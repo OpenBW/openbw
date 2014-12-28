@@ -1,80 +1,85 @@
 
 template<typename T>
 T load_dat(const char*fn) {
-	FILE*f = fopen(fn, "rb");
-	if (!fn) xcept("failed to open %s for reading", fn);
+	SFile f(fn);
 	T r;
-	if (!fread(&r, sizeof(r), 1, f)) {
-		fclose(f);
-		xcept("failed to read %d bytes from %s", sizeof(r), fn);
-	}
-	fclose(f);
+	f.read(&r, sizeof(r));
 	return r;
+// 	FILE*f = fopen(fn, "rb");
+// 	if (!fn) xcept("failed to open %s for reading", fn);
+// 	T r;
+// 	if (!fread(&r, sizeof(r), 1, f)) {
+// 		fclose(f);
+// 		xcept("failed to read %d bytes from %s", sizeof(r), fn);
+// 	}
+// 	fclose(f);
+// 	return r;
 }
 
 struct units_dat {
 	static const size_t total_count = 228;
 	static const size_t units_count = 106;
 	static const size_t buildings_count = 96;
-	uint8_t Graphics[total_count];
-	uint16_t Subunit1[total_count];
-	uint16_t Subunit2[total_count];
-	uint16_t Infestation[buildings_count];
-	uint32_t ConstructionAnimation[total_count];
-	uint8_t UnitDirection[total_count];
-	uint8_t ShieldEnable[total_count];
-	uint16_t ShieldAmount[total_count];
-	int32_t HitPoints[total_count];
-	uint8_t ElevationLevel[total_count];
-	uint8_t Unknown[total_count];
-	uint8_t Sublabel[total_count];
-	uint8_t CompAIIdle[total_count];
-	uint8_t HumanAIIdle[total_count];
-	uint8_t ReturntoIdle[total_count];
-	uint8_t AttackUnit[total_count];
-	uint8_t AttackMove[total_count];
-	uint8_t GroundWeapon[total_count];
-	uint8_t MaxGroundHits[total_count];
-	uint8_t AirWeapon[total_count];
-	uint8_t MaxAirHits[total_count];
-	uint8_t AIInternal[total_count];
-	uint32_t SpecialAbilityFlags[total_count];
-	uint8_t TargetAcquisitionRange[total_count];
-	uint8_t SightRange[total_count];
-	uint8_t ArmorUpgrade[total_count];
-	uint8_t UnitSize[total_count];
-	uint8_t Armor[total_count];
-	uint8_t RightClickAction[total_count];
-	uint16_t ReadySound[units_count];
-	uint16_t WhatSoundStart[total_count];
-	uint16_t WhatSoundEnd[total_count];
-	uint16_t PissSoundStart[units_count];
-	uint16_t PissSoundEnd[units_count];
-	uint16_t YesSoundStart[units_count];
-	uint16_t YesSoundEnd[units_count];
-	uint16_t StarEditPlacementBoxWidth[total_count];
-	uint16_t StarEditPlacementBoxHeight[total_count];
-	uint16_t AddonHorizontal[buildings_count];
-	uint16_t AddonVertical[buildings_count];
-	uint16_t UnitSizeLeft[total_count];
-	uint16_t UnitSizeUp[total_count];
-	uint16_t UnitSizeRight[total_count];
-	uint16_t UnitSizeDown[total_count];
-	uint16_t Portrait[total_count];
-	uint16_t MineralCost[total_count];
-	uint16_t VespeneCost[total_count];
-	uint16_t BuildTime[total_count];
-	uint16_t Unknown1[total_count];
-	uint8_t StarEditGroupFlags[total_count];
-	uint8_t SupplyProvided[total_count];
-	uint8_t SupplyRequired[total_count];
-	uint8_t SpaceRequired[total_count];
-	uint8_t SpaceProvided[total_count];
-	uint16_t BuildScore[total_count];
-	uint16_t DestroyScore[total_count];
-	uint16_t UnitMapString[total_count];
-	uint8_t BroodwarUnitFlag[total_count];
-	uint16_t StarEditAvailabilityFlags[total_count];
+
+	std::array<uint8_t, total_count> Graphics;
+	std::array<uint16_t, total_count> Subunit1;
+	std::array<uint16_t, total_count> Subunit2;
+	std::array<uint16_t, buildings_count> Infestation;
+	std::array<uint32_t, total_count> ConstructionAnimation;
+	std::array<uint8_t, total_count> UnitDirection;
+	std::array<uint8_t, total_count> ShieldEnable;
+	std::array<uint16_t, total_count> ShieldAmount;
+	std::array<int32_t, total_count> HitPoints;
+	std::array<uint8_t, total_count> ElevationLevel;
+	std::array<uint8_t, total_count> Unknown;
+	std::array<uint8_t, total_count> Sublabel;
+	std::array<uint8_t, total_count> CompAIIdle;
+	std::array<uint8_t, total_count> HumanAIIdle;
+	std::array<uint8_t, total_count> ReturntoIdle;
+	std::array<uint8_t, total_count> AttackUnit;
+	std::array<uint8_t, total_count> AttackMove;
+	std::array<uint8_t, total_count> GroundWeapon;
+	std::array<uint8_t, total_count> MaxGroundHits;
+	std::array<uint8_t, total_count> AirWeapon;
+	std::array<uint8_t, total_count> MaxAirHits;
+	std::array<uint8_t, total_count> AIInternal;
+	std::array<uint32_t, total_count> SpecialAbilityFlags;
+	std::array<uint8_t, total_count> TargetAcquisitionRange;
+	std::array<uint8_t, total_count> SightRange;
+	std::array<uint8_t, total_count> ArmorUpgrade;
+	std::array<uint8_t, total_count> UnitSize;
+	std::array<uint8_t, total_count> Armor;
+	std::array<uint8_t, total_count> RightClickAction;
+	std::array<uint16_t, units_count> ReadySound;
+	std::array<uint16_t, total_count> WhatSoundStart;
+	std::array<uint16_t, total_count> WhatSoundEnd;
+	std::array<uint16_t, units_count> PissSoundStart;
+	std::array<uint16_t, units_count> PissSoundEnd;
+	std::array<uint16_t, units_count> YesSoundStart;
+	std::array<uint16_t, units_count> YesSoundEnd;
+	std::array<uint16_t, total_count> StarEditPlacementBoxWidth;
+	std::array<uint16_t, total_count> StarEditPlacementBoxHeight;
+	std::array<uint16_t, buildings_count> AddonHorizontal;
+	std::array<uint16_t, buildings_count> AddonVertical;
+	std::array<uint16_t, total_count> UnitSizeLeft;
+	std::array<uint16_t, total_count> UnitSizeUp;
+	std::array<uint16_t, total_count> UnitSizeRight;
+	std::array<uint16_t, total_count> UnitSizeDown;
+	std::array<uint16_t, total_count> Portrait;
+	std::array<uint16_t, total_count> MineralCost;
+	std::array<uint16_t, total_count> VespeneCost;
+	std::array<uint16_t, total_count> BuildTime;
+	std::array<uint16_t, total_count> Unknown1;
+	std::array<uint8_t, total_count> StarEditGroupFlags;
+	std::array<uint8_t, total_count> SupplyProvided;
+	std::array<uint8_t, total_count> SupplyRequired;
+	std::array<uint8_t, total_count> SpaceRequired;
+	std::array<uint8_t, total_count> SpaceProvided;
+	std::array<uint16_t, total_count> BuildScore;
+	std::array<uint16_t, total_count> DestroyScore;
+	std::array<uint16_t, total_count> UnitMapString;
+	std::array<uint8_t, total_count> BroodwarUnitFlag;
+	std::array<uint16_t, total_count> StarEditAvailabilityFlags;
 };
 
 static_assert(sizeof(units_dat) == 19876, "units_dat is wrong size");
@@ -119,3 +124,51 @@ static_assert(sizeof(weapons_dat) == 5460, "weapons_dat is wrong size");
 weapons_dat load_weapons_dat(const char*fn) {
 	return load_dat<weapons_dat>(fn);
 }
+
+#pragma pack(1)
+struct upgrades_dat {
+	static const size_t count = 61;
+	std::array<uint16_t,count> MineralCostBase;
+	std::array<uint16_t, count> MineralCostFactor;
+	std::array<uint16_t, count> VespeneCostBase;
+	std::array<uint16_t, count> BespeneCostFactor;
+	std::array<uint16_t, count> ResearchTimeBase;
+	std::array<uint16_t, count> ResearchTimeFactor;
+	std::array<uint16_t, count> Unknown;
+	std::array<uint16_t, count> Icon;
+	std::array<uint16_t, count> Label;
+	std::array<uint8_t, count> Race;
+	std::array<uint8_t, count> MaxRepeats;
+	std::array<uint8_t, count> BroodwarOnly;
+};
+#pragma pack()
+
+static_assert(sizeof(upgrades_dat) == 1281, "upgrades_dat is wrong size");
+
+upgrades_dat load_upgrades_dat(const char*fn) {
+	return load_dat<upgrades_dat>(fn);
+}
+
+#pragma pack(1)
+struct techdata_dat {
+	static const size_t count = 44;
+	std::array<uint16_t, count> mineralCost;
+	std::array<uint16_t, count> gasCost;
+	std::array<uint16_t, count> researchTime;
+	std::array<uint16_t, count> energyCost;
+	std::array<uint32_t, count> unknown;
+	std::array<uint16_t, count> icon;
+	std::array<uint16_t, count> label;
+	std::array<uint8_t, count> race;
+	std::array<uint8_t, count> unused;
+	std::array<uint8_t, count> isBroodWarOnly;
+};
+#pragma pack()
+
+static_assert(sizeof(techdata_dat) == 836, "techdata_dat is wrong size");
+
+techdata_dat load_techdata_dat(const char*fn) {
+	return load_dat<techdata_dat>(fn);
+}
+
+
