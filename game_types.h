@@ -18,16 +18,6 @@ struct rect_t {
 	int bottom;
 };
 
-//
-// These are based on BWAPIs CUnit. I've kept the order the same and names similar for convenience.
-// This also means the order is the same as in Broodwar, but the types (and thus sizes, offsets) are not.
-//
-//
-// These are all memset to 0 at game start, because Broodwar does so, and I believe it's necessary in order to
-// replicate some minor "bugs".
-// For intrusive_list, only clear() or the destructor can be called after a memset.
-//
-
 struct link_base {
 	std::pair<link_base*, link_base*> link;
 };
@@ -39,18 +29,158 @@ struct default_link_f {
 	}
 };
 
+namespace iscript_opcodes {
+	enum {
+		opc_playfram,
+		opc_playframtile,
+		opc_sethorpos,
+		opc_setvertpos,
+		opc_setpos,
+		opc_wait,
+		opc_waitrand,
+		opc_goto,
+		opc_imgol,
+		opc_imgul,
+		opc_imgolorig,
+		opc_switchul,
+		opc___0c,
+		opc_imgoluselo,
+		opc_imguluselo,
+		opc_sprol,
+		opc_highsprol,
+		opc_lowsprul,
+		opc_uflunstable,
+		opc_spruluselo,
+		opc_sprul,
+		opc_sproluselo,
+		opc_end,
+		opc_setflipstate,
+		opc_playsnd,
+		opc_playsndrand,
+		opc_playsndbtwn,
+		opc_domissiledmg,
+		opc_attackmelee,
+		opc_followmaingraphic,
+		opc_randcondjmp,
+		opc_turnccwise,
+		opc_turncwise,
+		opc_turn1cwise,
+		opc_turnrand,
+		opc_setspawnframe,
+		opc_sigorder,
+		opc_attackwith,
+		opc_attack,
+		opc_castspell,
+		opc_useweapon,
+		opc_move,
+		opc_gotorepeatattk,
+		opc_engframe,
+		opc_engset,
+		opc___2d,
+		opc_nobrkcodestart,
+		opc_nobrkcodeend,
+		opc_ignorerest,
+		opc_attkshiftproj,
+		opc_tmprmgraphicstart,
+		opc_tmprmgraphicend,
+		opc_setfldirect,
+		opc_call,
+		opc_return,
+		opc_setflspeed,
+		opc_creategasoverlays,
+		opc_pwrupcondjmp,
+		opc_trgtrangecondjmp,
+		opc_trgtarccondjmp,
+		opc_curdirectcondjmp,
+		opc_imgulnextid,
+		opc___3e,
+		opc_liftoffcondjmp,
+		opc_warpoverlay,
+		opc_orderdone,
+		opc_grdsprol,
+		opc___43,
+		opc_dogrddamage
+	};
+};
+namespace iscript_anims {
+	enum {
+		Init,
+		Death,
+		GndAttkInit,
+		AirAttkInit,
+		Unused1,
+		GndAttkRpt,
+		AirAttkRpt,
+		CastSpell,
+		GndAttkToIdle,
+		AirAttkToIdle,
+		Unused2,
+		Walking,
+		WalkingToIdle,
+		SpecialState1,
+		SpecialState2,
+		AlmostBuilt,
+		Built,
+		Landing,
+		LiftOff,
+		IsWorking,
+		WorkingToIdle,
+		WarpIn,
+		Unused3,
+		StarEditInit,
+		Disable,
+		Burrow,
+		UnBurrow,
+		Enable
+	};
+};
+
+struct iscript_t {
+	struct script {
+		int id;
+		a_vector<size_t> animation_pc;
+	};
+	a_unordered_map<int, script> scripts;
+	a_vector<int> program_data;
+};
+
+//
+// These are based on BWAPIs CUnit. I've kept the order the same and names similar for convenience.
+// This also means the order is the same as in Broodwar, but the types (and thus sizes, offsets) are not.
+//
+//
+// These are all memset to 0 at game start, because Broodwar does so, and I believe it's necessary in order to
+// replicate some minor "bugs".
+// For intrusive_list, only clear() or the destructor can be called after a memset.
+//
+// The reason for the pointer cast operators is that intrusive_list works with references, but I'd like
+// to get pointers when iterating.
+//
+
+struct iscript_state_t {
+	const iscript_t::script*current_script;
+	size_t program_counter;
+	size_t return_address;
+	int animation;
+	int wait;
+};
+
 struct image_t: link_base {
+
+	operator image_t*() {
+		return this;
+	}
+	enum {
+		flag_iscript_running = 0x10,
+		flag_hidden = 0x20
+	};
 
 	int image_id;
 	int palette_type;
 	int direction;
 	int flags;
 	xy offset;
-	int iscript_header;
-	int iscript_offset;
-	int unknown_0x014;
-	int anim;
-	int wait;
+	iscript_state_t iscript_state;
 	int frame_set;
 	int frame_index;
 	xy map_position;
@@ -62,13 +192,13 @@ struct image_t: link_base {
 	// void(*update(...);
 	sprite_t* sprite;
 
-	operator image_t*() {
-		return this;
-	}
-
 };
 
 struct sprite_t: link_base {
+
+	operator sprite_t*() {
+		return this;
+	}
 
 	int sprite_id;
 	int owner;
@@ -82,13 +212,13 @@ struct sprite_t: link_base {
 	image_t* main_image;
 	intrusive_list<image_t, default_link_f> images;
 
-	operator sprite_t*() {
-		return this;
-	}
-
 };
 
 struct flingy_t: link_base {
+
+	operator flingy_t*() {
+		return this;
+	}
 
 	int hp;
 	sprite_t* sprite;
@@ -121,10 +251,6 @@ struct flingy_t: link_base {
 	int air_weapon_cooldown;
 	int spell_cooldown;
 	target_t order_target;
-
-	operator flingy_t*() {
-		return this;
-	}
 
 };
 

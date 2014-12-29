@@ -47,9 +47,9 @@ struct sight_values_t {
 		// the other tile with equal diagonal distance to the origin as prev, if it exists.
 		// otherwise, it is prev
 		maskdat_node_t*prev2;
-		int map_index_offset;
+		size_t map_index_offset;
 		// temporary variable used when spreading vision to make sure we don't go through obstacles
-		uint32_t vision_propagation;
+		mutable uint32_t vision_propagation;
 		int8_t x;
 		int8_t y;
 		// prev_count will be 1 if prev and prev2 are equal, otherwise it is 2
@@ -146,6 +146,14 @@ struct tile_t {
 	}
 };
 
+struct global_state {
+	iscript_t iscript;
+};
+
+struct cache_state {
+
+};
+
 struct game_state {
 	size_t map_tile_width;
 	size_t map_tile_height;
@@ -201,6 +209,7 @@ struct game_state {
 
 struct state_base {
 
+	const global_state*global;
 	game_state*game;
 
 	int update_tiles_countdown;
@@ -282,15 +291,16 @@ struct state : state_base {
 struct state_functions {
 
 	state&st;
-	game_state&game_st = *st.game;
+	const global_state&global_st = *st.global;
+	const game_state&game_st = *st.game;
 
-	units_dat_t&units_dat = game_st.units_dat;
-	weapons_dat_t&weapons_dat = game_st.weapons_dat;
-	upgrades_dat_t&upgrades_dat = game_st.upgrades_dat;
-	techdata_dat_t&techdata_dat = game_st.techdata_dat;
-	flingy_dat_t&flingy_dat = game_st.flingy_dat;
-	sprites_dat_t&sprites_dat = game_st.sprites_dat;
-	images_dat_t&images_dat = game_st.images_dat;
+	const units_dat_t&units_dat = game_st.units_dat;
+	const weapons_dat_t&weapons_dat = game_st.weapons_dat;
+	const upgrades_dat_t&upgrades_dat = game_st.upgrades_dat;
+	const techdata_dat_t&techdata_dat = game_st.techdata_dat;
+	const flingy_dat_t&flingy_dat = game_st.flingy_dat;
+	const sprites_dat_t&sprites_dat = game_st.sprites_dat;
+	const images_dat_t&images_dat = game_st.images_dat;
 
 	state_functions(state&st) : st(st) {}
 
@@ -948,8 +958,39 @@ struct state_functions {
 		for (image_t*i : sprite->images) i->flags |= 1;
 	}
 
-	void iscript_start(image_t*image, int script_id) {
-		xcept("script %d does not exist", script_id);
+	void iscript_set_script(image_t*image, int script_id) {
+		auto i = global_st.iscript.scripts.find(script_id);
+		if (i == global_st.iscript.scripts.end()) {
+			xcept("script %d does not exist", script_id);
+		}
+		image->iscript_state.current_script = &i->second;
+	}
+
+	void iscript_execute(image_t*image, iscript_state_t&state, bool no_side_effects, int*distance_moved) {
+		xcept("iscript_execute");
+	}
+
+	void iscript_run_anim(image_t*image, int new_anim) {
+		using namespace iscript_anims;
+		int old_anim = image->iscript_state.animation;
+		if (new_anim == Death && old_anim == Death) return;
+		if (~image->flags & image_t::flag_iscript_running && new_anim != Init && new_anim != Death) return;
+		if ((new_anim == Walking || new_anim == IsWorking) && new_anim == old_anim) return;
+		if (new_anim == GndAttkRpt && old_anim != GndAttkRpt) {
+			if (old_anim != GndAttkInit) new_anim = GndAttkInit;
+		}
+		if (new_anim == AirAttkRpt && old_anim != AirAttkRpt) {
+			if (old_anim != AirAttkInit) new_anim = AirAttkInit;
+		}
+		auto*script = image->iscript_state.current_script;
+		if (!script) xcept("attempt to start animation without a script");
+		auto&anims_pc = script->animation_pc;
+		if ((size_t)new_anim >= anims_pc.size()) xcept("script %d does not have animation %d", script->id, new_anim);
+		image->iscript_state.animation = new_anim;
+		image->iscript_state.program_counter = anims_pc[new_anim];
+		image->iscript_state.return_address = 0;
+		image->iscript_state.wait = 0;
+		iscript_execute(image, image->iscript_state, false, nullptr);
 	}
 
 	image_t* create_image(int image_id, sprite_t*sprite, xy offset, int direction) {
@@ -964,19 +1005,20 @@ struct state_functions {
 			image->grp_file = nullptr; // fixme? might only be needed for rendering
 			int flags = 0;
 			if (images_dat.isTurnable[image_id] & 1) flags |= 8;
-			if (images_dat.isClickable[image_id] & 1) flags |= 32;
+			if (images_dat.isClickable[image_id] & 1) flags |= image_t::flag_hidden;
 			image->flags = flags;
 			image->frame_set = 0;
 			image->direction = 0;
 			image->frame_index = 0;
-			image->anim = 0;
 			image->sprite = sprite;
 			image->offset = offset;
 			image->grp_bounds = { 0,0,0,0 };
 			image->coloring_data = 0;
-			image->iscript_header = 0;
-			image->iscript_offset = 0;
-			image->unknown_0x014 = 0;
+			image->iscript_state.current_script = nullptr;
+			image->iscript_state.program_counter = 0;
+			image->iscript_state.return_address = 0;
+			image->iscript_state.animation = 0;
+			image->iscript_state.wait = 0;
 			int drawfunc = images_dat.drawFunction[image_id];
 			if (drawfunc == 14) image->coloring_data = sprite->owner;
 			if (drawfunc == 9) {
@@ -998,7 +1040,9 @@ struct state_functions {
 			image->flags |= 1;
 			image->flags &= 16;
 			if (images_dat.useFullIscript[image_id] & 1) image->flags |= 16;
-			iscript_start(image, images_dat.iscriptEntry[image_id]);
+			iscript_set_script(image, images_dat.iscriptEntry[image_id]);
+			iscript_run_anim(image, iscript_anims::Init);
+			xcept("updateGraphicData");
 		};
 
 		initialize_image();
@@ -1189,10 +1233,81 @@ void advance(state&st) {
 
 }
 
+template<typename T>
+struct is_std_array : std::false_type {};
+template<typename T, size_t N>
+struct is_std_array<std::array<T, N>> : std::true_type{};
 
-struct load_functions : state_functions {
+template<bool default_little_endian = true>
+struct data_reader {
+	uint8_t*ptr = nullptr;
+	uint8_t*end = nullptr;
+	data_reader() = default;
+	data_reader(uint8_t*ptr, uint8_t*end) : ptr(ptr), end(end) {}
+	template<typename T, bool little_endian, typename std::enable_if<is_std_array<T>::value>::type* = nullptr>
+	T value_at(uint8_t*ptr) {
+		T r;
+		for (auto&v : r) {
+			v = value_at<std::remove_reference<decltype(v)>::type, little_endian>(ptr);
+			ptr += sizeof(v);
+		}
+		return r;
+	}
+	template<typename T, bool little_endian, typename std::enable_if<!is_std_array<T>::value>::type* = nullptr>
+	T value_at(uint8_t*ptr) {
+		static_assert(std::is_integral<T>::value, "can only read integers and arrays of integers");
+		T r = 0;
+		for (size_t i = 0; i < sizeof(T); ++i) {
+			r |= ptr[i] << ((little_endian ? i : sizeof(T) - 1 - i) * 8);
+		}
+		return r;
+	}
+	template<typename T, bool little_endian = default_little_endian>
+	T get() {
+		if (ptr + sizeof(T) - end > 0) xcept("data_reader: attempt to read past end");
+		ptr += sizeof(T);
+		return value_at<T, little_endian>(ptr - sizeof(T));
+	}
+	uint8_t*get_n(size_t n) {
+		uint8_t*r = ptr;
+		if (ptr + n - end > 0) xcept("data_reader: attempt to read past end");
+		ptr += n;
+		return r;
+	}
+	template<typename T, bool little_endian = default_little_endian>
+	a_vector<T> get_vec(size_t n) {
+		uint8_t*data = get_n(n*sizeof(T));
+		a_vector<T> r(n);
+		for (size_t i = 0; i < n; ++i, data += sizeof(T)) {
+			r[i] = value_at<T, little_endian>(data);
+		}
+		return r;
+	}
+	void skip(size_t n) {
+		if (ptr + n - end > 0 || ptr + n < ptr) xcept("data_reader: attempt to seek past end");
+		ptr += n;
+	}
+	size_t left() {
+		return end - ptr;
+	}
+};
 
-	load_functions(state&st) : state_functions(st) {}
+using data_reader_le = data_reader<true>;
+using data_reader_be = data_reader<false>;
+
+struct game_load_functions : state_functions {
+
+	game_load_functions(state&st) : state_functions(st) {}
+
+	game_state&game_st = *st.game;
+
+	units_dat_t&units_dat = game_st.units_dat;
+	weapons_dat_t&weapons_dat = game_st.weapons_dat;
+	upgrades_dat_t&upgrades_dat = game_st.upgrades_dat;
+	techdata_dat_t&techdata_dat = game_st.techdata_dat;
+	flingy_dat_t&flingy_dat = game_st.flingy_dat;
+	sprites_dat_t&sprites_dat = game_st.sprites_dat;
+	images_dat_t&images_dat = game_st.images_dat;
 
 	void reset() {
 
@@ -1308,7 +1423,7 @@ struct load_functions : state_functions {
 
 
 
-		for (size_t idx = 0; idx < 228; ++idx) {
+		for (int idx = 0; idx < 228; ++idx) {
 
 			int shooting_type = idx;
 			int air_strength = 0;
@@ -1341,8 +1456,8 @@ struct load_functions : state_functions {
 	void generate_sight_values() {
 		for (size_t i = 0; i < game_st.sight_values.size(); ++i) {
 			auto&v = game_st.sight_values[i];
-			v.max_width = 3 + i * 2;
-			v.max_height = 3 + i * 2;
+			v.max_width = 3 + (int)i * 2;
+			v.max_height = 3 + (int)i * 2;
 			v.min_width = 3;
 			v.min_height = 3;
 			v.min_mask_size = 0;
@@ -1550,36 +1665,16 @@ struct load_functions : state_functions {
 		load_data_file(game_st.cv5, format("Tileset\\%s.cv5", tileset_names.at(game_st.tileset_index)));
 	}
 
-	struct data_reader {
-		uint8_t*ptr = nullptr;
-		uint8_t*end = nullptr;
-		data_reader() = default;
-		data_reader(uint8_t*ptr, uint8_t*end) : ptr(ptr), end(end) {}
-		template<typename T>
-		T get() {
-			if (ptr + sizeof(T) - end > 0) xcept("data_reader: attempt to read past end-of-file");
-			ptr += sizeof(T);
-			return *(T*)(ptr - sizeof(T));
+	struct tag_t {
+		tag_t() = default;
+		tag_t(const char str[4]) : data({ str[0], str[1], str[2], str[3] }) {}
+		tag_t(const std::array<char, 4> data) : data(data) {}
+		std::array<char, 4> data = {};
+		bool operator==(const tag_t&n) const {
+			return data == n.data;
 		}
-		uint8_t*get_n(size_t n) {
-			uint8_t*r = ptr;
-			if (ptr + n - end > 0) xcept("data_reader: attempt to read past end-of-file");
-			ptr += n;
-			return r;
-		}
-		template<typename T>
-		a_vector<T> get_vec(size_t n) {
-			uint8_t*data = get_n(n*sizeof(T));
-			a_vector<T> r(n);
-			memcpy(r.data(), data, n*sizeof(T));
-			return r;
-		}
-		void skip(int n) {
-			if (ptr + n - end > 0) xcept("data_reader: attempt to seek past end-of-file");
-			ptr += n;
-		}
-		size_t left() {
-			return end - ptr;
+		size_t operator()(const tag_t&v) const {
+			return std::hash<uint32_t>()((uint32_t)v.data[0] | v.data[1] << 8 | v.data[2] << 16 | v.data[3] << 24);
 		}
 	};
 
@@ -1593,14 +1688,24 @@ struct load_functions : state_functions {
 		a_vector<uint8_t> data;
 		load_data_file(data, "staredit\\scenario.chk");
 
-		a_unordered_map<uint32_t, std::function<void(data_reader)>> tag_funcs;
+		a_unordered_map<tag_t, std::function<void(data_reader_le)>, tag_t> tag_funcs;
 
-		using tag_list_t = a_vector<std::pair<uint32_t, bool>>;
+		auto tagstr = [&](tag_t tag) {
+			std::array<char, 5> name;
+			name[0] = tag.data[0];
+			name[1] = tag.data[1];
+			name[2] = tag.data[2];
+			name[3] = tag.data[3];
+			name[4] = 0;
+			return name;
+		};
+
+		using tag_list_t = a_vector<std::pair<tag_t, bool>>;
 		auto read_chunks = [&](const tag_list_t&tags) {
-			data_reader r(data.data(), data.data() + data.size());
-			a_unordered_map<uint32_t, data_reader> chunks;
+			data_reader_le r(data.data(), data.data() + data.size());
+			a_unordered_map<tag_t, data_reader_le> chunks;
 			while (r.left()) {
-				uint32_t tag = r.get<uint32_t>();
+				tag_t tag = r.get<std::array<char, 4>>();
 				uint32_t len = r.get<uint32_t>();
 				//log("tag '%.4s' len %d\n", (char*)&tag, len);
 				uint8_t*chunk_data = r.ptr;
@@ -1608,47 +1713,47 @@ struct load_functions : state_functions {
 				chunks[tag] = { chunk_data, r.ptr };
 			}
 			for (auto&v : tags) {
-				uint32_t rev_tag = std::get<0>(v);
-				uint32_t tag = rev_tag >> 24 | (rev_tag >> 8) & 0xff00 | (rev_tag << 8) & 0xff0000 | rev_tag << 24;
+				tag_t tag = std::get<0>(v);
 				auto i = chunks.find(tag);
 				if (i == chunks.end()) {
-					if (std::get<1>(v)) xcept("map is missing required chunk '%.4s'", (char*)&tag);
+					if (std::get<1>(v)) xcept("map is missing required chunk '%s'", tagstr(tag).data());
 				} else {
-					if (!tag_funcs[rev_tag]) xcept("tag '%.4s' is missing a function", (char*)&tag);
-					tag_funcs[rev_tag](i->second);
+					if (!tag_funcs[tag]) xcept("tag '%s' is missing a function", tagstr(tag).data());
+					log("loading tag '%s'...\n", tagstr(tag).data());
+					tag_funcs[tag](i->second);
 				}
 			}
 		};
 
 		int version = 0;
-		tag_funcs['VER '] = [&](data_reader r) {
+		tag_funcs["VER "] = [&](data_reader_le r) {
 			version = r.get<uint16_t>();
 			log("VER: version is %d\n", version);
 		};
-		tag_funcs['DIM '] = [&](data_reader r) {
+		tag_funcs["DIM "] = [&](data_reader_le r) {
 			game_st.map_tile_width = r.get<uint16_t>();
 			game_st.map_tile_height = r.get<uint16_t>();
 			game_st.map_width = game_st.map_tile_width * 32;
 			game_st.map_height = game_st.map_tile_height * 32;
 			log("DIM: dimensions are %d %d\n", game_st.map_tile_width, game_st.map_tile_height);
 		};
-		tag_funcs['ERA '] = [&](data_reader r) {
+		tag_funcs["ERA "] = [&](data_reader_le r) {
 			game_st.tileset_index = r.get<uint16_t>() % 8;
 			log("ERA: tileset is %d\n", game_st.tileset_index);
 		};
-		tag_funcs['OWNR'] = [&](data_reader r) {
+		tag_funcs["OWNR"] = [&](data_reader_le r) {
 			for (size_t i = 0; i < 12; ++i) {
 				st.players[i].controller = r.get<int8_t>();
 				if (st.players[i].controller == state::player_t::controller_open) st.players[i].controller = state::player_t::controller_occupied;
 				if (st.players[i].controller == state::player_t::controller_computer) st.players[i].controller = state::player_t::controller_computer_game;
 			}
 		};
-		tag_funcs['SIDE'] = [&](data_reader r) {
+		tag_funcs["SIDE"] = [&](data_reader_le r) {
 			for (size_t i = 0; i < 12; ++i) {
 				st.players[i].race = r.get<int8_t>();
 			}
 		};
-		tag_funcs['STR '] = [&](data_reader r) {
+		tag_funcs["STR "] = [&](data_reader_le r) {
 			auto start = r;
 			size_t num = r.get<uint16_t>();
 			game_st.map_strings.clear();
@@ -1663,12 +1768,12 @@ struct load_functions : state_functions {
 				//log("string %d: %s\n", i, game_st.map_strings[i]);
 			}
 		};
-		tag_funcs['SPRP'] = [&](data_reader r) {
+		tag_funcs["SPRP"] = [&](data_reader_le r) {
 			game_st.scenario_name = game_st.get_string(r.get<uint16_t>());
 			game_st.scenario_description = game_st.get_string(r.get<uint16_t>());
 			log("SPRP: scenario name: '%s',  description: '%s'\n", game_st.scenario_name, game_st.scenario_description);
 		};
-		tag_funcs['FORC'] = [&](data_reader r) {
+		tag_funcs["FORC"] = [&](data_reader_le r) {
 			for (size_t i = 0; i < 12; ++i) st.players[i].force = 0;
 			for (size_t i = 0; i < 4; ++i) {
 				game_st.forces[i].name = "";
@@ -1686,13 +1791,17 @@ struct load_functions : state_functions {
 				}
 			}
 		};
-		tag_funcs['VCOD'] = [&](data_reader r) {
+		tag_funcs["VCOD"] = [&](data_reader_le r) {
 			// Starcraft does some verification/checksum stuff here
 		};
 
 
-		tag_funcs['MTXM'] = [&](data_reader r) {
-			game_st.gfx_tiles = r.get_vec<tile_id>(game_st.map_tile_width * game_st.map_tile_height);
+		tag_funcs["MTXM"] = [&](data_reader_le r) {
+			auto gfx_tiles_data = r.get_vec<uint16_t>(game_st.map_tile_width * game_st.map_tile_height);
+			game_st.gfx_tiles.resize(gfx_tiles_data.size());
+			for (size_t i = 0; i < gfx_tiles_data.size(); ++i) {
+				game_st.gfx_tiles[i] = tile_id(gfx_tiles_data[i]);
+			}
 			for (size_t i = 0; i < game_st.gfx_tiles.size(); ++i) {
 				tile_id tile_id = game_st.gfx_tiles[i];
 				size_t megatile_index = game_st.cv5.at(tile_id.group_index()).megaTileRef[tile_id.subtile_index()];
@@ -1709,7 +1818,7 @@ struct load_functions : state_functions {
 		bool bStartingUnits = false;
 		bool bTournamentModeEnabled = false;
 
-		tag_funcs['THG2'] = [&](data_reader r) {
+		tag_funcs["THG2"] = [&](data_reader_le r) {
 			while (r.left()) {
 				int unit_type = r.get<uint16_t>();
 				int x = r.get<uint16_t>();
@@ -1732,7 +1841,7 @@ struct load_functions : state_functions {
 				}
 			}
 		};
-		tag_funcs['MASK'] = [&](data_reader r) {
+		tag_funcs["MASK"] = [&](data_reader_le r) {
 			auto mask = r.get_vec<uint8_t>(game_st.map_tile_width*game_st.map_tile_height);
 			for (size_t i = 0; i < mask.size(); ++i) {
 				st.tiles[i].visible |= mask[i];
@@ -1740,7 +1849,7 @@ struct load_functions : state_functions {
 			}
 		};
 
-		auto units = [&](data_reader r, bool broodwar) {
+		auto units = [&](data_reader_le r, bool broodwar) {
 			auto uses_default_settings = r.get_vec<uint8_t>(228);
 			auto hp = r.get_vec<uint32_t>(228);
 			auto shield = r.get_vec<uint16_t>(228);
@@ -1751,7 +1860,7 @@ struct load_functions : state_functions {
 			auto string_index = r.get_vec<uint16_t>(228);
 			auto weapon_damage = r.get_vec<uint16_t>(broodwar ? 130 : 100);
 			auto weapon_bonus_damage = r.get_vec<uint16_t>(broodwar ? 130 : 100);
-			for (size_t i = 0; i < 228; ++i) {
+			for (int i = 0; i < 228; ++i) {
 				if (uses_default_settings[i]) continue;
 				game_st.units_dat.HitPoints[i] = hp[i];
 				game_st.units_dat.ShieldAmount[i] = shield[i];
@@ -1775,7 +1884,7 @@ struct load_functions : state_functions {
 			}
 		};
 
-		auto upgrades = [&](data_reader r, bool broodwar) {
+		auto upgrades = [&](data_reader_le r, bool broodwar) {
 			auto uses_default_settings = r.get_vec<uint8_t>(broodwar ? 62 : 46);
 			auto mineral_cost = r.get_vec<uint16_t>(broodwar ? 61 : 46);
 			auto mineral_cost_factor = r.get_vec<uint16_t>(broodwar ? 61 : 46);
@@ -1794,7 +1903,7 @@ struct load_functions : state_functions {
 			}
 		};
 
-		auto techdata = [&](data_reader r, bool broodwar) {
+		auto techdata = [&](data_reader_le r, bool broodwar) {
 			auto uses_default_settings = r.get_vec<uint8_t>(broodwar ? 44 : 24);
 			auto mineral_cost = r.get_vec<uint16_t>(broodwar ? 44 : 24);
 			auto gas_cost = r.get_vec<uint16_t>(broodwar ? 44 : 24);
@@ -1809,7 +1918,7 @@ struct load_functions : state_functions {
 			}
 		};
 
-		auto upgrade_restrictions = [&](data_reader r, bool broodwar) {
+		auto upgrade_restrictions = [&](data_reader_le r, bool broodwar) {
 			int count = broodwar ? 61 : 46;
 			auto player_max_level = r.get_vec<uint8_t>(12 * count);
 			auto player_cur_level = r.get_vec<uint8_t>(12 * count);
@@ -1823,7 +1932,7 @@ struct load_functions : state_functions {
 				}
 			}
 		};
-		auto tech_restrictions = [&](data_reader r, bool broodwar) {
+		auto tech_restrictions = [&](data_reader_le r, bool broodwar) {
 			int count = broodwar ? 44 : 24;
 			auto player_available = r.get_vec<uint8_t>(12 * count);
 			auto player_researched = r.get_vec<uint8_t>(12 * count);
@@ -1838,19 +1947,19 @@ struct load_functions : state_functions {
 			}
 		};
 
-		tag_funcs['UNIS'] = [&](data_reader r) {
+		tag_funcs["UNIS"] = [&](data_reader_le r) {
 			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
 			units(r, false);
 		};
-		tag_funcs['UPGS'] = [&](data_reader r) {
+		tag_funcs["UPGS"] = [&](data_reader_le r) {
 			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
 			upgrades(r, false);
 		};
-		tag_funcs['TECS'] = [&](data_reader r) {
+		tag_funcs["TECS"] = [&](data_reader_le r) {
 			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
 			techdata(r, false);
 		};
-		tag_funcs['PUNI'] = [&](data_reader r) {
+		tag_funcs["PUNI"] = [&](data_reader_le r) {
 			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
 			auto player_available = r.get_vec<std::array<uint8_t, 228>>(12);
 			auto global_available = r.get_vec<uint8_t>(228);
@@ -1861,37 +1970,37 @@ struct load_functions : state_functions {
 				}
 			}
 		};
-		tag_funcs['UPGR'] = [&](data_reader r) {
+		tag_funcs["UPGR"] = [&](data_reader_le r) {
 			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
 			upgrade_restrictions(r, false);
 		};
-		tag_funcs['PTEC'] = [&](data_reader r) {
+		tag_funcs["PTEC"] = [&](data_reader_le r) {
 			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
 			tech_restrictions(r, false);
 		};
 
-		tag_funcs['UNIx'] = [&](data_reader r) {
+		tag_funcs["UNIx"] = [&](data_reader_le r) {
 			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
 			units(r, true);
 		};
-		tag_funcs['UPGx'] = [&](data_reader r) {
+		tag_funcs["UPGx"] = [&](data_reader_le r) {
 			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
 			upgrades(r, true);
 		};
-		tag_funcs['TECx'] = [&](data_reader r) {
+		tag_funcs["TECx"] = [&](data_reader_le r) {
 			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
 			techdata(r, true);
 		};
-		tag_funcs['PUPx'] = [&](data_reader r) {
+		tag_funcs["PUPx"] = [&](data_reader_le r) {
 			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
 			upgrade_restrictions(r, true);
 		};
-		tag_funcs['PTEx'] = [&](data_reader r) {
+		tag_funcs["PTEx"] = [&](data_reader_le r) {
 			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
 			tech_restrictions(r, true);
 		};
 
-		tag_funcs['UNIT'] = [&](data_reader r) {
+		tag_funcs["UNIT"] = [&](data_reader_le r) {
 			while (r.left()) {
 
 				int id = r.get<uint32_t>();
@@ -1964,15 +2073,15 @@ struct load_functions : state_functions {
 		};
 
 		read_chunks({
-			{'VER ', true},
-			{'DIM ', true},
-			{'ERA ', true},
-			{'OWNR', true},
-			{'SIDE', true},
-			{'STR ', true},
-			{'SPRP', true},
-			{'FORC', true},
-			{'VCOD', true}
+			{"VER ", true},
+			{"DIM ", true},
+			{"ERA ", true},
+			{"OWNR", true},
+			{"SIDE", true},
+			{"STR ", true},
+			{"SPRP", true},
+			{"FORC", true},
+			{"VCOD", true}
 		});
 
 		reset();
@@ -1982,25 +2091,25 @@ struct load_functions : state_functions {
 			// todo: check game mode
 			// this is for use map settings
 			tag_list_t tags = {
-				{'STR ', true},
-				{'MTXM', true},
-				{'THG2', true},
-				{'MASK', true},
-				{'UNIS', true},
-				{'UPGS', true},
-				{'TECS', true},
-				{'PUNI', true},
-				{'UPGR', true},
-				{'PTEC', true},
-				{'UNIx', false},
-				{'UPGx', false},
-				{'TECx', false},
-				{'PUPx', false},
-				{'PTEx', false},
-				{'UNIT', true},
-				{'UPRP', true},
-				{'MRGN', true},
-				{'TRIG', true}
+				{"STR ", true},
+				{"MTXM", true},
+				{"THG2", true},
+				{"MASK", true},
+				{"UNIS", true},
+				{"UPGS", true},
+				{"TECS", true},
+				{"PUNI", true},
+				{"UPGR", true},
+				{"PTEC", true},
+				{"UNIx", false},
+				{"UPGx", false},
+				{"TECx", false},
+				{"PUPx", false},
+				{"PTEx", false},
+				{"UNIT", true},
+				{"UPRP", true},
+				{"MRGN", true},
+				{"TRIG", true}
 			};
 			read_chunks(tags);
 
@@ -2009,14 +2118,213 @@ struct load_functions : state_functions {
 	}
 };
 
+void global_init(global_state&st) {
+
+	auto load_iscript_bin = [&]() {
+
+		using namespace iscript_opcodes;
+		std::array<const char*, 69> ins_data;
+
+		ins_data[opc_playfram] = "2";
+		ins_data[opc_playframtile] = "2";
+		ins_data[opc_sethorpos] = "1";
+		ins_data[opc_setvertpos] = "1";
+		ins_data[opc_setpos] = "11";
+		ins_data[opc_wait] = "1";
+		ins_data[opc_waitrand] = "11";
+		ins_data[opc_goto] = "j";
+		ins_data[opc_imgol] = "211";
+		ins_data[opc_imgul] = "211";
+		ins_data[opc_imgolorig] = "2";
+		ins_data[opc_switchul] = "2";
+		ins_data[opc___0c] = "";
+		ins_data[opc_imgoluselo] = "211";
+		ins_data[opc_imguluselo] = "211";
+		ins_data[opc_sprol] = "211";
+		ins_data[opc_highsprol] = "211";
+		ins_data[opc_lowsprul] = "211";
+		ins_data[opc_uflunstable] = "2";
+		ins_data[opc_spruluselo] = "211";
+		ins_data[opc_sprul] = "211";
+		ins_data[opc_sproluselo] = "21";
+		ins_data[opc_end] = "e";
+		ins_data[opc_setflipstate] = "1";
+		ins_data[opc_playsnd] = "2";
+		ins_data[opc_playsndrand] = "v";
+		ins_data[opc_playsndbtwn] = "22";
+		ins_data[opc_domissiledmg] = "";
+		ins_data[opc_attackmelee] = "v";
+		ins_data[opc_followmaingraphic] = "";
+		ins_data[opc_randcondjmp] = "1b";
+		ins_data[opc_turnccwise] = "1";
+		ins_data[opc_turncwise] = "1";
+		ins_data[opc_turn1cwise] = "";
+		ins_data[opc_turnrand] = "1";
+		ins_data[opc_setspawnframe] = "1";
+		ins_data[opc_sigorder] = "1";
+		ins_data[opc_attackwith] = "1";
+		ins_data[opc_attack] = "";
+		ins_data[opc_castspell] = "";
+		ins_data[opc_useweapon] = "1";
+		ins_data[opc_move] = "1";
+		ins_data[opc_gotorepeatattk] = "";
+		ins_data[opc_engframe] = "1";
+		ins_data[opc_engset] = "1";
+		ins_data[opc___2d] = "";
+		ins_data[opc_nobrkcodestart] = "";
+		ins_data[opc_nobrkcodeend] = "";
+		ins_data[opc_ignorerest] = "";
+		ins_data[opc_attkshiftproj] = "1";
+		ins_data[opc_tmprmgraphicstart] = "";
+		ins_data[opc_tmprmgraphicend] = "";
+		ins_data[opc_setfldirect] = "1";
+		ins_data[opc_call] = "b";
+		ins_data[opc_return] = "";
+		ins_data[opc_setflspeed] = "2";
+		ins_data[opc_creategasoverlays] = "1";
+		ins_data[opc_pwrupcondjmp] = "b";
+		ins_data[opc_trgtrangecondjmp] = "2b";
+		ins_data[opc_trgtarccondjmp] = "22b";
+		ins_data[opc_curdirectcondjmp] = "22b";
+		ins_data[opc_imgulnextid] = "11";
+		ins_data[opc___3e] = "";
+		ins_data[opc_liftoffcondjmp] = "b";
+		ins_data[opc_warpoverlay] = "2";
+		ins_data[opc_orderdone] = "1";
+		ins_data[opc_grdsprol] = "211";
+		ins_data[opc___43] = "";
+		ins_data[opc_dogrddamage] = "";
+
+		a_unordered_map<int, a_vector<size_t>> animation_pc;
+		a_vector<int> program_data;
+
+		program_data.push_back(0); // invalid/null pc
+
+		a_vector<uint8_t> data;
+		load_data_file(data, "scripts\\iscript.bin");
+		data_reader_le base_r(data.data(), data.data() + data.size());
+		auto r = base_r;
+		size_t id_list_offset = r.get<uint32_t>();
+		r.skip(id_list_offset);
+		while (r.left()) {
+			int id = r.get<int16_t>();
+			if (id == -1) break;
+			size_t script_address = r.get<uint16_t>();
+			//log("loading script %d at %d\n", id, script_address);
+			auto script_r = base_r;
+			script_r.skip(script_address);
+			auto signature = script_r.get<std::array<char, 4>>();
+			//auto script_program_r = script_r;
+
+			a_unordered_map<int, size_t> decode_map;
+
+			std::function<size_t(int)> decode_at = [&](size_t initial_address) {
+				if (!initial_address) xcept("iscript load: attempt to decode instruction at null address");
+				auto in = decode_map.emplace(initial_address, 0);
+				if (!in.second) {
+					//log("instruction at 0x%04x already exists with index %d\n", initial_address, in.first->second);
+					return in.first->second;
+				}
+				size_t initial_pc = program_data.size();
+				//log("decoding at 0x%04x: initial_pc %d\n", initial_address, initial_pc);
+				in.first->second = initial_pc;
+				auto r = base_r;
+				r.skip(initial_address);
+				a_vector<std::tuple<size_t, size_t>> branches;
+				bool done = false;
+				while (!done) {
+					size_t pc = program_data.size();
+					size_t cur_address = r.ptr - base_r.ptr;
+					if (cur_address != initial_address) {
+						auto in = decode_map.emplace(cur_address, pc);
+						if (!in.second) {
+							//log("0x%04x (0x%x): already decoded, inserting jmp\n", cur_address, pc);
+							program_data.push_back(opc_goto + 1);
+							program_data.push_back(in.first->second);
+							break;
+						}
+					}
+					size_t opcode = r.get<uint8_t>();
+					if (opcode >= ins_data.size()) xcept("iscript load: at 0x%04x: invalid instruction %d", cur_address, opcode);
+					//log("0x%04x (0x%x): opcode %d\n", cur_address, pc, opcode);
+					program_data.push_back(opcode + 1);
+					const char*c = ins_data[opcode];
+					while (*c) {
+						if (*c == '1') program_data.push_back(r.get<uint8_t>());
+						else if (*c == '2') program_data.push_back(r.get<uint16_t>());
+						else if (*c == 'v') {
+							int n = r.get<uint8_t>();
+							program_data.push_back(n);
+							for (; n; --n) program_data.push_back(r.get<uint16_t>());
+						} else if (*c == 'j') {
+							size_t jump_address = r.get<uint16_t>();
+							auto jump_pc_it = decode_map.find(jump_address);
+							if (jump_pc_it == decode_map.end()) {
+								program_data.pop_back();
+								r = base_r;
+								r.skip(jump_address);
+							} else {
+								program_data.push_back(jump_pc_it->second);
+								done = true;
+							}
+						} else if (*c == 'b') {
+							size_t branch_address = r.get<uint16_t>();
+							branches.emplace_back(branch_address, program_data.size());
+							program_data.push_back(0);
+						} else if (*c == 'e') {
+							done = true;
+						}
+						++c;
+					}
+				}
+				for (auto&v : branches) {
+					//log("doing branch to 0x%04x (fixup %x)\n", std::get<0>(v), std::get<1>(v));
+					program_data[std::get<1>(v)] = decode_at(std::get<0>(v));
+				}
+				return initial_pc;
+			};
+
+			auto&anim_funcs = animation_pc[id];
+
+			size_t highest_animation = script_r.get<uint32_t>();
+			size_t animations = (highest_animation + 1 + 1)&-2;
+			for (size_t i = 0; i < animations; ++i) {
+				size_t anim_address = script_r.get<uint16_t>();
+				if (!anim_address) {
+					anim_funcs.push_back(0);
+					continue;
+				}
+				auto anim_r = base_r;
+				anim_r.skip(anim_address);
+				anim_funcs.push_back(decode_at(anim_address));
+			}
+		}
+
+		st.iscript.program_data = std::move(program_data);
+		st.iscript.scripts.clear();
+		for (auto&v : animation_pc) {
+			auto&s = st.iscript.scripts[v.first];
+			s.id = v.first;
+			s.animation_pc = std::move(v.second);
+		}
+	};
+
+	load_iscript_bin();
+
+}
+
 void init() {
 
-	state st;
+	global_state global_st;
 	game_state game_st;
+	state st;
+	st.global = &global_st;
 	st.game = &game_st;
 
-	load_functions funcs(st);
-	funcs.load_map_file(R"(X:\Starcraft\StarCraft\maps\testone.scm)");
+	global_init(global_st);
+
+	game_load_functions game_load_funcs(st);
+	game_load_funcs.load_map_file(R"(X:\Starcraft\StarCraft\maps\testone.scm)");
 }
 
 }
