@@ -16,7 +16,7 @@ T load_dat(const char*fn) {
 // 	return r;
 }
 
-struct units_dat {
+struct units_dat_t {
 	static const size_t total_count = 228;
 	static const size_t units_count = 106;
 	static const size_t buildings_count = 96;
@@ -82,15 +82,15 @@ struct units_dat {
 	std::array<uint16_t, total_count> StarEditAvailabilityFlags;
 };
 
-static_assert(sizeof(units_dat) == 19876, "units_dat is wrong size");
+static_assert(sizeof(units_dat_t) == 19876, "units_dat is wrong size");
 
-units_dat load_units_dat(const char*fn) {
-	return load_dat<units_dat>(fn);
+units_dat_t load_units_dat(const char*fn) {
+	return load_dat<units_dat_t>(fn);
 }
 
 
 #pragma pack(1)
-struct weapons_dat {
+struct weapons_dat_t {
 	static const size_t count = 130;
 	uint16_t Label[count];
 	uint32_t Graphics[count];
@@ -119,14 +119,14 @@ struct weapons_dat {
 };
 #pragma pack()
 
-static_assert(sizeof(weapons_dat) == 5460, "weapons_dat is wrong size");
+static_assert(sizeof(weapons_dat_t) == 5460, "weapons_dat is wrong size");
 
-weapons_dat load_weapons_dat(const char*fn) {
-	return load_dat<weapons_dat>(fn);
+weapons_dat_t load_weapons_dat(const char*fn) {
+	return load_dat<weapons_dat_t>(fn);
 }
 
 #pragma pack(1)
-struct upgrades_dat {
+struct upgrades_dat_t {
 	static const size_t count = 61;
 	std::array<uint16_t,count> MineralCostBase;
 	std::array<uint16_t, count> MineralCostFactor;
@@ -143,14 +143,14 @@ struct upgrades_dat {
 };
 #pragma pack()
 
-static_assert(sizeof(upgrades_dat) == 1281, "upgrades_dat is wrong size");
+static_assert(sizeof(upgrades_dat_t) == 1281, "upgrades_dat_t is wrong size");
 
-upgrades_dat load_upgrades_dat(const char*fn) {
-	return load_dat<upgrades_dat>(fn);
+upgrades_dat_t load_upgrades_dat(const char*fn) {
+	return load_dat<upgrades_dat_t>(fn);
 }
 
 #pragma pack(1)
-struct techdata_dat {
+struct techdata_dat_t {
 	static const size_t count = 44;
 	std::array<uint16_t, count> mineralCost;
 	std::array<uint16_t, count> gasCost;
@@ -165,10 +165,76 @@ struct techdata_dat {
 };
 #pragma pack()
 
-static_assert(sizeof(techdata_dat) == 836, "techdata_dat is wrong size");
+static_assert(sizeof(techdata_dat_t) == 836, "techdata_dat_t is wrong size");
 
-techdata_dat load_techdata_dat(const char*fn) {
-	return load_dat<techdata_dat>(fn);
+techdata_dat_t load_techdata_dat(const char*fn) {
+	return load_dat<techdata_dat_t>(fn);
 }
+
+#pragma pack(1)
+struct flingy_dat_t {
+	static const size_t count = 209;
+	std::array<uint16_t, count> sprite;
+	std::array<uint32_t, count> topSpeed;
+	std::array<uint16_t, count> acceleration;
+	std::array<uint32_t, count> haltDistance;
+	std::array<uint8_t, count> turnSpeed;
+	std::array<uint8_t, count> unused;
+	std::array<uint8_t, count> moveControl;
+};
+#pragma pack()
+
+static_assert(sizeof(flingy_dat_t) == 3135, "flingy_dat_t is wrong size");
+
+flingy_dat_t load_flingy_dat(const char*fn) {
+	return load_dat<flingy_dat_t>(fn);
+}
+
+#pragma pack(1)
+struct sprites_dat_t {
+	static const size_t count = 517;
+	static const size_t selectable_count = 387;
+	std::array<uint16_t, count> image;
+	std::array<uint8_t, selectable_count> healthBarSize;
+	std::array<uint8_t, count> unknown;
+	std::array<uint8_t, count> isVisible;
+	std::array<uint8_t, selectable_count> selectionCircle;
+	std::array<uint8_t, selectable_count> selectionCircleVPos;
+};
+#pragma pack()
+
+static_assert(sizeof(sprites_dat_t) == 3229, "sprites_dat_t is wrong size");
+
+sprites_dat_t load_sprites_dat(const char*fn) {
+	return load_dat<sprites_dat_t>(fn);
+}
+
+#pragma pack(1)
+struct images_dat_t {
+	static const size_t count = 999;
+	std::array<uint32_t, count> grpFile;
+	std::array<uint8_t, count> isTurnable;
+	std::array<uint8_t, count> isClickable;
+	std::array<uint8_t, count> useFullIscript;
+	std::array<uint8_t, count> drawIfCloaked;
+	std::array<uint8_t, count> drawFunction;
+	std::array<uint8_t, count> remapping;
+	std::array<uint32_t, count> iscriptEntry;
+	std::array<uint32_t, count> shieldOverlayLO;
+	std::array<uint32_t, count> attackOverlayLO;
+	std::array<uint32_t, count> injuryOverlayLO;
+	std::array<uint32_t, count> specialOverlayLO;
+	std::array<uint32_t, count> landingDustLO;
+	std::array<uint32_t, count> liftOffDustLO;
+};
+#pragma pack()
+
+static_assert(sizeof(images_dat_t) == 37962, "images_dat is wrong size");
+
+images_dat_t load_images_dat(const char*fn) {
+	return load_dat<images_dat_t>(fn);
+}
+
+
 
 

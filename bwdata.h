@@ -430,7 +430,7 @@ namespace BW
       /*0x120*/ u8        irradiatePlayerID;
       /*0x121*/ u8        parasiteFlags;
       /*0x122*/ u8        cycleCounter;     // counts/cycles up from 0 to 7 (inclusive). See also 0x85.
-      /*0x123*/ bool      isBlind;
+      /*0x123*/ u8        isBlind;
       /*0x124*/ u8        maelstromTimer;
       /*0x125*/ u8        _unused_0x125;    // ?? Might be afterburner timer or ultralisk roar timer
       /*0x126*/ u8        acidSporeCount;
