@@ -5,7 +5,7 @@ struct xy_typed {
 	typedef xy_typed<utype> xy;
 	xy() : x(0), y(0) {}
 	xy(utype x, utype y) : x(x), y(y) {}
-	xy(Position pos) : x(pos.x), y(pos.y) {}
+	//xy(Position pos) : x(pos.x), y(pos.y) {}
 	bool operator<(const xy&n) const {
 		if (y == n.y) return x < n.x;
 		return y < n.y;

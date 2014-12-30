@@ -12,9 +12,6 @@ struct unit_id {
 	}
 };
 
-#include "bwdata.h"
-using namespace BW;
-
 #include "bwdat.h"
 
 #include "bwenums.h"
