@@ -8,14 +8,12 @@ struct unit_t;
 
 struct target_t {
 	xy pos;
-	unit_t* unit;
+	unit_t*unit;
 };
 
-struct rect_t {
-	int left;
-	int top;
-	int right;
-	int bottom;
+struct rect {
+	xy from;
+	xy to;
 };
 
 struct link_base {
@@ -144,6 +142,18 @@ struct iscript_t {
 	a_vector<int> program_data;
 };
 
+struct grp_t {
+	struct frame_t {
+		int left;
+		int top;
+		int right;
+		int bottom;
+	};
+	int width;
+	int height;
+	a_vector<frame_t> frames;
+};
+
 //
 // These are based on BWAPIs CUnit. I've kept the order the same and names similar for convenience.
 // This also means the order is the same as in Broodwar, but the types (and thus sizes, offsets) are not.
@@ -171,8 +181,15 @@ struct image_t: link_base {
 		return this;
 	}
 	enum {
-		flag_iscript_running = 0x10,
-		flag_hidden = 0x20
+		flag_redraw = 1,
+		flag_horizontally_flipped = 2,
+		flag_y_frozen = 4,
+		flag_has_directional_frames = 8,
+		flag_has_iscript_animations = 0x10,
+		flag_hidden = 0x40
+	};
+	enum {
+		palette_type_hallucination = 16
 	};
 
 	int image_id;
@@ -185,12 +202,10 @@ struct image_t: link_base {
 	int frame_index;
 	xy map_position;
 	xy screen_position;
-	rect_t grp_bounds;
-	void* grp_file;
+	rect grp_bounds;
+	grp_t*grp;
 	int coloring_data;
-	// void(*draw)(...);
-	// void(*update(...);
-	sprite_t* sprite;
+	sprite_t*sprite;
 
 };
 
@@ -209,7 +224,7 @@ struct sprite_t: link_base {
 	int selection_timer;
 	int index;
 	xy position;
-	image_t* main_image;
+	image_t*main_image;
 	intrusive_list<image_t, default_link_f> images;
 
 };
@@ -221,7 +236,7 @@ struct flingy_t: link_base {
 	}
 
 	int hp;
-	sprite_t* sprite;
+	sprite_t*sprite;
 	target_t move_target;
 	xy next_movement_waypoint;
 	xy next_target_waypoint;
@@ -274,11 +289,11 @@ struct unit_t: flingy_t {
 
 	std::pair<unit_t*, unit_t*> player_units_link;
 
-	unit_t* subunit;
+	unit_t*subunit;
 	intrusive_list<order_t, default_link_f> order_queue;
-	unit_t* auto_target_unit;
-	unit_t* connected_unit;
-	unit_t* order_queue_count;
+	unit_t*auto_target_unit;
+	unit_t*connected_unit;
+	unit_t*order_queue_count;
 	int order_queue_timer;
 	int unknown_0x086;
 	int attack_notify_timer;
@@ -312,12 +327,12 @@ struct unit_t: flingy_t {
 			int spider_mine_count;
 		} vulture;
 		struct {
-			unit_t* parent;
+			unit_t*parent;
 			std::pair<unit_t*, unit_t*> fighter_link;
 			bool in_hangar;
 		} fighter;
 		struct fighter_link {
-			auto* operator()(unit_t*ptr) {
+			auto*operator()(unit_t*ptr) {
 				return &ptr->fighter.fighter_link;
 			}
 		};
@@ -334,23 +349,23 @@ struct unit_t: flingy_t {
 		} beacon;
 
 		struct {
-			unit_t* powerup;
+			unit_t*powerup;
 			xy target_resource;
-			unit_t* target_resource_unit;
+			unit_t*target_resource_unit;
 			int repair_resource_loss_timer;
 			bool is_carrying_something;
 			int resource_carry_count;
-			unit_t* harvest_target;
+			unit_t*harvest_target;
 			std::pair<unit_t*, unit_t*> gather_link;
 		} worker;
 		struct worker_gather_link {
-			auto* operator()(unit_t*ptr) {
+			auto*operator()(unit_t*ptr) {
 				return &ptr->worker.gather_link;
 			}
 		};
 
 		struct {
-			unit_t* addon;
+			unit_t*addon;
 			int addon_build_type;
 			int upgrade_research_time;
 			int tech_type;
@@ -369,16 +384,16 @@ struct unit_t: flingy_t {
 					bool resource_belongs_to_ai;
 				} resource;
 				struct {
-					unit_t* exit;
+					unit_t*exit;
 				} nydus;
 				struct {
-					sprite_t* nuke_dot;
+					sprite_t*nuke_dot;
 				} ghost;
 				struct {
-					sprite_t* pylon_aura;
+					sprite_t*pylon_aura;
 				} pylon;
 				struct {
-					unit_t* nuke;
+					unit_t*nuke;
 					bool ready;
 				} silo;
 				
@@ -403,19 +418,19 @@ struct unit_t: flingy_t {
 	union {
 		struct {
 			xy position;
-			unit_t* unit;
+			unit_t*unit;
 		} rally;
 		struct {
 			std::pair<unit_t*, unit_t*> psi_link;
 		} pylon;
 	};
 
-	path_t* path;
+	path_t*path;
 	int pathing_collision_interval;
 	int pathing_flags;
 	int unused_0x106;
 	bool is_being_healed;
-	rect_t contour_bounds;
+	rect contour_bounds;
 
 	int remove_timer;
 	int defense_matrix_damage;
@@ -427,7 +442,7 @@ struct unit_t: flingy_t {
 	int stasis_timer;
 	int plague_timer;
 	int storm_timer;
-	unit_t* irradiated_by;
+	unit_t*irradiated_by;
 	int irradiate_owner;
 	int parasite_flags;
 	int cycle_counter;
@@ -438,10 +453,10 @@ struct unit_t: flingy_t {
 	std::array<int, 9> acid_spore_time;
 
 	int bullet_behavior_3_by_3_attack_sequence;
-	void* ai;
+	void*ai;
 	int air_strength;
 	int ground_strength;
-	rect_t finder;
+	rect finder;
 	int repulse_unknown;
 	int repulse_angle;
 	xy drift_pos;

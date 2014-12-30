@@ -82,15 +82,15 @@ static_assert(sizeof(cv5_entry) == 52, "cv5_entry: wrong size");
 struct vf4_entry {
 	std::array<uint16_t, 16> flags;
 };
-static_assert(sizeof(vf4_entry) == 32, "cv5_entry: wrong size");
+static_assert(sizeof(vf4_entry) == 32, "vf4_entry: wrong size");
 struct vx4_entry {
 	std::array<uint16_t, 16> images;
 };
-static_assert(sizeof(vx4_entry) == 32, "cv5_entry: wrong size");
+static_assert(sizeof(vx4_entry) == 32, "vx4_entry: wrong size");
 struct vr4_entry {
 	std::array<uint8_t, 64> bitmap;
 };
-static_assert(sizeof(vr4_entry) == 64, "cv5_entry: wrong size");
+static_assert(sizeof(vr4_entry) == 64, "vr4_entry: wrong size");
 
 struct tile_id {
 	uint16_t raw_value = 0;
@@ -147,14 +147,28 @@ struct tile_t {
 };
 
 struct global_state {
+
+	global_state() = default;
+	global_state(global_state&) = delete;
+	global_state(global_state&&) = default;
+	global_state&operator=(global_state&) = delete;
+	global_state&operator=(global_state&&) = default;
+
+	images_dat_t images_dat;
 	iscript_t iscript;
-};
 
-struct cache_state {
-
+	a_vector<grp_t> grps;
+	a_vector<grp_t*> image_grp;
 };
 
 struct game_state {
+
+	game_state() = default;
+	game_state(game_state&) = delete;
+	game_state(game_state&&) = default;
+	game_state&operator=(game_state&) = delete;
+	game_state&operator=(game_state&&) = default;
+
 	size_t map_tile_width;
 	size_t map_tile_height;
 	size_t map_width;
@@ -198,13 +212,15 @@ struct game_state {
 	techdata_dat_t techdata_dat;
 	flingy_dat_t flingy_dat;
 	sprites_dat_t sprites_dat;
-	images_dat_t images_dat;
 
 	std::array<std::array<bool, 228>, 12> unit_type_allowed;
 	std::array<std::array<int, 61>, 12> max_upgrade_levels;
 	std::array<std::array<bool, 44>, 12> tech_available;
 
 	std::array<xy, 12> start_locations;
+
+	bool is_replay;
+	int local_player;
 };
 
 struct state_base {
@@ -258,9 +274,17 @@ struct state_base {
 	uint32_t lcg_rand_state;
 
 	int last_error;
+
+	rect viewport;
 };
 
 struct state : state_base {
+
+	state() = default;
+	state(state&) = delete;
+	state(state&&) = default;
+	state&operator=(state&) = delete;
+	state&operator=(state&&) = default;
 
 	intrusive_list<unit_t, default_link_f> visible_units;
 	intrusive_list<unit_t, default_link_f> hidden_units;
@@ -280,12 +304,6 @@ struct state : state_base {
 	intrusive_list<image_t, default_link_f> free_images;
 
 	a_vector<image_t> images = a_vector<image_t>(5000);
-
-	state() = default;
-	state(state&) = delete;
-	state(state&&) = default;
-	state&operator=(state&) = delete;
-	state&operator=(state&&) = default;
 };
 
 struct state_functions {
@@ -300,12 +318,13 @@ struct state_functions {
 	const techdata_dat_t&techdata_dat = game_st.techdata_dat;
 	const flingy_dat_t&flingy_dat = game_st.flingy_dat;
 	const sprites_dat_t&sprites_dat = game_st.sprites_dat;
-	const images_dat_t&images_dat = game_st.images_dat;
+	const images_dat_t&images_dat = global_st.images_dat;
 
 	state_functions(state&st) : st(st) {}
 
 	bool in_game_loop = false;
 	bool update_tiles = false;
+	unit_t*iscript_unit = nullptr;
 
 	bool Completed(unit_t*u) {
 		return !!(u->status_flags&StatusFlags::Completed);
@@ -346,7 +365,7 @@ struct state_functions {
 		return !!(sprite->flags&SpriteFlags::Hidden);
 	};
 
-	unit_t* get_unit(unit_id id) {
+	unit_t*get_unit(unit_id id) {
 		size_t idx = id.index();
 		if (!idx) return nullptr;
 		size_t actual_index = idx - 1;
@@ -428,7 +447,7 @@ struct state_functions {
 		u->current_button_set = type;
 	};
 
-	image_t* find_overlay(sprite_t*sprite, int first, int last) {
+	image_t*find_overlay(sprite_t*sprite, int first, int last) {
 		for (image_t*i : sprite->images) {
 			if (i->image_id >= first && i->image_id <= last) return i;
 		}
@@ -647,7 +666,7 @@ struct state_functions {
 		auto UMInitialize = [&](unit_t*u) {
 			u->pathing_flags &= ~(1 | 2);
 			if (u->sprite->elevation_level) u->pathing_flags |= 1;
-			u->contour_bounds = { 0,0,0,0 };
+			u->contour_bounds = { {0,0},{0,0} };
 			int next_state = UM_Lump;
 			if (!SA_Subunit(u) && InBuilding(u)) {
 				next_state = UM_InitSeq;
@@ -779,12 +798,8 @@ struct state_functions {
 				if (tile_x + cur->x >= game_st.map_tile_width) continue;
 				if (tile_y + cur->y >= game_st.map_tile_height) continue;
 				bool okay = false;
-				for (int i2 = 0; i2 < cur->prev_count; ++i2) {
-					if (!((i2 == 0 ? cur->prev : cur->prev2)->vision_propagation & required_tile_mask.raw)) {
-						okay = true;
-						break;
-					}
-				}
+				okay |= !(cur->prev->vision_propagation&required_tile_mask.raw);
+				if (cur->prev_count == 2) okay |= !(cur->prev2->vision_propagation&required_tile_mask.raw);
 				if (!okay) continue;
 				auto&tile = base_tile[cur->map_index_offset];
 				tile.raw &= reveal_tile_mask.raw;
@@ -955,7 +970,68 @@ struct state_functions {
 		visibility_flags &= st.local_mask;
 		if ((sprite->visibility_flags&visibility_flags) == visibility_flags) return;
 		sprite->visibility_flags = visibility_flags;
-		for (image_t*i : sprite->images) i->flags |= 1;
+		for (image_t*i : sprite->images) i->flags |= image_t::flag_redraw;
+	}
+
+	void set_image_offset(image_t*image, xy offset) {
+		if (image->offset == offset) return;
+		image->offset = offset;
+		image->flags |= image_t::flag_redraw;
+	}
+
+	void set_image_palette_type(image_t*image, int palette_type) {
+		image->palette_type = palette_type;
+		if (palette_type == 17) {
+			// coloring_data might be a union, since this is written
+			// using two single-byte writes
+			image->coloring_data = 48 | (2 << 8);
+		}
+		image->flags |= image_t::flag_redraw;
+	}
+
+	void set_image_palette_type(image_t*image, image_t*copy_from) {
+		if (copy_from->palette_type < 2 || copy_from->palette_type > 7) return;
+		set_image_palette_type(image, copy_from->palette_type);
+		// seems like it's actually just two values, since this is also
+		// written using two single-byte writes
+		image->coloring_data = copy_from->coloring_data;
+	}
+
+	void hide_image(image_t*image) {
+		if (image->flags&image_t::flag_hidden) return;
+		image->flags |= image_t::flag_hidden;
+	}
+
+	void update_image_offset(image_t*image) {
+		xcept("update_image_offset");
+	}
+
+	void update_image_frame_index(image_t*image) {
+		int frame_index = image->frame_set + image->direction;
+		if (image->frame_index != frame_index) {
+			image->frame_index = frame_index;
+			image->flags |= image_t::flag_redraw;
+		}
+	}
+
+	void set_image_direction(image_t*image, int direction) {
+		if (image->flags & image_t::flag_has_directional_frames) {
+			bool facing;
+			if (direction <= 16) {
+				facing = false;
+			} else {
+				direction = 32 - direction;
+				facing = true;
+			}
+			if (!!(image->flags & 2) != facing || image->direction != direction) {
+				image->direction = direction;
+				if (facing) image->flags |= 2;
+				else image->flags &= 2;
+				set_image_palette_type(image, image->palette_type);
+				update_image_frame_index(image);
+				if (image->flags & 0x80) update_image_offset(image);
+			}
+		}
 	}
 
 	void iscript_set_script(image_t*image, int script_id) {
@@ -967,14 +1043,132 @@ struct state_functions {
 	}
 
 	void iscript_execute(image_t*image, iscript_state_t&state, bool no_side_effects, int*distance_moved) {
-		xcept("iscript_execute");
+
+		if (state.wait) {
+			--state.wait;
+			return;
+		}
+
+		auto play_frame = [&](int frame_index) {
+			if (image->frame_set == frame_index) return;
+			image->frame_set = frame_index;
+			update_image_frame_index(image);
+		};
+
+		auto add_image = [&](int image_id, xy offset, int order) {
+			image_t*script_image = image;
+			image_t*image = create_image(image_id, script_image->sprite, offset, 0, order, script_image);
+			if (!image) return (image_t*)nullptr;
+			
+			if (image->palette_type == 0 && iscript_unit && IsHallucination(iscript_unit)) {
+				if (game_st.is_replay || iscript_unit->owner == game_st.local_player) {
+					set_image_palette_type(image, image_t::palette_type_hallucination);
+					image->coloring_data = 0;
+				}
+			}
+			if (image->flags & image_t::flag_has_directional_frames) {
+				int dir = script_image->flags & image_t::flag_horizontally_flipped ? 32 - script_image->direction : script_image->direction;
+				set_image_direction(image, dir);
+			}
+			update_image_frame_index(image);
+			if (iscript_unit && (GroundedBuilding(iscript_unit) || Completed(iscript_unit))) {
+				if (!images_dat.drawIfCloaked[image_id]) {
+					hide_image(image);
+				} else if (image->palette_type==0) {
+					set_image_palette_type(image, script_image);
+				}
+			}
+			return image;
+		};
+
+		const int*program_data = global_st.iscript.program_data.data();
+		const int*p = program_data + state.program_counter;
+		while (true) {
+			using namespace iscript_opcodes;
+			int opc = *p++ - 1;
+			log("iscript: %04x: opc %d\n", p - program_data, opc);
+			int a, b, c;
+			switch (opc) {
+			case opc_playfram:
+				a = *p++;
+				if (no_side_effects) break;
+				play_frame(a);
+				break;
+			case opc_playframtile:
+				a = *p++;
+				if (no_side_effects) break;
+				if ((size_t)a + game_st.tileset_index < image->grp->frames.size()) play_frame(a + game_st.tileset_index);
+				break;
+			case opc_sethorpos:
+				a = *p++;
+				if (no_side_effects) break;
+				if (image->offset.x != a) {
+					image->offset.x = a;
+					image->flags |= image_t::flag_redraw;
+				}
+				break;
+			case opc_setvertpos:
+				a = *p++;
+				if (no_side_effects) break;
+				if (!iscript_unit || !(iscript_unit->status_flags&(StatusFlags::Completed | StatusFlags::GroundedBuilding))) {
+					if (image->offset.y != a) {
+						image->offset.y = a;
+						image->flags |= image_t::flag_redraw;
+					}
+				}
+				break;
+			case opc_setpos:
+				a = *p++;
+				b = *p++;
+				if (no_side_effects) break;
+				set_image_offset(image, xy(a, b));
+				break;
+			case opc_wait:
+				state.wait = *p++;
+				state.program_counter = p - program_data;
+				return;
+			case opc_waitrand:
+				a = *p++;
+				b = *p++;
+				if (no_side_effects) break;
+				state.wait = a + (lcg_rand(3) % (b - a + 1)) - 1;
+				return;
+			case opc_goto:
+				p = program_data + *p++;
+				break;
+			case opc_imgol:
+			case opc_imgul:
+				a = *p++;
+				b = *p++;
+				c = *p++;
+				if (no_side_effects) break;
+				add_image(a, image->offset + xy(b, c), opc == opc_imgol ? image_order_above : image_order_below);
+				break;
+			case opc_imgolorig:
+			case opc_switchul:
+				a = *p++;
+				if (no_side_effects) break;
+				if (image_t*new_image = add_image(a, xy(), opc == opc_imgolorig ? image_order_above : image_order_below)) {
+					if (~new_image->flags & 0x80) {
+						new_image->flags |= 0x80;
+						update_image_offset(image);
+					}
+				}
+				break;
+			case opc_imgoluselo:
+				break;
+			default:
+				xcept("iscript: unhandled opcode %d", opc);
+			}
+		}
+		
 	}
 
 	void iscript_run_anim(image_t*image, int new_anim) {
 		using namespace iscript_anims;
 		int old_anim = image->iscript_state.animation;
 		if (new_anim == Death && old_anim == Death) return;
-		if (~image->flags & image_t::flag_iscript_running && new_anim != Init && new_anim != Death) return;
+		if (~image->flags & image_t::flag_has_iscript_animations && new_anim != Init && new_anim != Death) return;
 		if ((new_anim == Walking || new_anim == IsWorking) && new_anim == old_anim) return;
 		if (new_anim == GndAttkRpt && old_anim != GndAttkRpt) {
 			if (old_anim != GndAttkInit) new_anim = GndAttkInit;
@@ -993,72 +1187,114 @@ struct state_functions {
 		iscript_execute(image, image->iscript_state, false, nullptr);
 	}
 
-	image_t* create_image(int image_id, sprite_t*sprite, xy offset, int direction) {
+	void initialize_image(image_t*image, int image_id, sprite_t*sprite, xy offset) {
+		image->image_id = image_id;
+		image->grp = global_st.image_grp[image_id];
+		int flags = 0;
+		if (images_dat.isTurnable[image_id] & 1) flags |= image_t::flag_has_directional_frames;
+		if (images_dat.isClickable[image_id] & 1) flags |= 0x20;
+		image->flags = flags;
+		image->frame_set = 0;
+		image->direction = 0;
+		image->frame_index = 0;
+		image->sprite = sprite;
+		image->offset = offset;
+		image->grp_bounds = { {0,0},{0,0} };
+		image->coloring_data = 0;
+		image->iscript_state.current_script = nullptr;
+		image->iscript_state.program_counter = 0;
+		image->iscript_state.return_address = 0;
+		image->iscript_state.animation = 0;
+		image->iscript_state.wait = 0;
+		int drawfunc = images_dat.drawFunction[image_id];
+		if (drawfunc == 14) image->coloring_data = sprite->owner;
+		if (drawfunc == 9) {
+			//images_dat.remapping[image_id];
+			// some color shift stuff based on the tileset
+			image->coloring_data = 0; // fixme, see InitializeImageData
+		}
+	};
+
+	void update_image_position(image_t*image) {
+
+		xy map_pos = image->sprite->position + image->offset;
+		auto&frame = image->grp->frames[image->frame_index];
+		if (image->flags&image_t::flag_horizontally_flipped) {
+			map_pos.x += image->grp->width / 2 - (frame.right + frame.left);
+		} else {
+			map_pos.x += frame.left - image->grp->width / 2;
+		}
+		if (image->flags & image_t::flag_y_frozen) map_pos.y = image->map_position.y;
+		else map_pos.y += frame.top - image->grp->height / 2;
+		rect grp_bounds = { {0, 0}, {frame.right, frame.bottom} };
+		xy screen_pos = map_pos - st.viewport.from;
+		if (screen_pos.x < 0) {
+			grp_bounds.from.x -= screen_pos.x;
+			grp_bounds.to.x += screen_pos.x;
+		}
+		if (screen_pos.y < 0) {
+			grp_bounds.from.y -= screen_pos.y;
+			grp_bounds.to.y += screen_pos.y;
+		}
+		if (grp_bounds.to.x > st.viewport.to.x - map_pos.x) grp_bounds.to.x = st.viewport.to.x - map_pos.x;
+		if (grp_bounds.to.y > st.viewport.to.y - map_pos.y) grp_bounds.to.y = st.viewport.to.y - map_pos.y;
+
+		image->map_position = map_pos;
+		image->screen_position = screen_pos;
+		image->grp_bounds = grp_bounds;
+
+	}
+
+	enum {
+		image_order_top,
+		image_order_bottom,
+		image_order_above,
+		image_order_below
+	};
+	image_t*create_image(int image_id, sprite_t*sprite, xy offset, int direction, int order, image_t*relimg = nullptr) {
+		if ((size_t)image_id >= 999) xcept("attempt to create image with invalid id %d", image_id);
 		if (st.free_images.empty()) return nullptr;
 		image_t*image = &st.free_images.front();
 		st.free_images.pop_front();
-		if (sprite->images.empty()) sprite->main_image = image;
-		bw_insert_list(sprite->images, *image);
-
-		auto initialize_image = [&]() {
-			image->image_id = image_id;
-			image->grp_file = nullptr; // fixme? might only be needed for rendering
-			int flags = 0;
-			if (images_dat.isTurnable[image_id] & 1) flags |= 8;
-			if (images_dat.isClickable[image_id] & 1) flags |= image_t::flag_hidden;
-			image->flags = flags;
-			image->frame_set = 0;
-			image->direction = 0;
-			image->frame_index = 0;
-			image->sprite = sprite;
-			image->offset = offset;
-			image->grp_bounds = { 0,0,0,0 };
-			image->coloring_data = 0;
-			image->iscript_state.current_script = nullptr;
-			image->iscript_state.program_counter = 0;
-			image->iscript_state.return_address = 0;
-			image->iscript_state.animation = 0;
-			image->iscript_state.wait = 0;
-			int drawfunc = images_dat.drawFunction[image_id];
-			if (drawfunc == 14) image->coloring_data = sprite->owner;
-			if (drawfunc == 9) {
-				image->coloring_data = 0; // fixme, see InitializeImageData
+		if (sprite->images.empty()) {
+			sprite->main_image = image;
+			sprite->images.push_front(*image);
+		} else {
+			if (order == image_order_top) sprite->images.push_front(*image);
+			else if (order == image_order_bottom) sprite->images.push_back(*image);
+			else {
+				if (!relimg) relimg = sprite->main_image;
+				if (order == image_order_above) sprite->images.insert(sprite->images.iterator_to(*relimg), *image);
+				else sprite->images.insert(++sprite->images.iterator_to(*relimg), *image);
 			}
-		};
-		auto start_image = [&]() {
-			int drawfunc = images_dat.drawFunction[image_id];
-			image->palette_type = drawfunc;
-			// fixme ?
-			// image->update = update_functions[drawfunc];
-			// if (image->flags&2) image->draw = draw_functions2[drawfunc];
-			// else image->draw = draw_functions[drawfunc];
-			if (drawfunc == 17) {
-				// coloring_data might be a union, since this is written
-				// using two single-byte writes
-				image->coloring_data = 48 | (2 << 8);
-			}
-			image->flags |= 1;
-			image->flags &= 16;
-			if (images_dat.useFullIscript[image_id] & 1) image->flags |= 16;
-			iscript_set_script(image, images_dat.iscriptEntry[image_id]);
-			iscript_run_anim(image, iscript_anims::Init);
-			xcept("updateGraphicData");
-		};
-
-		initialize_image();
-		start_image();
-		xcept("create image waa\n");
-
-		return nullptr;
+		}
+		initialize_image(image, image_id, sprite, offset);
+		int palette_type = images_dat.drawFunction[image->image_id];
+		set_image_palette_type(image, palette_type);
+		if (images_dat.useFullIscript[image->image_id] & 1) image->flags |= image_t::flag_has_iscript_animations;
+		else image->flags &= image_t::flag_has_iscript_animations;
+		iscript_set_script(image, images_dat.iscriptEntry[image->image_id]);
+		iscript_run_anim(image, iscript_anims::Init);
+		update_image_position(image);
+		set_image_direction(image, direction);
+		return image;
 	}
 
-	sprite_t* create_sprite(int sprite_id, xy pos, int owner) {
+	image_t*create_image_above_main_image(int image_id, sprite_t*sprite, xy offset, int direction) {
+		image_t*image = create_image(image_id, sprite, offset, direction, image_order_above);
+		if (!image) return nullptr;
+		
+		return image;
+	}
+
+	sprite_t*create_sprite(int sprite_id, xy pos, int owner) {
+		if ((size_t)sprite_id >= 517) xcept("attempt to create sprite with invalid id %d", sprite_id);
 
 		if (st.free_sprites.empty()) return nullptr;
 		sprite_t*sprite = &st.free_sprites.front();
 		st.free_sprites.pop_front();
 
-		auto init_sprite = [&]() {
+		auto initialize_sprite = [&]() {
 			if ((size_t)pos.x >= game_st.map_width || (size_t)pos.y >= game_st.map_height) return false;
 			sprite->owner = owner;
 			sprite->sprite_id = sprite_id;
@@ -1070,11 +1306,12 @@ struct state_functions {
 				sprite->flags |= SpriteFlags::Hidden;
 				set_sprite_visibility(sprite, 0);
 			}
-			if (!create_image(sprites_dat.image[sprite_id], sprite, { 0,0 }, 0)) return false;
+			if (!create_image_above_main_image(sprites_dat.image[sprite_id], sprite, { 0,0 }, 0)) return false;
+			xcept("initialize_sprite ...");
 			return true;
 		};
 
-		if (!init_sprite()) {
+		if (!initialize_sprite()) {
 			bw_insert_list(st.free_sprites, *sprite);
 			return nullptr;
 		}
@@ -1121,9 +1358,9 @@ struct state_functions {
 		return false;
 	}
 
-	bool initialize_unit_type(unit_t*u, int type, xy pos, int owner) {
+	bool initialize_unit_type(unit_t*u, int unit_type, xy pos, int owner) {
 
-		int flingy_id = units_dat.Graphics[type];
+		int flingy_id = units_dat.Graphics[unit_type];
 		if (!initialize_flingy(u, flingy_id, pos, owner, 0)) return false;
 
 		xcept("initialize unit type please");
@@ -1131,25 +1368,22 @@ struct state_functions {
 		return true;
 	}
 
-	unit_t* new_unit(int type, xy pos, int owner) {
+	unit_t*create_unit(int unit_type, xy pos, int owner) {
+		if ((size_t)unit_type >= 228) xcept("attempt to create unit with invalid id %d", unit_type);
 
+		if (in_game_loop) {
+			lcg_rand(14);
+		}
 		if (st.free_units.empty()) {
 			error_string(61); // Cannot create more units
 			return nullptr;
 		}
-		if (!is_in_bounds(type, pos)) {
+		if (!is_in_bounds(unit_type, pos)) {
 			error_string(0);
 			return nullptr;
 		}
 		unit_t*u = st.free_units.front();
-		auto construct_unit = [&]() {
-
-			u->worker.harvest_target = nullptr;
-			u->worker.gather_link = { nullptr, nullptr };
-
-			u->pylon.psi_link = { nullptr, nullptr };
-
-			u->burrowed_unit_link = { nullptr, nullptr };
+		auto initialize_unit = [&]() {
 
 			u->order_queue.clear();
 
@@ -1192,33 +1426,22 @@ struct state_functions {
 			u->previous_hp = 0;
 			u->ai = nullptr;
 
-			if (!initialize_unit_type(u, type, pos, owner)) return false;
+			if (!initialize_unit_type(u, unit_type, pos, owner)) return false;
 			xcept("unit type initialized");
 
 			return true;
 		};
-		if (!construct_unit()) {
+		if (!initialize_unit()) {
 			error_string(62); // Unable to create unit
 			return nullptr;
 		}
 		st.free_units.pop_front();
-
-		return nullptr;
-
-	}
-
-	unit_t* create_unit(int type, xy pos, int owner) {
-
-		if (in_game_loop) {
-			lcg_rand(14);
-		}
-		unit_t*u = new_unit(type, pos, owner);
-
+		xcept("create unit %p", u);
 
 		return u;
 	}
 
-	unit_t* create_initial_unit(int type, xy pos, int owner) {
+	unit_t*create_initial_unit(int type, xy pos, int owner) {
 		unit_t*u = create_unit(type, pos, owner);
 		xcept("create_initial_unit %p", u);
 	}
@@ -1270,7 +1493,7 @@ struct data_reader {
 	}
 	uint8_t*get_n(size_t n) {
 		uint8_t*r = ptr;
-		if (ptr + n - end > 0) xcept("data_reader: attempt to read past end");
+		if (ptr + n - end > 0 || ptr + n < ptr) xcept("data_reader: attempt to read past end");
 		ptr += n;
 		return r;
 	}
@@ -1307,7 +1530,7 @@ struct game_load_functions : state_functions {
 	techdata_dat_t&techdata_dat = game_st.techdata_dat;
 	flingy_dat_t&flingy_dat = game_st.flingy_dat;
 	sprites_dat_t&sprites_dat = game_st.sprites_dat;
-	images_dat_t&images_dat = game_st.images_dat;
+	const images_dat_t&images_dat = global_st.images_dat;
 
 	void reset() {
 
@@ -1317,7 +1540,6 @@ struct game_load_functions : state_functions {
 		techdata_dat = load_techdata_dat("arr\\techdata.dat");
 		flingy_dat = load_flingy_dat("arr\\flingy.dat");
 		sprites_dat = load_sprites_dat("arr\\sprites.dat");
-		images_dat = load_images_dat("arr\\images.dat");
 
 		for (auto&v : game_st.unit_type_allowed) v.fill(true);
 		for (auto&v : game_st.tech_available) v.fill(true);
@@ -1381,6 +1603,9 @@ struct game_load_functions : state_functions {
 		}
 
 		st.last_error = 0;
+
+		game_st.is_replay = false;
+		game_st.local_player = 0;
 	}
 
 	int get_unit_strength(int unit_type, int weapon_type) {
@@ -2127,9 +2352,9 @@ void global_init(global_state&st) {
 
 		ins_data[opc_playfram] = "2";
 		ins_data[opc_playframtile] = "2";
-		ins_data[opc_sethorpos] = "1";
-		ins_data[opc_setvertpos] = "1";
-		ins_data[opc_setpos] = "11";
+		ins_data[opc_sethorpos] = "s1";
+		ins_data[opc_setvertpos] = "s1";
+		ins_data[opc_setpos] = "s1s1";
 		ins_data[opc_wait] = "1";
 		ins_data[opc_waitrand] = "11";
 		ins_data[opc_goto] = "j";
@@ -2218,68 +2443,80 @@ void global_init(global_state&st) {
 
 			a_unordered_map<int, size_t> decode_map;
 
-			std::function<size_t(int)> decode_at = [&](size_t initial_address) {
-				if (!initial_address) xcept("iscript load: attempt to decode instruction at null address");
-				auto in = decode_map.emplace(initial_address, 0);
-				if (!in.second) {
-					//log("instruction at 0x%04x already exists with index %d\n", initial_address, in.first->second);
-					return in.first->second;
-				}
-				size_t initial_pc = program_data.size();
-				//log("decoding at 0x%04x: initial_pc %d\n", initial_address, initial_pc);
-				in.first->second = initial_pc;
-				auto r = base_r;
-				r.skip(initial_address);
-				a_vector<std::tuple<size_t, size_t>> branches;
-				bool done = false;
-				while (!done) {
-					size_t pc = program_data.size();
-					size_t cur_address = r.ptr - base_r.ptr;
-					if (cur_address != initial_address) {
-						auto in = decode_map.emplace(cur_address, pc);
-						if (!in.second) {
-							//log("0x%04x (0x%x): already decoded, inserting jmp\n", cur_address, pc);
-							program_data.push_back(opc_goto + 1);
-							program_data.push_back(in.first->second);
-							break;
-						}
+			auto decode_at = [&](size_t initial_address) {
+				a_deque<std::tuple<size_t, size_t>> branches;
+				std::function<size_t(int)> decode = [&](size_t initial_address) {
+					if (!initial_address) xcept("iscript load: attempt to decode instruction at null address");
+					auto in = decode_map.emplace(initial_address, 0);
+					if (!in.second) {
+						//log("instruction at 0x%04x already exists with index %d\n", initial_address, in.first->second);
+						return in.first->second;
 					}
-					size_t opcode = r.get<uint8_t>();
-					if (opcode >= ins_data.size()) xcept("iscript load: at 0x%04x: invalid instruction %d", cur_address, opcode);
-					//log("0x%04x (0x%x): opcode %d\n", cur_address, pc, opcode);
-					program_data.push_back(opcode + 1);
-					const char*c = ins_data[opcode];
-					while (*c) {
-						if (*c == '1') program_data.push_back(r.get<uint8_t>());
-						else if (*c == '2') program_data.push_back(r.get<uint16_t>());
-						else if (*c == 'v') {
-							int n = r.get<uint8_t>();
-							program_data.push_back(n);
-							for (; n; --n) program_data.push_back(r.get<uint16_t>());
-						} else if (*c == 'j') {
-							size_t jump_address = r.get<uint16_t>();
-							auto jump_pc_it = decode_map.find(jump_address);
-							if (jump_pc_it == decode_map.end()) {
-								program_data.pop_back();
-								r = base_r;
-								r.skip(jump_address);
-							} else {
-								program_data.push_back(jump_pc_it->second);
+					size_t initial_pc = program_data.size();
+					//log("decoding at 0x%04x: initial_pc %d\n", initial_address, initial_pc);
+					in.first->second = initial_pc;
+					auto r = base_r;
+					r.skip(initial_address);
+					bool done = false;
+					while (!done) {
+						size_t pc = program_data.size();
+						size_t cur_address = r.ptr - base_r.ptr;
+						if (cur_address != initial_address) {
+							auto in = decode_map.emplace(cur_address, pc);
+							if (!in.second) {
+								//log("0x%04x (0x%x): already decoded, inserting jump\n", cur_address, pc);
+								program_data.push_back(opc_goto + 1);
+								program_data.push_back(in.first->second);
+								break;
+							}
+						}
+						size_t opcode = r.get<uint8_t>();
+						if (opcode >= ins_data.size()) xcept("iscript load: at 0x%04x: invalid instruction %d", cur_address, opcode);
+						//log("0x%04x (0x%x): opcode %d\n", cur_address, pc, opcode);
+						program_data.push_back(opcode + 1);
+						const char*c = ins_data[opcode];
+						while (*c) {
+							if (*c == 's') {
+								++c;
+								if (*c=='1') program_data.push_back(r.get<int8_t>());
+								else if (*c == '2') program_data.push_back(r.get<int16_t>());
+							} else if (*c == '1') program_data.push_back(r.get<uint8_t>());
+							else if (*c == '2') program_data.push_back(r.get<uint16_t>());
+							else if (*c == 'v') {
+								int n = r.get<uint8_t>();
+								program_data.push_back(n);
+								for (; n; --n) program_data.push_back(r.get<uint16_t>());
+							} else if (*c == 'j') {
+								size_t jump_address = r.get<uint16_t>();
+								auto jump_pc_it = decode_map.find(jump_address);
+								if (jump_pc_it == decode_map.end()) {
+									program_data.pop_back();
+									r = base_r;
+									r.skip(jump_address);
+								} else {
+									program_data.push_back(jump_pc_it->second);
+									done = true;
+								}
+							} else if (*c == 'b') {
+								size_t branch_address = r.get<uint16_t>();
+								branches.emplace_back(branch_address, program_data.size());
+								program_data.push_back(0);
+							} else if (*c == 'e') {
 								done = true;
 							}
-						} else if (*c == 'b') {
-							size_t branch_address = r.get<uint16_t>();
-							branches.emplace_back(branch_address, program_data.size());
-							program_data.push_back(0);
-						} else if (*c == 'e') {
-							done = true;
+							++c;
 						}
-						++c;
 					}
-				}
-				for (auto&v : branches) {
+					return initial_pc;
+				};
+				size_t initial_pc = decode(initial_address);
+				while (!branches.empty()) {
+					auto v = branches.front();
+					branches.pop_front();
 					//log("doing branch to 0x%04x (fixup %x)\n", std::get<0>(v), std::get<1>(v));
-					program_data[std::get<1>(v)] = decode_at(std::get<0>(v));
+					size_t pc = decode(std::get<0>(v));
+					if ((int)pc != pc) xcept("0x%x does not fit in an int", pc);
+					program_data[std::get<1>(v)] = (int)pc;
 				}
 				return initial_pc;
 			};
@@ -2309,7 +2546,86 @@ void global_init(global_state&st) {
 		}
 	};
 
+	images_dat_t&images_dat = st.images_dat;
+
+	auto load_images = [&]() {
+
+		images_dat = load_images_dat("arr\\images.dat");
+
+		a_vector<uint8_t> data;
+		load_data_file(data, "arr\\images.tbl");
+		data_reader_le base_r(data.data(), data.data() + data.size());
+
+		auto r = base_r;
+		size_t file_count = r.get<uint16_t>();
+
+		a_vector<grp_t> grps;
+
+		auto load_grp = [&](a_string fn) {
+			a_vector<uint8_t> data;
+			load_data_file(data, format("unit\\%s", fn));
+			data_reader_le r(data.data(), data.data() + data.size());
+			grp_t grp;
+			size_t frame_count = r.get<uint16_t>();
+			grp.width = r.get<uint16_t>();
+			grp.height = r.get<uint16_t>();
+			grp.frames.resize(frame_count);
+			for (size_t i = 0; i < frame_count; ++i) {
+				auto&f = grp.frames[i];
+				f.left = r.get<int8_t>();
+				f.top = r.get<int8_t>();
+				f.right = r.get<int8_t>();
+				f.bottom = r.get<int8_t>();
+				size_t file_offset = r.get<uint32_t>();
+			}
+			return grp;
+		};
+		a_unordered_map<size_t, size_t> loaded;
+		auto load = [&](size_t index) {
+			if (!index) return (size_t)0;
+			auto in = loaded.emplace(index, 0);
+			if (!in.second) return in.first->second;
+			--index;
+			log("index is %d\n", index);
+			auto r = base_r;
+			r.skip(2 + index * 2);
+			size_t fn_offset = r.get<uint16_t>();
+			r = base_r;
+			r.skip(fn_offset);
+			a_string fn;
+			while (char c = r.get<char>()) fn += c;
+
+			size_t grps_index = grps.size();
+			in.first->second = grps_index;
+			grps.push_back(load_grp(fn));
+			return grps_index;
+		};
+
+		a_vector<size_t> image_grp_index;
+
+		grps.emplace_back(); // null/invalid entry
+
+		for (int i = 0; i < 999; ++i) {
+			log("main %d\n", i);
+			image_grp_index.push_back(load(images_dat.grpFile[i]));
+// 			images_dat.attackOverlayLO[i];
+// 			images_dat.injuryOverlayLO[i];
+// 			images_dat.specialOverlayLO[i];
+// 			images_dat.landingDustLO[i];
+// 			images_dat.liftOffDustLO[i];
+// 			images_dat.shieldOverlayLO[i];
+		}
+
+		st.grps = std::move(grps);
+		st.image_grp.resize(image_grp_index.size());
+		for (size_t i = 0; i < image_grp_index.size(); ++i) {
+			st.image_grp[i] = &st.grps[i];
+		}
+
+	};
+
 	load_iscript_bin();
+	load_images();
 
 }
 
