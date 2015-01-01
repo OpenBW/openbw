@@ -95,6 +95,11 @@ struct xy_typed {
 
 typedef xy_typed<int> xy;
 
+struct rect {
+	xy from;
+	xy to;
+};
+
 template<typename iter_T>
 struct iterators_range {
 	iter_T begin_it;

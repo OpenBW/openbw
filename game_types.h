@@ -11,11 +11,6 @@ struct target_t {
 	unit_t*unit;
 };
 
-struct rect {
-	xy from;
-	xy to;
-};
-
 struct link_base {
 	std::pair<link_base*, link_base*> link;
 };
@@ -25,133 +20,6 @@ struct default_link_f {
 	auto*operator()(T*ptr) {
 		return (std::pair<T*, T*>*)&ptr->link;
 	}
-};
-
-namespace iscript_opcodes {
-	enum {
-		opc_playfram,
-		opc_playframtile,
-		opc_sethorpos,
-		opc_setvertpos,
-		opc_setpos,
-		opc_wait,
-		opc_waitrand,
-		opc_goto,
-		opc_imgol,
-		opc_imgul,
-		opc_imgolorig,
-		opc_switchul,
-		opc___0c,
-		opc_imgoluselo,
-		opc_imguluselo,
-		opc_sprol,
-		opc_highsprol,
-		opc_lowsprul,
-		opc_uflunstable,
-		opc_spruluselo,
-		opc_sprul,
-		opc_sproluselo,
-		opc_end,
-		opc_setflipstate,
-		opc_playsnd,
-		opc_playsndrand,
-		opc_playsndbtwn,
-		opc_domissiledmg,
-		opc_attackmelee,
-		opc_followmaingraphic,
-		opc_randcondjmp,
-		opc_turnccwise,
-		opc_turncwise,
-		opc_turn1cwise,
-		opc_turnrand,
-		opc_setspawnframe,
-		opc_sigorder,
-		opc_attackwith,
-		opc_attack,
-		opc_castspell,
-		opc_useweapon,
-		opc_move,
-		opc_gotorepeatattk,
-		opc_engframe,
-		opc_engset,
-		opc___2d,
-		opc_nobrkcodestart,
-		opc_nobrkcodeend,
-		opc_ignorerest,
-		opc_attkshiftproj,
-		opc_tmprmgraphicstart,
-		opc_tmprmgraphicend,
-		opc_setfldirect,
-		opc_call,
-		opc_return,
-		opc_setflspeed,
-		opc_creategasoverlays,
-		opc_pwrupcondjmp,
-		opc_trgtrangecondjmp,
-		opc_trgtarccondjmp,
-		opc_curdirectcondjmp,
-		opc_imgulnextid,
-		opc___3e,
-		opc_liftoffcondjmp,
-		opc_warpoverlay,
-		opc_orderdone,
-		opc_grdsprol,
-		opc___43,
-		opc_dogrddamage
-	};
-};
-namespace iscript_anims {
-	enum {
-		Init,
-		Death,
-		GndAttkInit,
-		AirAttkInit,
-		Unused1,
-		GndAttkRpt,
-		AirAttkRpt,
-		CastSpell,
-		GndAttkToIdle,
-		AirAttkToIdle,
-		Unused2,
-		Walking,
-		WalkingToIdle,
-		SpecialState1,
-		SpecialState2,
-		AlmostBuilt,
-		Built,
-		Landing,
-		LiftOff,
-		IsWorking,
-		WorkingToIdle,
-		WarpIn,
-		Unused3,
-		StarEditInit,
-		Disable,
-		Burrow,
-		UnBurrow,
-		Enable
-	};
-};
-
-struct iscript_t {
-	struct script {
-		int id;
-		a_vector<size_t> animation_pc;
-	};
-	a_unordered_map<int, script> scripts;
-	a_vector<int> program_data;
-};
-
-struct grp_t {
-	struct frame_t {
-		int left;
-		int top;
-		int right;
-		int bottom;
-	};
-	int width;
-	int height;
-	a_vector<frame_t> frames;
 };
 
 //
@@ -192,7 +60,7 @@ struct image_t: link_base {
 		palette_type_hallucination = 16
 	};
 
-	int image_id;
+	const image_type_t*image_type;
 	int palette_type;
 	int direction;
 	int flags;
@@ -215,7 +83,7 @@ struct sprite_t: link_base {
 		return this;
 	}
 
-	int sprite_id;
+	const sprite_type_t*sprite_type;
 	int owner;
 	int selection_index;
 	int visibility_flags;
@@ -223,6 +91,8 @@ struct sprite_t: link_base {
 	int flags;
 	int selection_timer;
 	int index;
+	int width;
+	int height;
 	xy position;
 	image_t*main_image;
 	intrusive_list<image_t, default_link_f> images;
@@ -244,7 +114,7 @@ struct flingy_t: link_base {
 	int current_direction1;
 	int flingy_turn_radius;
 	int velocity_direction1;
-	int flingy_id;
+	const flingy_type_t*flingy_type;
 	int unknown_0x026;
 	int flingy_movement_type;
 	xy position;
@@ -285,7 +155,7 @@ struct unit_t: flingy_t {
 	}
 
 	int shield_points;
-	int unit_type;
+	const unit_type_t*unit_type;
 
 	std::pair<unit_t*, unit_t*> player_units_link;
 
@@ -347,62 +217,64 @@ struct unit_t: flingy_t {
 			int unknown_04;
 			int flag_spawn_frame;
 		} beacon;
-
-		struct {
-			unit_t*powerup;
-			xy target_resource;
-			unit_t*target_resource_unit;
-			int repair_resource_loss_timer;
-			bool is_carrying_something;
-			int resource_carry_count;
-			unit_t*harvest_target;
-			std::pair<unit_t*, unit_t*> gather_link;
-		} worker;
-		struct worker_gather_link {
-			auto*operator()(unit_t*ptr) {
-				return &ptr->worker.gather_link;
-			}
-		};
-
-		struct {
-			unit_t*addon;
-			int addon_build_type;
-			int upgrade_research_time;
-			int tech_type;
-			int upgrade_type;
-			int larva_timer;
-			int landing_timer;
-			int creep_timer;
-			int upgrade_level;
-			union {
-				struct {
-					int resource_count;
-					int resource_iscript;
-					int gather_queue_count;
-					intrusive_list<unit_t, worker_gather_link> gather_queue;
-					int resource_group;
-					bool resource_belongs_to_ai;
-				} resource;
-				struct {
-					unit_t*exit;
-				} nydus;
-				struct {
-					sprite_t*nuke_dot;
-				} ghost;
-				struct {
-					sprite_t*pylon_aura;
-				} pylon;
-				struct {
-					unit_t*nuke;
-					bool ready;
-				} silo;
-				
-				struct {
-					xy origin;
-				} powerup;
-			};
-		} building;
 	};
+
+	struct {
+		unit_t*powerup;
+		xy target_resource;
+		unit_t*target_resource_unit;
+		int repair_resource_loss_timer;
+		bool is_carrying_something;
+		int resource_carry_count;
+		unit_t*harvest_target;
+		std::pair<unit_t*, unit_t*> gather_link;
+	} worker;
+	struct worker_gather_link {
+		auto*operator()(unit_t*ptr) {
+			return &ptr->worker.gather_link;
+		}
+	};
+
+	struct building_t {
+		building_t() {}
+		unit_t*addon;
+		int addon_build_type;
+		int upgrade_research_time;
+		int tech_type;
+		int upgrade_type;
+		int larva_timer;
+		int landing_timer;
+		int creep_timer;
+		int upgrade_level;
+		union {
+			struct {
+				int resource_count;
+				int resource_iscript;
+				int gather_queue_count;
+				intrusive_list<unit_t, worker_gather_link> gather_queue;
+				int resource_group;
+				bool resource_belongs_to_ai;
+			} resource;
+			struct {
+				unit_t*exit;
+			} nydus;
+			struct {
+				sprite_t*nuke_dot;
+			} ghost;
+			struct {
+				sprite_t*pylon_aura;
+			} pylon;
+			struct {
+				unit_t*nuke;
+				bool ready;
+			} silo;
+
+			struct {
+				xy origin;
+			} powerup;
+		};
+	} building;
+
 
 	int status_flags;
 	int resource_type;

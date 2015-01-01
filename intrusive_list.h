@@ -85,7 +85,7 @@ struct intrusive_list {
 			ptr = link_T()(ptr)->second;
 			return *this;
 		}
-		this_t& operator++(int) {
+		this_t operator++(int) {
 			auto r = *this;
 			ptr = link_T()(ptr)->second;
 			return r;
@@ -206,6 +206,9 @@ public:
 		link_T()(prev)->second = next;
 		link_T()(next)->first = prev;
 		return iterator(*next);
+	}
+	void remove(reference v) {
+		erase(iterator(v));
 	}
 	void push_back(reference v) {
 		insert(end(), v);
