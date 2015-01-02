@@ -12,8 +12,6 @@ struct unit_id {
 	}
 };
 
-#include "bwdat.h"
-
 #include "bwenums.h"
 
 namespace bwgame {
@@ -331,52 +329,74 @@ struct state_functions {
 		}
 	};
 
-	bool Completed(unit_t*u) {
-		return !!(u->status_flags&StatusFlags::Completed);
+	bool ut_flag(unit_t*u, unit_type_t::flags_t flag) {
+		return !!(u->unit_type->flags & flag);
 	};
-	bool InBuilding(unit_t*u) {
-		return !!(u->status_flags&StatusFlags::InBuilding);
+	bool u_status_flag(unit_t*u, unit_t::status_flags_t flag) {
+		return !!(u->status_flags & flag);
 	};
-	bool Unmovable(unit_t*u) {
-		return !!(u->status_flags&StatusFlags::Unmovable);
-	};
-	bool Burrowed(unit_t*u) {
-		return !!(u->status_flags&StatusFlags::Burrowed);
-	};
-	bool IsABuilding(unit_t*u) {
-		return !!(u->status_flags&StatusFlags::IsABuilding);
-	};
-	bool IsAUnit(unit_t*u) {
-		return !!(u->status_flags&StatusFlags::IsAUnit);
-	};
-	bool GroundedBuilding(unit_t*u) {
-		return !!(u->status_flags&StatusFlags::GroundedBuilding);
-	};
-	bool IsHallucination(unit_t*u) {
-		return !!(u->status_flags&StatusFlags::IsHallucination);
-	};
-	bool InAir(unit_t*u) {
-		return !!(u->status_flags&StatusFlags::InAir);
+	bool st_flag(sprite_t*s, sprite_type_t::flags_t flag) {
+		return !!(s->sprite_type->flags & flag);
 	};
 
-	bool SA_Subunit(unit_t*u) {
-		return !!(u->unit_type->flags & UnitPrototypeFlags::Subunit);
+	bool u_completed(unit_t*u) {
+		return u_status_flag(u, unit_t::status_flag_completed);
 	};
-	bool SA_Worker(unit_t*u) {
-		return !!(u->unit_type->flags & UnitPrototypeFlags::Worker);
+	bool u_in_building(unit_t*u) {
+		return u_status_flag(u, unit_t::status_flag_in_building);
 	};
-	bool SA_Hero(unit_t*u) {
-		return !!(u->unit_type->flags & UnitPrototypeFlags::Hero);
+	bool u_immovable(unit_t*u) {
+		return u_status_flag(u, unit_t::status_flag_immovable);
 	};
-	bool SA_Building(unit_t*u) {
-		return !!(u->unit_type->flags & UnitPrototypeFlags::Building);
+	bool u_burrowed(unit_t*u) {
+		return u_status_flag(u, unit_t::status_flag_burrowed);
 	};
-	bool SA_Flyer(unit_t*u) {
-		return !!(u->unit_type->flags & UnitPrototypeFlags::Flyer);
+	bool u_not_building(unit_t*u) {
+		return u_status_flag(u, unit_t::status_flag_not_building);
+	};
+	bool u_can_attack(unit_t*u) {
+		return u_status_flag(u, unit_t::status_flag_can_attack);
+	};
+	bool u_grounded_building(unit_t*u) {
+		return u_status_flag(u, unit_t::status_flag_grounded_building);
+	};
+	bool u_hallucination(unit_t*u) {
+		return u_status_flag(u, unit_t::status_flag_hallucination);
+	};
+	bool u_flying(unit_t*u) {
+		return u_status_flag(u, unit_t::status_flag_flying);
+	};
+	bool u_speed_upgrade(unit_t*u) {
+		return u_status_flag(u, unit_t::status_flag_speed_upgrade);
+	};
+	bool u_cooldown_upgrade(unit_t*u) {
+		return u_status_flag(u, unit_t::status_flag_cooldown_upgrade);
 	};
 
-	bool SPR_Hidden(sprite_t*sprite) {
-		return !!(sprite->flags&SpriteFlags::Hidden);
+	bool ut_has_turret(unit_t*u) {
+		return ut_flag(u, unit_type_t::flag_has_turret);
+	};
+	bool ut_worker(unit_t*u) {
+		return ut_flag(u, unit_type_t::flag_worker);
+	};
+	bool ut_hero(unit_t*u) {
+		return ut_flag(u, unit_type_t::flag_hero);
+	};
+	bool ut_building(unit_t*u) {
+		return ut_flag(u, unit_type_t::flag_building);
+	};
+	bool ut_flyer(unit_t*u) {
+		return ut_flag(u, unit_type_t::flag_flyer);
+	};
+	bool ut_can_attack(unit_t*u) {
+		return ut_flag(u, unit_type_t::flag_can_attack);
+	};
+	bool ut_invincible(unit_t*u) {
+		return ut_flag(u, unit_type_t::flag_invincible);
+	};
+
+	bool st_hidden(sprite_t*sprite) {
+		return st_flag(sprite, sprite_type_t::flag_hidden);
 	};
 
 	const unit_type_t*get_unit_type(int id) {
@@ -671,7 +691,7 @@ struct state_functions {
 
 	int unit_movepos_state(unit_t*u) {
 		if (u->sprite->position != u->move_target.pos) return 0;
-		return Unmovable(u) ? 2 : 1;
+		return u_immovable(u) ? 2 : 1;
 	};
 
 	bool unit_order_dead(unit_t*u) {
@@ -687,25 +707,25 @@ struct state_functions {
 			if (u->sprite->elevation_level) u->pathing_flags |= 1;
 			u->contour_bounds = { {0,0},{0,0} };
 			int next_state = UM_Lump;
-			if (!SA_Subunit(u) && InBuilding(u)) {
+			if (!ut_has_turret(u) && u_in_building(u)) {
 				next_state = UM_InitSeq;
 			} else if (!u->sprite || unit_order_dead(u)) {
 				next_state = UM_Lump;
-			} else if (InBuilding(u)) {
+			} else if (u_in_building(u)) {
 				next_state = UM_Bunker;
-			} else if (SPR_Hidden(u->sprite)) {
+			} else if (st_hidden(u->sprite)) {
 				if (u->movement_flags & MovementFlags::Accelerating || unit_movepos_state(u) == 0) {
 					// SetMoveTarget_xy(u)
 					// ...
 					xcept("todo hidden sprite pathing stuff");
 				}
 				next_state = UM_Hidden;
-			} else if (Burrowed(u)) {
+			} else if (u_burrowed(u)) {
 				next_state = UM_Lump;
 			}
 			// Doesn't this seems backwards? It sure does.
-			else if (IsABuilding(u)) next_state = u->pathing_flags & 1 ? UM_AtRest : UM_Flyer;
-			else if (IsAUnit(u)) next_state = SA_Subunit(u) ? UM_BldgTurret : UM_Turret;
+			else if (u_not_building(u)) next_state = u->pathing_flags & 1 ? UM_AtRest : UM_Flyer;
+			else if (u_can_attack(u)) next_state = ut_has_turret(u) ? UM_BldgTurret : UM_Turret;
 			else if (u->pathing_flags & 1 && (u->movement_flags & MovementFlags::Accelerating || unit_movepos_state(u) == 0)) next_state = UM_LumpWannabe;
 			u->movement_state = next_state;
 		};
@@ -722,14 +742,14 @@ struct state_functions {
 	};
 
 	bool is_transforming_zerg_building(unit_t*u) {
-		if (Completed(u)) return false;
+		if (u_completed(u)) return false;
 		int tt = u->build_queue[u->build_queue_slot];
 		return tt == UnitTypes::Zerg_Hive || tt == UnitTypes::Zerg_Lair || tt == UnitTypes::Zerg_Greater_Spire || tt == UnitTypes::Zerg_Spore_Colony || tt == UnitTypes::Zerg_Sunken_Colony;
 	};
 
 
 	int unit_sight_range2(unit_t*u, bool ignore_blindness) {
-		if (GroundedBuilding(u) && !Completed(u) && !is_transforming_zerg_building(u)) return 4;
+		if (u_grounded_building(u) && !u_completed(u) && !is_transforming_zerg_building(u)) return 4;
 		if (!ignore_blindness && u->is_blind) return 2;
 		if (u->unit_type->id == UnitTypes::Terran_Ghost && st.upgrade_levels[u->owner][UpgradeTypes::Ocular_Implants]) return 11;
 		if (u->unit_type->id == UnitTypes::Zerg_Overlord && st.upgrade_levels[u->owner][UpgradeTypes::Antennae]) return 11;
@@ -745,7 +765,7 @@ struct state_functions {
 	};
 
 	int unit_max_energy(unit_t*u) {
-		if (SA_Hero(u)) return 250 << 8;
+		if (ut_hero(u)) return 250 << 8;
 		auto energy_upgrade = [&]() {
 			switch (u->unit_type->id) {
 			case UnitTypes::Terran_Ghost: return UpgradeTypes::Moebius_Reactor;
@@ -770,18 +790,18 @@ struct state_functions {
 
 
 	bool visible_to_everyone(unit_t*u) {
-		if (SA_Worker(u)) {
+		if (ut_worker(u)) {
 			if (u->worker.powerup && u->worker.powerup->unit_type->id == UnitTypes::Powerup_Flag) return true;
 			else return false;
 		}
 		if (!u->unit_type->space_provided) return false;
 		if (u->unit_type->id == UnitTypes::Zerg_Overlord && !st.upgrade_levels[u->owner][UpgradeTypes::Ventral_Sacs]) return false;
-		if (IsHallucination(u)) return false;
+		if (u_hallucination(u)) return false;
 		for (auto idx : u->loaded_units) {
 			unit_t*lu = get_unit(idx);
 			if (!lu || !lu->sprite) continue;
 			if (unit_order_dead(lu)) continue;
-			if (!SA_Worker(lu)) continue;
+			if (!ut_worker(lu)) continue;
 			if (lu->worker.powerup && lu->worker.powerup->unit_type->id == UnitTypes::Powerup_Flag) return true;
 		}
 		return false;
@@ -876,7 +896,7 @@ struct state_functions {
 					visible_to |= st.shared_vision[i];
 				}
 			}
-			reveal_sight_at(u->sprite->position, unit_sight_range(u), visible_to, InAir(u));
+			reveal_sight_at(u->sprite->position, unit_sight_range(u), visible_to, u_flying(u));
 		}
 	};
 
@@ -1153,7 +1173,7 @@ struct state_functions {
 			// actually be used for anything.
 			if (!image) return (image_t*)nullptr;
 			
-			if (image->palette_type == 0 && iscript_unit && IsHallucination(iscript_unit)) {
+			if (image->palette_type == 0 && iscript_unit && u_hallucination(iscript_unit)) {
 				if (game_st.is_replay || iscript_unit->owner == game_st.local_player) {
 					set_image_palette_type(image, image_t::palette_type_hallucination);
 					image->coloring_data = 0;
@@ -1164,7 +1184,7 @@ struct state_functions {
 				set_image_direction(image, dir);
 			}
 			update_image_frame_index(image);
-			if (iscript_unit && (GroundedBuilding(iscript_unit) || Completed(iscript_unit))) {
+			if (iscript_unit && (u_grounded_building(iscript_unit) || u_completed(iscript_unit))) {
 				if (!image_type->draw_if_cloaked) {
 					hide_image(image);
 				} else if (image->palette_type==0) {
@@ -1415,7 +1435,7 @@ struct state_functions {
 		f->current_speed2 = 0;
 		f->flingy_top_speed = flingy_type->top_speed;
 		f->flingy_acceleration = flingy_type->acceleration;
-		f->flingy_turn_radius = flingy_type->turn_speed;
+		f->flingy_turn_rate = flingy_type->turn_rate;
 		f->flingy_movement_type = flingy_type->movement_type;
 
 		f->position = pos;
@@ -1442,6 +1462,56 @@ struct state_functions {
 		}
 
 		return true;
+	}
+
+	void update_unit_speed_upgrades(unit_t*u) {
+		auto speed_upgrade = [&]() {
+			switch (u->unit_type->id) {
+			case UnitTypes::Terran_Vulture:
+			case UnitTypes::Hero_Jim_Raynor_Vulture:
+				return UpgradeTypes::Ion_Thrusters;
+			case UnitTypes::Zerg_Overlord:
+				return UpgradeTypes::Pneumatized_Carapace;
+			case UnitTypes::Zerg_Zergling:
+				return UpgradeTypes::Metabolic_Boost;
+			case UnitTypes::Zerg_Hydralisk:
+				return UpgradeTypes::Muscular_Augments;
+			case UnitTypes::Protoss_Zealot:
+				return UpgradeTypes::Leg_Enhancements;
+			case UnitTypes::Protoss_Scout:
+				return UpgradeTypes::Gravitic_Thrusters;
+			case UnitTypes::Protoss_Shuttle:
+				return UpgradeTypes::Gravitic_Drive;
+			case UnitTypes::Protoss_Observer:
+				return UpgradeTypes::Gravitic_Boosters;
+			case UnitTypes::Zerg_Ultralisk:
+				return UpgradeTypes::Anabolic_Synthesis;
+			};
+			return UpgradeTypes::None;
+		};
+		bool cooldown = false;
+		if (u->unit_type->id == UnitTypes::Hero_Devouring_One) cooldown = true;
+		if (u->unit_type->id == UnitTypes::Zerg_Zergling && st.upgrade_levels[u->owner][UpgradeTypes::Adrenal_Glands]) cooldown = true;
+		bool speed = false;
+		int speed_upg = speed_upgrade();
+		if (speed_upg != UpgradeTypes::None && st.upgrade_levels[u->owner][speed_upg]) speed = true;
+		if (cooldown!=u_cooldown_upgrade(u) || speed!=u_speed_upgrade(u)) {
+			if (cooldown) u->status_flags |= unit_t::status_flag_cooldown_upgrade;
+			if (speed) u->status_flags |= unit_t::status_flag_speed_upgrade;
+			update_unit_speed(u);
+		}
+	}
+
+	void update_unit_speed(unit_t*u) {
+		
+		int movement_type = u->unit_type->flingy->movement_type;
+		if (movement_type != 0 && movement_type != 1) {
+			xcept("update_unit_speed");
+			
+		} else {
+			xcept("fixme update_unit_speed");
+		}
+
 	}
 
 	bool initialize_unit_type(unit_t*u, const unit_type_t*unit_type, xy pos, int owner) {
@@ -1473,11 +1543,52 @@ struct state_functions {
 		else u->energy = unit_max_energy(u) / 4;
 		// u->ai_action_flag = 0;
 		u->sprite->elevation_level = unit_type->elevation_level;
-		if (SA_Building(u)) u->status_flags |= StatusFlags::GroundedBuilding;
-		if (SA_Flyer(u)) u->status_flags |= StatusFlags::InAir;
+		if (ut_building(u)) u->status_flags |= unit_t::status_flag_grounded_building;
+		if (ut_flyer(u)) u->status_flags |= unit_t::status_flag_flying;
+		if (ut_can_attack(u)) u->status_flags |= unit_t::status_flag_can_attack;
+		if (ut_flag(u, (unit_type_t::flags_t)0x8000000)) u->status_flags |= 0x20000;
+		if (!ut_flyer(u)) u->status_flags |= 0x100000;
+		if (u->unit_type->elevation_level < 12) u->pathing_flags |= 1;
+		else u->pathing_flags &= 1;
+		if (ut_building(u)) {
+			u->building.addon = nullptr;
+			u->building.addon_build_type = nullptr;
+			u->building.upgrade_research_time = 0;
+			u->building.tech_type = nullptr;
+			u->building.upgrade_type = nullptr;
+			u->building.larva_timer = 0;
+			u->building.landing_timer = 0;
+			u->building.creep_timer = 0;
+			u->building.upgrade_level = 0;
+		}
+		u->path = nullptr;
+		u->movement_state = 0;
+		u->recent_order_timer = 0;
+		if (ut_invincible(u)) u->status_flags |= unit_t::status_flag_invincible;
+		else u->status_flags &= unit_t::status_flag_invincible;
 
+		// u->building_overlay_state = 0; xcept("fixme building overlay state needs damage graphic?");
 
-		xcept("initialize unit type please");
+		if (u->unit_type->build_time == 0) {
+			u->remaining_build_time = 1;
+			u->hp_construction_rate = 1;
+		} else {
+			u->remaining_build_time = u->unit_type->build_time;
+			u->hp_construction_rate = (u->unit_type->hitpoints - u->unit_type->hitpoints / 10 + u->unit_type->build_time - 1) / u->unit_type->build_time;
+			if (u->hp_construction_rate == 0) u->hp_construction_rate = 1;
+		}
+		if (u->unit_type->has_shield && u_grounded_building(u)) {
+			int max_shields = u->unit_type->shield_points << 8;
+			u->shield_points = max_shields / 10;
+			if (u->unit_type->build_time == 0) {
+				u->shield_construction_rate = 1;
+			} else {
+				u->shield_construction_rate = (max_shields - u->shield_points) / u->unit_type->build_time;
+				if (u->shield_construction_rate == 0) u->shield_construction_rate = 1;
+			}
+		}
+		update_unit_speed_upgrades(u);
+		update_unit_speed(u);
 
 		return true;
 	}
@@ -1500,7 +1611,7 @@ struct state_functions {
 		auto initialize_unit = [&]() {
 
 			u->order_queue.clear();
-
+			
 			u->auto_target_unit = nullptr;
 			u->connected_unit = nullptr;
 
@@ -1747,8 +1858,6 @@ struct game_load_functions : state_functions {
 	};
 
 	void calculate_unit_strengths() {
-
-
 
 		for (int idx = 0; idx < 228; ++idx) {
 

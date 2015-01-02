@@ -112,7 +112,7 @@ struct flingy_t: link_base {
 	xy next_target_waypoint;
 	int movement_flags;
 	int current_direction1;
-	int flingy_turn_radius;
+	int flingy_turn_rate;
 	int velocity_direction1;
 	const flingy_type_t*flingy_type;
 	int unknown_0x026;
@@ -154,6 +154,26 @@ struct unit_t: flingy_t {
 		return this;
 	}
 
+	enum status_flags_t : uint32_t {
+		status_flag_completed = 1,
+		status_flag_grounded_building = 2,
+		status_flag_flying = 4,
+
+		status_flag_burrowed = 0x10,
+		status_flag_in_building = 0x20,
+
+		status_flag_can_attack = 0x10000,
+		status_flag_not_building = 0x20000,
+
+		status_flag_immovable = 0x80000,
+
+		status_flag_invincible = 0x4000000,
+
+		status_flag_speed_upgrade = 0x10000000,
+		status_flag_cooldown_upgrade = 0x20000000,
+		status_flag_hallucination = 0x40000000,
+	};
+
 	int shield_points;
 	const unit_type_t*unit_type;
 
@@ -163,7 +183,7 @@ struct unit_t: flingy_t {
 	intrusive_list<order_t, default_link_f> order_queue;
 	unit_t*auto_target_unit;
 	unit_t*connected_unit;
-	unit_t*order_queue_count;
+	int order_queue_count;
 	int order_queue_timer;
 	int unknown_0x086;
 	int attack_notify_timer;
@@ -185,9 +205,9 @@ struct unit_t: flingy_t {
 	int build_queue_slot;
 	int unit_id_generation;
 	int secondary_order_id;
-	int building_overlay_state;
-	int hp_gain_during_repair;
-	int unknown_0x0aa;
+	// int building_overlay_state; fixme
+	int hp_construction_rate;
+	int shield_construction_rate;
 	int remaining_build_time;
 	int previous_hp;
 	std::array<unit_id, 8> loaded_units;
@@ -238,10 +258,10 @@ struct unit_t: flingy_t {
 	struct building_t {
 		building_t() {}
 		unit_t*addon;
-		int addon_build_type;
+		unit_type_t*addon_build_type;
 		int upgrade_research_time;
-		int tech_type;
-		int upgrade_type;
+		tech_type_t*tech_type;
+		upgrade_type_t*upgrade_type;
 		int larva_timer;
 		int landing_timer;
 		int creep_timer;
@@ -268,13 +288,11 @@ struct unit_t: flingy_t {
 				unit_t*nuke;
 				bool ready;
 			} silo;
-
 			struct {
 				xy origin;
 			} powerup;
 		};
 	} building;
-
 
 	int status_flags;
 	int resource_type;
