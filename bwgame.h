@@ -159,6 +159,8 @@ struct global_state {
 
 	a_vector<grp_t> grps;
 	a_vector<grp_t*> image_grp;
+	a_vector<a_vector<a_vector<xy>>> lo_offsets;
+	a_vector<std::array<a_vector<a_vector<xy>>*, 6>> image_lo_offsets;
 };
 
 struct game_state {
@@ -228,7 +230,7 @@ struct state_base {
 
 	int update_tiles_countdown;
 
-	std::array<int8_t, 12> selection_circle_color;
+	std::array<int, 12> selection_circle_color;
 
 	int order_timer_counter;
 	int secondary_order_timer_counter;
@@ -254,11 +256,18 @@ struct state_base {
 	};
 	std::array<player_t, 12> players;
 
-	std::array<std::array<int8_t, 61>, 12> upgrade_levels;
+	std::array<std::array<int, 61>, 12> upgrade_levels;
 	std::array<std::array<bool, 44>, 12> tech_researched;
 
-	// rearrange order 228 12 ?
-	std::array<std::array<int32_t, 12>, 228> completed_unit_count;
+	std::array<std::array<int, 228>, 12> unit_counts;
+	std::array<std::array<int, 228>, 12> completed_unit_counts;
+
+	std::array<int, 12> factory_counts;
+	std::array<int, 12> building_counts;
+	std::array<int, 12> non_building_counts;
+
+	std::array<std::array<int, 12>, 3> supply_used;
+	std::array<std::array<int, 12>, 3> supply_available;
 
 	uint32_t local_mask;
 
@@ -310,7 +319,7 @@ struct state_functions {
 	const global_state&global_st = *st.global;
 	const game_state&game_st = *st.game;
 
-	state_functions(state&st) : st(st) {}
+	explicit state_functions(state&st) : st(st) {}
 
 	bool in_game_loop = false;
 	bool update_tiles = false;
@@ -327,6 +336,11 @@ struct state_functions {
 		~iscript_unit_setter() {
 			iscript_unit = prev_iscript_unit;
 		}
+	};
+
+	void u_set_status_flag(unit_t*u, unit_t::status_flags_t flag, bool value) {
+		if (value) u->status_flags |= flag;
+		else u->status_flags &= ~flag;
 	};
 
 	bool ut_flag(unit_t*u, unit_type_t::flags_t flag) {
@@ -373,8 +387,8 @@ struct state_functions {
 		return u_status_flag(u, unit_t::status_flag_cooldown_upgrade);
 	};
 
-	bool ut_has_turret(unit_t*u) {
-		return ut_flag(u, unit_type_t::flag_has_turret);
+	bool ut_is_turret(unit_t*u) {
+		return ut_flag(u, unit_type_t::flag_is_turret);
 	};
 	bool ut_worker(unit_t*u) {
 		return ut_flag(u, unit_type_t::flag_worker);
@@ -393,6 +407,9 @@ struct state_functions {
 	};
 	bool ut_invincible(unit_t*u) {
 		return ut_flag(u, unit_type_t::flag_invincible);
+	};
+	bool ut_two_units_in_one_egg(unit_t*u) {
+		return ut_flag(u, unit_type_t::flag_two_units_in_one_egg);
 	};
 
 	bool st_hidden(sprite_t*sprite) {
@@ -418,6 +435,15 @@ struct state_functions {
 		return u;
 	};
 
+	bool unit_type_spreads_creep(const unit_type_t*ut, bool include_non_evolving) {
+		if (ut->id == UnitTypes::Zerg_Hatchery && include_non_evolving) return true;
+		if (ut->id == UnitTypes::Zerg_Lair) return true;
+		if (ut->id == UnitTypes::Zerg_Hive) return true;
+		if (ut->id == UnitTypes::Zerg_Creep_Colony && include_non_evolving) return true;
+		if (ut->id == UnitTypes::Zerg_Spore_Colony) return true;
+		if (ut->id == UnitTypes::Zerg_Sunken_Colony) return true;
+		return false;
+	}
 
 	void setAllImageGroupFlagsPal11(sprite_t*sprite) {
 		for (image_t*img : sprite->images) {
@@ -475,17 +501,17 @@ struct state_functions {
 		}
 	};
 
-	bool is_frozen_or_in_air(unit_t*u) {
-		if (u->status_flags&StatusFlags::InAir) return true;
+	bool is_frozen_or_flying(unit_t*u) {
+		if (u_flying(u)) return true;
 		if (u->lockdown_timer) return true;
 		if (u->stasis_timer) return true;
 		if (u->maelstrom_timer) return true;
 		return false;
 	};
 
-	void set_buttonset(unit_t*u, int type) {
-		if (type != UnitTypes::None && ~u->unit_type->flags & UnitPrototypeFlags::Building) {
-			if (is_frozen_or_in_air(u)) return;
+	void set_current_button_set(unit_t*u, int type) {
+		if (type != UnitTypes::None && !ut_building(u)) {
+			if (is_frozen_or_flying(u)) return;
 		}
 		u->current_button_set = type;
 	};
@@ -498,7 +524,7 @@ struct state_functions {
 	};
 
 	void freeze_effect_end(unit_t*u, int first, int last) {
-		bool still_frozen = is_frozen_or_in_air(u);
+		bool still_frozen = is_frozen_or_flying(u);
 		if (u->subunit && !still_frozen) {
 			u->status_flags &= ~StatusFlags::DoodadStatesThing;
 			xcept("freeze_effect_end: orderComputer_cl");
@@ -524,7 +550,7 @@ struct state_functions {
 
 	void remove_stasis(unit_t*u) {
 		u->stasis_timer = 0;
-		set_buttonset(u, u->unit_type->id);
+		set_current_button_set(u, u->unit_type->id);
 		if (~u->unit_type->flags & UnitPrototypeFlags::Invincible) {
 			u->status_flags &= ~StatusFlags::Invincible;
 		}
@@ -707,7 +733,7 @@ struct state_functions {
 			if (u->sprite->elevation_level) u->pathing_flags |= 1;
 			u->contour_bounds = { {0,0},{0,0} };
 			int next_state = UM_Lump;
-			if (!ut_has_turret(u) && u_in_building(u)) {
+			if (!ut_is_turret(u) && u_in_building(u)) {
 				next_state = UM_InitSeq;
 			} else if (!u->sprite || unit_order_dead(u)) {
 				next_state = UM_Lump;
@@ -723,9 +749,8 @@ struct state_functions {
 			} else if (u_burrowed(u)) {
 				next_state = UM_Lump;
 			}
-			// Doesn't this seems backwards? It sure does.
 			else if (u_not_building(u)) next_state = u->pathing_flags & 1 ? UM_AtRest : UM_Flyer;
-			else if (u_can_attack(u)) next_state = ut_has_turret(u) ? UM_BldgTurret : UM_Turret;
+			else if (u_can_attack(u)) next_state = ut_is_turret(u) ? UM_BldgTurret : UM_Turret;
 			else if (u->pathing_flags & 1 && (u->movement_flags & MovementFlags::Accelerating || unit_movepos_state(u) == 0)) next_state = UM_LumpWannabe;
 			u->movement_state = next_state;
 		};
@@ -743,7 +768,9 @@ struct state_functions {
 
 	bool is_transforming_zerg_building(unit_t*u) {
 		if (u_completed(u)) return false;
-		int tt = u->build_queue[u->build_queue_slot];
+		unit_type_t*t = u->build_queue[u->build_queue_slot];
+		if (!t) return false;
+		int tt = t->id;
 		return tt == UnitTypes::Zerg_Hive || tt == UnitTypes::Zerg_Lair || tt == UnitTypes::Zerg_Greater_Spire || tt == UnitTypes::Zerg_Spore_Colony || tt == UnitTypes::Zerg_Sunken_Colony;
 	};
 
@@ -951,7 +978,7 @@ struct state_functions {
 				}
 			}
 		}
-		if (st.completed_unit_count[UnitTypes::Spell_Disruption_Web][11]) {
+		if (st.completed_unit_counts[11][UnitTypes::Spell_Disruption_Web]) {
 			xcept("disruption web stuff");
 		}
 		// some_units_loaded_and_disruption_web end
@@ -1139,6 +1166,34 @@ struct state_functions {
 
 	}
 
+	xy get_image_lo_offset(image_t*image, int lo_index, int offset_index) {
+		int frame = image->frame_index;
+		auto&lo_offsets = global_st.image_lo_offsets.at(image->image_type->id);
+		if ((size_t)lo_index >= lo_offsets.size()) xcept("invalid lo index %d\n", lo_index);
+		auto&frame_offsets = *lo_offsets[lo_index];
+		if ((size_t)frame >= frame_offsets.size()) xcept("image %d lo_index %d does not offsets for frame %d", image->image_type->id, lo_index, frame);
+		if ((size_t)offset_index >= frame_offsets[frame].size()) xcept("image %d lo_index %d frame %d does not contain an offset at index %d", image->image_type->id, lo_index, frame, offset_index);
+		return frame_offsets[frame][offset_index];
+	}
+
+	int get_modified_unit_speed(unit_t*u, int base_speed) {
+		int speed = base_speed;
+		int mod = 0;
+		if (u->stim_timer) ++mod;
+		if (u_speed_upgrade(u)) ++mod;
+		if (u->ensnare_timer) ++mod;
+		if (mod < 0) speed /= 2;
+		if (mod > 0) {
+			if (u->unit_type->id == UnitTypes::Protoss_Scout || u->unit_type->id == UnitTypes::Hero_Mojo || u->unit_type->id == UnitTypes::Hero_Artanis) speed = (6 << 8) + ((1 << 8) - ((1 << 8) / 3)); // 1707, 6 + 2/3 rounded up (nearest)
+			else {
+				speed += speed / 2;
+				int min_speed = (3 << 8) + (1 << 8) / 3; // 3 + 1/3 rounded down (nearest)
+				if (speed < min_speed) speed = min_speed;
+			}
+		}
+		return speed;
+	}
+
 	void iscript_set_script(image_t*image, int script_id) {
 		auto i = global_st.iscript.scripts.find(script_id);
 		if (i == global_st.iscript.scripts.end()) {
@@ -1198,8 +1253,9 @@ struct state_functions {
 		const int*p = program_data + state.program_counter;
 		while (true) {
 			using namespace iscript_opcodes;
-			int opc = *p++ - 1;
-			log("iscript: %04x: opc %d\n", p - program_data, opc);
+			size_t pc = p - program_data;
+			int opc = *p++ - 0x808091;
+			log("iscript: %04x: opc %d\n", pc, opc);
 			int a, b, c;
 			switch (opc) {
 			case opc_playfram:
@@ -1247,7 +1303,7 @@ struct state_functions {
 				state.wait = a + (lcg_rand(3) % (b - a + 1)) - 1;
 				return true;
 			case opc_goto:
-				p = program_data + *p++;
+				p = program_data + *p;
 				break;
 			case opc_imgol:
 			case opc_imgul:
@@ -1268,7 +1324,19 @@ struct state_functions {
 					}
 				}
 				break;
-			case opc_imgoluselo:
+// 			case opc_imgoluselo:
+// 				a = *p++;
+// 				b = *p++;
+// 				if (no_side_effects) break;
+// 
+// 				break;
+			case opc_move:
+				a = *p++;
+				if (distance_moved) {
+					*distance_moved = get_modified_unit_speed(iscript_unit, a << 8);
+				}
+				if (no_side_effects) break;
+				xcept("opc_move");
 				break;
 			default:
 				xcept("iscript: unhandled opcode %d", opc);
@@ -1495,6 +1563,12 @@ struct state_functions {
 		bool speed = false;
 		int speed_upg = speed_upgrade();
 		if (speed_upg != UpgradeTypes::None && st.upgrade_levels[u->owner][speed_upg]) speed = true;
+		if (u->unit_type->id == UnitTypes::Hero_Hunter_Killer) speed = true;
+		if (u->unit_type->id == UnitTypes::Hero_Yggdrasill) speed = true;
+		if (u->unit_type->id == UnitTypes::Hero_Fenix_Zealot) speed = true;
+		if (u->unit_type->id == UnitTypes::Hero_Mojo) speed = true;
+		if (u->unit_type->id == UnitTypes::Hero_Artanis) speed = true;
+		if (u->unit_type->id == UnitTypes::Zerg_Lurker) speed = true;
 		if (cooldown!=u_cooldown_upgrade(u) || speed!=u_speed_upgrade(u)) {
 			if (cooldown) u->status_flags |= unit_t::status_flag_cooldown_upgrade;
 			if (speed) u->status_flags |= unit_t::status_flag_speed_upgrade;
@@ -1506,12 +1580,76 @@ struct state_functions {
 		
 		int movement_type = u->unit_type->flingy->movement_type;
 		if (movement_type != 0 && movement_type != 1) {
-			xcept("update_unit_speed");
-			
+			if (u->flingy_movement_type==2) {
+				image_t*image = u->sprite->main_image;
+				if (!image) xcept("null image");
+				auto*script = image->iscript_state.current_script;
+				auto&anims_pc = script->animation_pc;
+				int anim = iscript_anims::Walking;
+				// BW just returns if the animation doesn't exist,
+				// so this could be changed to a return statement if it throws
+				if ((size_t)anim >= anims_pc.size()) xcept("script %d does not have animation %d", script->id, anim);
+				iscript_unit_setter ius(this, u);
+				iscript_state_t st;
+				st.current_script = script;
+				st.animation = anim;
+				st.program_counter = anims_pc[anim];
+				st.return_address = 0;
+				st.wait = 0;
+				int total_distance_moved = 0;
+				for (int i = 0; i < 32;++i) {
+					int distance_moved = 0;
+					iscript_execute(image, st, true, &distance_moved);
+					int mod = 0;
+					if (u->stim_timer) ++mod;
+					if (u_speed_upgrade(u)) ++mod;
+					if (u->ensnare_timer) --mod;
+					if (mod < 0) distance_moved -= distance_moved / 4;
+					if (mod > 0) distance_moved *= 2;
+					total_distance_moved += distance_moved;
+				}
+				int avg_distance_moved = total_distance_moved / 32;
+				u->flingy_top_speed = avg_distance_moved;
+				log("avg_distance_moved is %d\n", avg_distance_moved);
+			}
 		} else {
 			xcept("fixme update_unit_speed");
 		}
 
+	}
+
+	void increment_unit_counts(unit_t*u, int count) {
+		if (u_hallucination(u)) return;
+		if (ut_is_turret(u)) return;
+
+		st.unit_counts[u->owner][u->unit_type->id] += count;
+		int supply_required = u->unit_type->supply_required;
+		if (u->unit_type->staredit_group_flags & GroupFlags::Zerg) {
+			const unit_type_t*ut = u->unit_type;
+			if (ut->id==UnitTypes::Zerg_Egg || ut->id==UnitTypes::Zerg_Cocoon || ut->id==UnitTypes::Zerg_Lurker_Egg) {
+				ut = u->build_queue[u->build_queue_slot];
+				if (ut_two_units_in_one_egg(u)) supply_required *= 2;
+			}
+			st.supply_used[0][u->owner] += supply_required * count;
+		} else if (u->unit_type->staredit_group_flags&GroupFlags::Terran) {
+			st.supply_used[1][u->owner] += supply_required * count;
+		} else {
+			st.supply_used[2][u->owner] += supply_required * count;
+		}
+		if (u->unit_type->staredit_group_flags & GroupFlags::Factory) st.factory_counts[u->owner] += count;
+		if (u->unit_type->staredit_group_flags & GroupFlags::Men) {
+			st.non_building_counts[u->owner] += count;
+		} else if (u->unit_type->staredit_group_flags & GroupFlags::Building) st.building_counts[u->owner] += count;
+		else if (u->unit_type->id == UnitTypes::Zerg_Egg || u->unit_type->id == UnitTypes::Zerg_Cocoon || u->unit_type->id == UnitTypes::Zerg_Lurker_Egg) {
+			st.non_building_counts[u->owner] += count;
+		}
+
+	}
+
+	void update_unit_finder(unit_t*u) {
+
+		xcept("update unit finder");
+		
 	}
 
 	bool initialize_unit_type(unit_t*u, const unit_type_t*unit_type, xy pos, int owner) {
@@ -1543,13 +1681,13 @@ struct state_functions {
 		else u->energy = unit_max_energy(u) / 4;
 		// u->ai_action_flag = 0;
 		u->sprite->elevation_level = unit_type->elevation_level;
-		if (ut_building(u)) u->status_flags |= unit_t::status_flag_grounded_building;
-		if (ut_flyer(u)) u->status_flags |= unit_t::status_flag_flying;
-		if (ut_can_attack(u)) u->status_flags |= unit_t::status_flag_can_attack;
-		if (ut_flag(u, (unit_type_t::flags_t)0x8000000)) u->status_flags |= 0x20000;
-		if (!ut_flyer(u)) u->status_flags |= 0x100000;
+		u_set_status_flag(u, unit_t::status_flag_grounded_building, ut_building(u));
+		u_set_status_flag(u, unit_t::status_flag_flying, ut_flyer(u));
+		u_set_status_flag(u, unit_t::status_flag_can_attack, ut_can_attack(u));
+		u_set_status_flag(u, (unit_t::status_flags_t)0x20000, ut_flag(u, (unit_type_t::flags_t)0x8000000));
+		u_set_status_flag(u, (unit_t::status_flags_t)0x100000, !ut_flyer(u));
 		if (u->unit_type->elevation_level < 12) u->pathing_flags |= 1;
-		else u->pathing_flags &= 1;
+		else u->pathing_flags &= ~1;
 		if (ut_building(u)) {
 			u->building.addon = nullptr;
 			u->building.addon_build_type = nullptr;
@@ -1564,8 +1702,7 @@ struct state_functions {
 		u->path = nullptr;
 		u->movement_state = 0;
 		u->recent_order_timer = 0;
-		if (ut_invincible(u)) u->status_flags |= unit_t::status_flag_invincible;
-		else u->status_flags &= unit_t::status_flag_invincible;
+		u_set_status_flag(u, unit_t::status_flag_invincible, ut_invincible(u));
 
 		// u->building_overlay_state = 0; xcept("fixme building overlay state needs damage graphic?");
 
@@ -1593,75 +1730,153 @@ struct state_functions {
 		return true;
 	}
 
+	void destroy_unit(unit_t*u) {
+
+		xcept("destroy unit %p\n", u);
+		
+	}
+
 	unit_t*create_unit(const unit_type_t*unit_type, xy pos, int owner) {
 		if (!unit_type) xcept("attempt to create unit of null type");
 
 		if (in_game_loop) {
 			lcg_rand(14);
 		}
-		if (st.free_units.empty()) {
-			error_string(61); // Cannot create more units
-			return nullptr;
-		}
-		if (!is_in_bounds(unit_type, pos)) {
-			error_string(0);
-			return nullptr;
-		}
-		unit_t*u = st.free_units.front();
-		auto initialize_unit = [&]() {
+		auto get_new = [&](const unit_type_t*unit_type) {
+			if (st.free_units.empty()) {
+				error_string(61); // Cannot create more units
+				return (unit_t*)nullptr;
+			}
+			if (!is_in_bounds(unit_type, pos)) {
+				error_string(0);
+				return (unit_t*)nullptr;
+			}
+			unit_t*u = st.free_units.front();
+			auto initialize_unit = [&]() {
 
-			u->order_queue.clear();
-			
-			u->auto_target_unit = nullptr;
-			u->connected_unit = nullptr;
+				u->order_queue.clear();
 
-			u->order_queue_count = 0;
-			u->order_queue_timer = 0;
-			u->unknown_0x086 = 0;
-			u->attack_notify_timer = 0;
-			u->displayed_unit_id = 0;
-			u->last_event_timer = 0;
-			u->last_event_color = 0;
-			//u->unused_0x08C = 0;
-			u->rank_increase = 0;
-			u->kill_count = 0;
+				u->auto_target_unit = nullptr;
+				u->connected_unit = nullptr;
 
-			u->remove_timer = 0;
-			u->defense_matrix_damage = 0;
-			u->defense_matrix_timer = 0;
-			u->stim_timer = 0;
-			u->ensnare_timer = 0;
-			u->lockdown_timer = 0;
-			u->irradiate_timer = 0;
-			u->stasis_timer = 0;
-			u->plague_timer = 0;
-			u->storm_timer = 0;
-			u->irradiated_by = nullptr;
-			u->irradiate_owner = 0;
-			u->parasite_flags = 0;
-			u->cycle_counter = 0;
-			u->is_blind = 0;
-			u->maelstrom_timer = 0;
-			u->unused_0x125 = 0;
-			u->acid_spore_count = 0;
-			for (auto&v : u->acid_spore_time) v = 0;
-			u->status_flags = 0;
-			u->user_action_flags = 0;
-			u->pathing_flags = 0;
-			u->previous_hp = 0;
-			u->ai = nullptr;
+				u->order_queue_count = 0;
+				u->order_queue_timer = 0;
+				u->unknown_0x086 = 0;
+				u->attack_notify_timer = 0;
+				u->displayed_unit_id = 0;
+				u->last_event_timer = 0;
+				u->last_event_color = 0;
+				//u->unused_0x08C = 0;
+				u->rank_increase = 0;
+				u->kill_count = 0;
 
-			if (!initialize_unit_type(u, unit_type, pos, owner)) return false;
-			xcept("unit type initialized");
+				u->remove_timer = 0;
+				u->defense_matrix_damage = 0;
+				u->defense_matrix_timer = 0;
+				u->stim_timer = 0;
+				u->ensnare_timer = 0;
+				u->lockdown_timer = 0;
+				u->irradiate_timer = 0;
+				u->stasis_timer = 0;
+				u->plague_timer = 0;
+				u->storm_timer = 0;
+				u->irradiated_by = nullptr;
+				u->irradiate_owner = 0;
+				u->parasite_flags = 0;
+				u->cycle_counter = 0;
+				u->is_blind = 0;
+				u->maelstrom_timer = 0;
+				u->unused_0x125 = 0;
+				u->acid_spore_count = 0;
+				for (auto&v : u->acid_spore_time) v = 0;
+				u->status_flags = 0;
+				u->user_action_flags = 0;
+				u->pathing_flags = 0;
+				u->previous_hp = 0;
+				u->ai = nullptr;
 
-			return true;
+				if (!initialize_unit_type(u, unit_type, pos, owner)) return false;
+
+				u->build_queue.fill(nullptr);
+				u->unit_id_generation = (u->unit_id_generation + 1) % (1 << 5);
+				auto produces_units = [&]() {
+					if (u->unit_type->id == UnitTypes::Terran_Command_Center) return true;
+					if (u->unit_type->id == UnitTypes::Terran_Barracks) return true;
+					if (u->unit_type->id == UnitTypes::Terran_Factory) return true;
+					if (u->unit_type->id == UnitTypes::Terran_Starport) return true;
+					if (u->unit_type->id == UnitTypes::Zerg_Infested_Command_Center) return true;
+					if (u->unit_type->id == UnitTypes::Zerg_Hatchery) return true;
+					if (u->unit_type->id == UnitTypes::Zerg_Lair) return true;
+					if (u->unit_type->id == UnitTypes::Zerg_Hive) return true;
+					if (u->unit_type->id == UnitTypes::Protoss_Nexus) return true;
+					if (u->unit_type->id == UnitTypes::Protoss_Gateway) return true;
+					return false;
+				};
+				if (!is_frozen_or_flying(u) || u_completed(u)) {
+					if (produces_units()) u->current_button_set = UnitTypes::Factories;
+					else u->current_button_set = UnitTypes::Buildings;
+				}
+				if (in_game_loop) u->wireframe_randomizer = lcg_rand(15);
+				else u->wireframe_randomizer = 0;
+				if (ut_is_turret(u)) u->hp = 1;
+				else u->hp = u->unit_type->hitpoints / 10;
+				if (u_grounded_building(u)) u->order_id = Orders::Nothing;
+				else u->order_id = u->unit_type->human_ai_idle;
+				// secondary_order_id is uninitialized
+				if (u->secondary_order_id != Orders::Nothing) {
+					u->secondary_order_id = Orders::Nothing;
+					u->secondary_order_unk_a = 0;
+					u->secondary_order_unk_b = 0;
+					u->current_build_unit = nullptr;
+					u->secondary_order_state = 0;
+				}
+				u->finder = { {-1,-1}, {-1,-1} };
+				st.player_units[owner].push_front(*u);
+				increment_unit_counts(u, 1);
+
+				if (u_grounded_building(u)) {
+					update_unit_finder(u);
+				} else {
+					if (unit_type->id==UnitTypes::Terran_Vulture || unit_type->id==UnitTypes::Hero_Jim_Raynor_Vulture) {
+						u->vulture.spider_mine_count = 0;
+					}
+					u->sprite->flags |= sprite_t::flag_hidden;
+					set_sprite_visibility(u->sprite, 0);
+				}
+				u->visibility_flags = ~0;
+				if (ut_is_turret(u)) {
+					u->sprite->flags |= 0x10;
+				} else {
+					if (~u->sprite->flags & sprite_t::flag_hidden) {
+						refresh_unit_vision(u);
+					}
+				}
+
+				return true;
+			};
+			if (!initialize_unit()) {
+				error_string(62); // Unable to create unit
+				return (unit_t*)nullptr;
+			}
+			st.free_units.pop_front();
+			return u;
 		};
-		if (!initialize_unit()) {
-			error_string(62); // Unable to create unit
-			return nullptr;
+		unit_t*u = get_new(unit_type);
+		if (u_grounded_building(u)) bw_insert_list(st.visible_units, *u);
+		else bw_insert_list(st.hidden_units, *u);
+
+		if (unit_type->id < UnitTypes::Terran_Command_Center && unit_type->turret_unit_type) {
+			unit_t*su = get_new(unit_type->turret_unit_type);
+			if (!su) {
+				destroy_unit(u);
+				return nullptr;
+			}
+			u->subunit = su;
+			su->subunit = u;
+			set_image_offset(u->sprite->main_image, get_image_lo_offset(u->sprite->main_image, 0, 2));
+		} else {
+			u->subunit = nullptr;
 		}
-		st.free_units.pop_front();
-		xcept("create unit %p", u);
 
 		return u;
 	}
@@ -1673,7 +1888,14 @@ struct state_functions {
 
 	unit_t*create_initial_unit(const unit_type_t*unit_type, xy pos, int owner) {
 		unit_t*u = create_unit(unit_type, pos, owner);
-		xcept("create_initial_unit %p", u);
+		if (!u) {
+			log("fixme: display last error (%d)\n", st.last_error);
+			return nullptr;
+		}
+		if (unit_type_spreads_creep(unit_type, true) || unit_type->flags&unit_type_t::flag_creep) {
+			xcept("apply creep");
+		}
+		xcept("create_initial_unit %p\n", u);
 	}
 
 };
@@ -1688,7 +1910,7 @@ void advance(state&st) {
 
 struct game_load_functions : state_functions {
 
-	game_load_functions(state&st) : state_functions(st) {}
+	explicit game_load_functions(state&st) : state_functions(st) {}
 
 	game_state&game_st = *st.game;
 
@@ -1765,6 +1987,16 @@ struct game_load_functions : state_functions {
 		st.upgrade_levels.fill({});
 		// upgrade progress?
 		// UPRP stuff?
+
+		for (auto&v : st.unit_counts) v.fill(0);
+		for (auto&v : st.completed_unit_counts) v.fill(0);
+
+		st.factory_counts.fill(0);
+		st.building_counts.fill(0);
+		st.non_building_counts.fill(0);
+
+		for (auto&v : st.supply_used) v.fill(0);
+		for (auto&v : st.supply_available) v.fill(0);
 
 		auto set_acquisition_ranges = [&]() {
 			for (int i = 0; i < 228; ++i) {
@@ -2702,7 +2934,7 @@ void global_init(global_state&st) {
 						size_t opcode = r.get<uint8_t>();
 						if (opcode >= ins_data.size()) xcept("iscript load: at 0x%04x: invalid instruction %d", cur_address, opcode);
 						//log("0x%04x (0x%x): opcode %d\n", cur_address, pc, opcode);
-						program_data.push_back(opcode + 1);
+						program_data.push_back(opcode + 0x808091);
 						const char*c = ins_data[opcode];
 						while (*c) {
 							if (*c == 's') {
@@ -2787,11 +3019,9 @@ void global_init(global_state&st) {
 		size_t file_count = r.get<uint16_t>();
 
 		a_vector<grp_t> grps;
+		a_vector<a_vector<a_vector<xy>>> lo_offsets;
 
-		auto load_grp = [&](a_string fn) {
-			a_vector<uint8_t> data;
-			load_data_file(data, format("unit\\%s", fn));
-			data_reader_le r(data.data(), data.data() + data.size());
+		auto load_grp = [&](data_reader_le r) {
 			grp_t grp;
 			size_t frame_count = r.get<uint16_t>();
 			grp.width = r.get<uint16_t>();
@@ -2805,48 +3035,82 @@ void global_init(global_state&st) {
 				f.bottom = r.get<int8_t>();
 				size_t file_offset = r.get<uint32_t>();
 			}
-			return grp;
+			size_t index = grps.size();
+			grps.push_back(std::move(grp));
+			return index;
 		};
+		auto load_offsets = [&](data_reader_le r) {
+			auto base_r = r;
+			lo_offsets.emplace_back();
+			auto&offs = lo_offsets.back();
+
+			size_t frame_count = r.get<uint32_t>();
+			size_t offset_count = r.get<uint32_t>();
+			for (size_t f = 0; f < frame_count; ++f) {
+				size_t file_offset = r.get<uint32_t>();
+				auto r2 = base_r;
+				r2.skip(file_offset);
+				offs.emplace_back();
+				auto&vec = offs.back();
+				vec.resize(offset_count);
+				for (size_t i = 0; i < offset_count; ++i) {
+					int x = r2.get<int8_t>();
+					int y = r2.get<int8_t>();
+					vec[i] = { x,y };
+				}
+			}
+			
+			return (size_t)0;
+		};
+
 		a_unordered_map<size_t, size_t> loaded;
-		auto load = [&](size_t index) {
+		auto load = [&](int index, std::function<size_t(data_reader_le)> f) {
 			if (!index) return (size_t)0;
 			auto in = loaded.emplace(index, 0);
 			if (!in.second) return in.first->second;
-			--index;
-			log("index is %d\n", index);
 			auto r = base_r;
-			r.skip(2 + index * 2);
+			r.skip(2 + (index - 1) * 2);
 			size_t fn_offset = r.get<uint16_t>();
 			r = base_r;
 			r.skip(fn_offset);
 			a_string fn;
 			while (char c = r.get<char>()) fn += c;
 
-			size_t grps_index = grps.size();
-			in.first->second = grps_index;
-			grps.push_back(load_grp(fn));
-			return grps_index;
+			a_vector<uint8_t> data;
+			load_data_file(data, format("unit\\%s", fn));
+			data_reader_le data_r(data.data(), data.data() + data.size());
+			size_t loaded_index = f(data_r);
+			in.first->second = loaded_index;
+			return loaded_index;
 		};
 
 		a_vector<size_t> image_grp_index;
+		std::array<a_vector<size_t>, 6> lo_indices;
 
 		grps.emplace_back(); // null/invalid entry
 
 		for (int i = 0; i < 999; ++i) {
 			const image_type_t*image_type = get_image_type(i);
-			image_grp_index.push_back(load(image_type->grp_filename_index));
-// 			images_dat.attackOverlayLO[i];
-// 			images_dat.injuryOverlayLO[i];
-// 			images_dat.specialOverlayLO[i];
-// 			images_dat.landingDustLO[i];
-// 			images_dat.liftOffDustLO[i];
-// 			images_dat.shieldOverlayLO[i];
+			image_grp_index.push_back(load(image_type->grp_filename_index, load_grp));
+			lo_indices[0].push_back(load(image_type->attack_filename_index, load_offsets));
+			lo_indices[1].push_back(load(image_type->damage_filename_index, load_offsets));
+			lo_indices[2].push_back(load(image_type->special_filename_index, load_offsets));
+			lo_indices[3].push_back(load(image_type->landing_dust_filename_index, load_offsets));
+			lo_indices[4].push_back(load(image_type->lift_off_filename_index, load_offsets));
+			lo_indices[5].push_back(load(image_type->shield_filename_index, load_offsets));
 		}
 
 		st.grps = std::move(grps);
 		st.image_grp.resize(image_grp_index.size());
 		for (size_t i = 0; i < image_grp_index.size(); ++i) {
-			st.image_grp[i] = &st.grps[i];
+			st.image_grp[i] = &st.grps.at(image_grp_index[i]);
+		}
+		st.lo_offsets = std::move(lo_offsets);
+		st.image_lo_offsets.resize(999);
+		for (size_t i = 0; i < lo_indices.size(); ++i) {
+			for (int i2 = 0; i2 < 999; ++i2) {
+				st.image_lo_offsets.at(i2).at(i) = &st.lo_offsets.at(lo_indices[i].at(i2));
+			}
 		}
 
 	};

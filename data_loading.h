@@ -34,13 +34,13 @@ struct data_reader {
 	}
 	template<typename T, bool little_endian = default_little_endian>
 	T get() {
-		if (ptr + sizeof(T) - end > 0) xcept("data_reader: attempt to read past end");
+		if (ptr + sizeof(T) > end) xcept("data_reader: attempt to read past end");
 		ptr += sizeof(T);
 		return value_at<T, little_endian>(ptr - sizeof(T));
 	}
 	uint8_t*get_n(size_t n) {
 		uint8_t*r = ptr;
-		if (ptr + n - end > 0 || ptr + n < ptr) xcept("data_reader: attempt to read past end");
+		if (ptr + n > end || ptr + n < ptr) xcept("data_reader: attempt to read past end");
 		ptr += n;
 		return r;
 	}
@@ -54,7 +54,7 @@ struct data_reader {
 		return r;
 	}
 	void skip(size_t n) {
-		if (ptr + n - end > 0 || ptr + n < ptr) xcept("data_reader: attempt to seek past end");
+		if (ptr + n > end || ptr + n < ptr) xcept("data_reader: attempt to seek past end");
 		ptr += n;
 	}
 	size_t left() {
@@ -387,7 +387,7 @@ image_types_t load_images_dat(a_string fn) {
 	rawr(uint32_t, damage_filename_index, count);
 	rawr(uint32_t, special_filename_index, count);
 	rawr(uint32_t, landing_dust_filename_index, count);
-	rawr(uint32_t, liftoff_filename_index, count);
+	rawr(uint32_t, lift_off_filename_index, count);
 
 	if (r.left()) log(" WARNING: %s: %d bytes left\n", fn, r.left());
 

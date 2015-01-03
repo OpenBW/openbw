@@ -83,6 +83,10 @@ struct sprite_t: link_base {
 		return this;
 	}
 
+	enum flags_t {
+		flag_hidden = 0x20
+	};
+
 	const sprite_type_t*sprite_type;
 	int owner;
 	int selection_index;
@@ -200,7 +204,7 @@ struct unit_t: flingy_t {
 	int current_button_set;
 	bool is_cloaked;
 	int movement_state;
-	std::array<int, 5> build_queue;
+	std::array<unit_type_t*, 5> build_queue;
 	int energy;
 	int build_queue_slot;
 	int unit_id_generation;
@@ -300,8 +304,8 @@ struct unit_t: flingy_t {
 	int secondary_order_state;
 	int recent_order_timer;
 	int visibility_flags;
-	int unknown_0x0e8;
-	int unknown_0x0ea;
+	int secondary_order_unk_a;
+	int secondary_order_unk_b;
 	unit_t*current_build_unit;
 	std::pair<unit_t*, unit_t*> burrowed_unit_link;
 

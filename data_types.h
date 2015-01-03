@@ -42,9 +42,13 @@ struct unit_type_t {
 		flag_flyer = 4,
 
 		flag_worker = 8,
-		flag_has_turret = 0x10,
+		flag_is_turret = 0x10,
 
 		flag_hero = 0x40,
+
+		flag_two_units_in_one_egg = 0x400,
+
+		flag_creep = 0x20000,
 
 		flag_can_attack = 0x10000000,
 		flag_invincible = 0x20000000,
@@ -224,7 +228,7 @@ struct image_type_t {
 	int damage_filename_index;
 	int special_filename_index;
 	int landing_dust_filename_index;
-	int liftoff_filename_index;
+	int lift_off_filename_index;
 };
 
 using image_types_t = type_container<image_type_t>;
