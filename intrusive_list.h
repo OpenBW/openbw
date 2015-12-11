@@ -70,7 +70,7 @@ struct intrusive_list {
 		typedef typename intrusive_list::reference reference;
 	private:
 		typedef iterator this_t;
-		pointer ptr;
+		pointer ptr = nullptr;
 	public:
 		iterator() = default;
 		explicit iterator(pointer ptr) : ptr(ptr) {}
@@ -141,10 +141,10 @@ public:
 		return *ptr_begin();
 	}
 	reference back() {
-		return *(ptr_end() - 1);
+		return *(--end());
 	}
 	const_reference back() const {
-		return *(ptr_end() - 1);
+		return *(--end());
 	}
 	iterator begin() {
 		return iterator(ptr_begin());

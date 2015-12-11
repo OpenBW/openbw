@@ -104,7 +104,7 @@ struct tile_id {
 	size_t subtile_index() {
 		return raw_value & 0xf;
 	}
-	operator bool() const {
+	explicit operator bool() const {
 		return raw_value != 0;
 	}
 };
@@ -202,7 +202,7 @@ struct game_state {
 
 	size_t tileset_index;
 
-	a_vector<tile_id> gfx_creep_tiles;
+	//a_vector<tile_id> gfx_creep_tiles;
 	a_vector<tile_id> gfx_tiles;
 	a_vector<cv5_entry> cv5;
 	a_vector<vf4_entry> vf4;
@@ -221,6 +221,9 @@ struct game_state {
 
 	bool is_replay;
 	int local_player;
+
+	int max_unit_width;
+	int max_unit_height;
 };
 
 struct state_base {
@@ -266,6 +269,16 @@ struct state_base {
 	std::array<int, 12> building_counts;
 	std::array<int, 12> non_building_counts;
 
+	std::array<int, 12> completed_factory_counts;
+	std::array<int, 12> completed_building_counts;
+	std::array<int, 12> completed_non_building_counts;
+
+	std::array<int, 12> total_buildings_ever_completed;
+	std::array<int, 12> total_non_buildings_ever_completed;
+
+	std::array<int, 12> unit_score;
+	std::array<int, 12> building_score;
+
 	std::array<std::array<int, 12>, 3> supply_used;
 	std::array<std::array<int, 12>, 3> supply_available;
 
@@ -273,6 +286,7 @@ struct state_base {
 
 	std::array<int, 12> shared_vision;
 
+	a_vector<tile_id> gfx_creep_tiles;
 	a_vector<tile_t> tiles;
 	a_vector<uint16_t> tiles_mega_tile_index;
 
@@ -283,6 +297,10 @@ struct state_base {
 	int last_error;
 
 	rect viewport;
+
+	int unit_finder_size;
+	a_vector<std::pair<unit_t*, int>> unit_finder_x;
+	a_vector<std::pair<unit_t*, int>> unit_finder_y;
 };
 
 struct state : state_base {
@@ -302,7 +320,7 @@ struct state : state_base {
 	a_vector<unit_t> units = a_vector<unit_t>(1700);
 
 	std::array<intrusive_list<unit_t, intrusive_list_member_link<unit_t, &unit_t::player_units_link>>, 12> player_units;
-	
+
 	a_vector<intrusive_list<sprite_t, default_link_f>> sprites_on_tile_line;
 	intrusive_list<sprite_t, default_link_f> free_sprites;
 
@@ -362,15 +380,24 @@ struct state_functions {
 	bool u_immovable(unit_t*u) {
 		return u_status_flag(u, unit_t::status_flag_immovable);
 	};
+	bool u_unpowered(unit_t*u) {
+		return u_status_flag(u, unit_t::status_flag_unpowered);
+	};
 	bool u_burrowed(unit_t*u) {
 		return u_status_flag(u, unit_t::status_flag_burrowed);
 	};
-	bool u_not_building(unit_t*u) {
-		return u_status_flag(u, unit_t::status_flag_not_building);
-	};
-	bool u_can_attack(unit_t*u) {
-		return u_status_flag(u, unit_t::status_flag_can_attack);
-	};
+// 	bool u_not_building(unit_t*u) {
+// 		return u_status_flag(u, unit_t::status_flag_not_building);
+// 	};
+// 	bool u_can_attack(unit_t*u) {
+// 		return u_status_flag(u, unit_t::status_flag_can_attack);
+// 	};
+	bool u_non_building(unit_t *u) {
+		return u_status_flag(u, unit_t::status_flag_non_building);
+	}
+	bool u_building(unit_t *u) {
+		return u_status_flag(u, unit_t::status_flag_building);
+	}
 	bool u_grounded_building(unit_t*u) {
 		return u_status_flag(u, unit_t::status_flag_grounded_building);
 	};
@@ -386,6 +413,9 @@ struct state_functions {
 	bool u_cooldown_upgrade(unit_t*u) {
 		return u_status_flag(u, unit_t::status_flag_cooldown_upgrade);
 	};
+	bool u_gathering(unit_t* u) {
+		return u_status_flag(u, unit_t::status_flag_gathering);
+	}
 
 	bool ut_is_turret(unit_t*u) {
 		return ut_flag(u, unit_type_t::flag_is_turret);
@@ -402,8 +432,11 @@ struct state_functions {
 	bool ut_flyer(unit_t*u) {
 		return ut_flag(u, unit_type_t::flag_flyer);
 	};
-	bool ut_can_attack(unit_t*u) {
-		return ut_flag(u, unit_type_t::flag_can_attack);
+// 	bool ut_can_attack(unit_t*u) {
+// 		return ut_flag(u, unit_type_t::flag_can_attack);
+// 	};
+	bool ut_non_building(unit_t*u) {
+		return ut_flag(u, unit_type_t::flag_non_building);
 	};
 	bool ut_invincible(unit_t*u) {
 		return ut_flag(u, unit_type_t::flag_invincible);
@@ -469,7 +502,7 @@ struct state_functions {
 		return max_visible_hp(u) + shields;
 	};
 
-	int getUnitStrength(unit_t*u, bool ground) {
+	int get_unit_strength(unit_t*u, bool ground) {
 		if (u->unit_type->id == UnitTypes::Zerg_Larva || u->unit_type->id == UnitTypes::Zerg_Egg || u->unit_type->id == UnitTypes::Zerg_Cocoon || u->unit_type->id == UnitTypes::Zerg_Lurker_Egg) return 0;
 		int vis_hp_shields = visible_hp_plus_shields(u);
 		int max_vis_hp_shields = max_visible_hp_plus_shields(u);
@@ -487,7 +520,7 @@ struct state_functions {
 		return r * vis_hp_shields / max_vis_hp_shields;
 	};
 
-	void setUnitHP(unit_t*u, int hitpoints) {
+	void set_unit_hp(unit_t*u, int hitpoints) {
 		u->hp = hitpoints;
 		if (u->hp > u->unit_type->hitpoints) u->hp = u->unit_type->hitpoints;
 		if (u->sprite->flags & SpriteFlags::Selected && u->sprite->visibility_flags&st.local_mask) {
@@ -496,8 +529,8 @@ struct state_functions {
 		if (u->status_flags & StatusFlags::Completed) {
 			// damage overlay stuff
 
-			u->air_strength = getUnitStrength(u, false);
-			u->ground_strength = getUnitStrength(u, true);
+			u->air_strength = get_unit_strength(u, false);
+			u->ground_strength = get_unit_strength(u, true);
 		}
 	};
 
@@ -680,7 +713,7 @@ struct state_functions {
 		if (u->status_flags & StatusFlags::Completed) {
 			if (u->unit_type->flags & UnitPrototypeFlags::RegeneratesHP) {
 				if (u->hp > 0 && u->unit_type->hitpoints) {
-					setUnitHP(u, u->hp + 4);
+					set_unit_hp(u, u->hp + 4);
 				}
 			}
 			updateEnergyTimer(u);
@@ -749,8 +782,8 @@ struct state_functions {
 			} else if (u_burrowed(u)) {
 				next_state = UM_Lump;
 			}
-			else if (u_not_building(u)) next_state = u->pathing_flags & 1 ? UM_AtRest : UM_Flyer;
-			else if (u_can_attack(u)) next_state = ut_is_turret(u) ? UM_BldgTurret : UM_Turret;
+			//else if (u_not_building(u)) next_state = u->pathing_flags & 1 ? UM_AtRest : UM_Flyer;
+			//else if (u_can_attack(u)) next_state = ut_is_turret(u) ? UM_BldgTurret : UM_Turret;
 			else if (u->pathing_flags & 1 && (u->movement_flags & MovementFlags::Accelerating || unit_movepos_state(u) == 0)) next_state = UM_LumpWannabe;
 			u->movement_state = next_state;
 		};
@@ -843,7 +876,8 @@ struct state_functions {
 
 	int get_ground_height_at(xy pos) {
 		size_t index = tile_index(pos);
-		tile_id creep_tile = game_st.gfx_creep_tiles.at(index);
+		log("index %d, st.gfx_creep_tiles.size() is %d\n", index, st.gfx_creep_tiles.size());
+		tile_id creep_tile = st.gfx_creep_tiles.at(index);
 		tile_id tile_id = creep_tile ? creep_tile : game_st.gfx_tiles.at(index);
 		size_t megatile_index = game_st.cv5.at(tile_id.group_index()).megaTileRef[tile_id.subtile_index()];
 		size_t ux = pos.x;
@@ -855,12 +889,14 @@ struct state_functions {
 	};
 
 	void reveal_sight_at(xy pos, int range, int reveal_to, bool in_air) {
+		log("reveal sight at %d %d\n", pos.x, pos.y);
+		log("map is %dx%d\n", game_st.map_width, game_st.map_height);
 		int visibility_mask = ~reveal_to;
 		int height_mask = 0;
 		if (!in_air) {
 			int height = get_ground_height_at(pos);
 			if (height == 2) height_mask = tile_t::flag_very_high;
-			else if (height == 1) height_mask = tile_t::flag_high | tile_t::flag_high;
+			else if (height == 1) height_mask = tile_t::flag_very_high | tile_t::flag_high;
 			else height_mask = tile_t::flag_very_high | tile_t::flag_high | tile_t::flag_middle;
 		}
 		tile_t reveal_tile_mask;
@@ -923,7 +959,9 @@ struct state_functions {
 					visible_to |= st.shared_vision[i];
 				}
 			}
+			log("reveal sight!\n");
 			reveal_sight_at(u->sprite->position, unit_sight_range(u), visible_to, u_flying(u));
+			log("done\n");
 		}
 	};
 
@@ -1045,12 +1083,16 @@ struct state_functions {
 	}
 
 	bool is_in_bounds(const unit_type_t*unit_type, xy pos) {
-		size_t ux = pos.x;
-		size_t uy = pos.y;
-		if (ux - unit_type->dimensions.from.x >= game_st.map_width) return false;
-		if (uy - unit_type->dimensions.from.y >= game_st.map_height) return false;
-		if (ux - unit_type->dimensions.to.x >= game_st.map_width) return false;
-		if (uy - unit_type->dimensions.to.y >= game_st.map_height) return false;
+		if (pos.x - unit_type->dimensions.from.x < 0) return false;
+		if (pos.y - unit_type->dimensions.from.y < 0) return false;
+		if ((size_t)(pos.x + unit_type->dimensions.to.x) >= game_st.map_width) return false;
+		if ((size_t)(pos.y + unit_type->dimensions.to.y) >= game_st.map_height) return false;
+// 		size_t ux = pos.x;
+// 		size_t uy = pos.y;
+// 		if (ux - unit_type->dimensions.from.x >= game_st.map_width) return false;
+// 		if (uy - unit_type->dimensions.from.y >= game_st.map_height) return false;
+// 		if (ux - unit_type->dimensions.to.x >= game_st.map_width) return false;
+// 		if (uy - unit_type->dimensions.to.y >= game_st.map_height) return false;
 		return true;
 	};
 	size_t get_sprite_tile_line_index(int y) {
@@ -1580,7 +1622,7 @@ struct state_functions {
 		
 		int movement_type = u->unit_type->flingy->movement_type;
 		if (movement_type != 0 && movement_type != 1) {
-			if (u->flingy_movement_type==2) {
+			if (u->flingy_movement_type == 2) {
 				image_t*image = u->sprite->main_image;
 				if (!image) xcept("null image");
 				auto*script = image->iscript_state.current_script;
@@ -1597,7 +1639,7 @@ struct state_functions {
 				st.return_address = 0;
 				st.wait = 0;
 				int total_distance_moved = 0;
-				for (int i = 0; i < 32;++i) {
+				for (int i = 0; i < 32; ++i) {
 					int distance_moved = 0;
 					iscript_execute(image, st, true, &distance_moved);
 					int mod = 0;
@@ -1628,12 +1670,15 @@ struct state_functions {
 			const unit_type_t*ut = u->unit_type;
 			if (ut->id==UnitTypes::Zerg_Egg || ut->id==UnitTypes::Zerg_Cocoon || ut->id==UnitTypes::Zerg_Lurker_Egg) {
 				ut = u->build_queue[u->build_queue_slot];
+				supply_required = ut->supply_required;
 				if (ut_two_units_in_one_egg(u)) supply_required *= 2;
+			} else {
+				if (ut_flyer(u) && !u_completed(u)) supply_required *= 2;
 			}
 			st.supply_used[0][u->owner] += supply_required * count;
-		} else if (u->unit_type->staredit_group_flags&GroupFlags::Terran) {
+		} else if (u->unit_type->staredit_group_flags & GroupFlags::Terran) {
 			st.supply_used[1][u->owner] += supply_required * count;
-		} else {
+		} else if (u->unit_type->staredit_group_flags & GroupFlags::Protoss) {
 			st.supply_used[2][u->owner] += supply_required * count;
 		}
 		if (u->unit_type->staredit_group_flags & GroupFlags::Factory) st.factory_counts[u->owner] += count;
@@ -1643,12 +1688,64 @@ struct state_functions {
 		else if (u->unit_type->id == UnitTypes::Zerg_Egg || u->unit_type->id == UnitTypes::Zerg_Cocoon || u->unit_type->id == UnitTypes::Zerg_Lurker_Egg) {
 			st.non_building_counts[u->owner] += count;
 		}
+		if (st.unit_counts[u->owner][u->unit_type->id] < 0) st.unit_counts[u->owner][u->unit_type->id] = 0;
+	}
 
+	size_t unit_finder_lower_bound_index(const a_vector<std::pair<unit_t*, int>>& unit_finder, int value) {
+		auto i = std::lower_bound(unit_finder.begin(), unit_finder.begin() + st.unit_finder_size, value, [](const auto& a, int value) {
+			return a.second < value;
+		});
+		return i - unit_finder.begin();
+	}
+	size_t unit_finder_upper_bound_index(const a_vector<std::pair<unit_t*, int>>& unit_finder, int value) {
+		auto i = std::upper_bound(unit_finder.begin(), unit_finder.begin() + st.unit_finder_size, value, [](int value, const auto& b) {
+			return b.second < value;
+		});
+		return i - unit_finder.begin();
+	}
+
+	void insert_unit_finder_x(size_t index, unit_t* u, int value) {
+		for (size_t i = st.unit_finder_size; i-- > index;) {
+			unit_t* n = st.unit_finder_x[i].first;
+			if (n->unit_finder_left_index == i) ++n->unit_finder_left_index;
+			else if (n->unit_finder_right_index == i) ++n->unit_finder_right_index;
+		}
+		std::copy_backward(st.unit_finder_x.begin() + index, st.unit_finder_x.begin() + st.unit_finder_size, st.unit_finder_x.begin() + st.unit_finder_size + 1);
+		st.unit_finder_x[index] = std::make_pair(u, value);
+	}
+	void insert_unit_finder_y(size_t index, unit_t* u, int value) {
+		for (size_t i = st.unit_finder_size; i-- > index;) {
+			unit_t* n = st.unit_finder_y[i].first;
+			if (n->unit_finder_top_index == i) ++n->unit_finder_top_index;
+			else if (n->unit_finder_bottom_index == i) ++n->unit_finder_bottom_index;
+		}
+		std::copy_backward(st.unit_finder_y.begin() + index, st.unit_finder_y.begin() + st.unit_finder_size, st.unit_finder_y.begin() + st.unit_finder_size + 1);
+		st.unit_finder_y[index] = std::make_pair(u, value);
 	}
 
 	void update_unit_finder(unit_t*u) {
+		if (ut_is_turret(u)) return;
+		
+		xy top_left = u->position - u->unit_type->dimensions.from;
+		xy bottom_right = u->position + u->unit_type->dimensions.to;
 
-		xcept("update unit finder");
+		size_t left_index = unit_finder_lower_bound_index(st.unit_finder_x, top_left.x);
+		size_t top_index = unit_finder_lower_bound_index(st.unit_finder_x, top_left.y);
+		u->unit_finder_left_index = left_index;
+		u->unit_finder_top_index = top_index;
+		insert_unit_finder_x(left_index, u, top_left.x);
+		insert_unit_finder_y(top_index, u, top_left.y);
+		++st.unit_finder_size;
+
+		size_t right_index = unit_finder_lower_bound_index(st.unit_finder_x, bottom_right.x);
+		size_t bottom_index = unit_finder_lower_bound_index(st.unit_finder_x, bottom_right.y);
+		u->unit_finder_right_index = right_index;
+		u->unit_finder_bottom_index = bottom_index;
+		insert_unit_finder_x(right_index, u, bottom_right.x);
+		insert_unit_finder_y(bottom_index, u, bottom_right.y);
+		++st.unit_finder_size;
+
+		log("indexes is %d %d %d %d\n", left_index, top_index, right_index, bottom_index);
 		
 	}
 
@@ -1683,7 +1780,7 @@ struct state_functions {
 		u->sprite->elevation_level = unit_type->elevation_level;
 		u_set_status_flag(u, unit_t::status_flag_grounded_building, ut_building(u));
 		u_set_status_flag(u, unit_t::status_flag_flying, ut_flyer(u));
-		u_set_status_flag(u, unit_t::status_flag_can_attack, ut_can_attack(u));
+		u_set_status_flag(u, unit_t::status_flag_non_building, ut_non_building(u));
 		u_set_status_flag(u, (unit_t::status_flags_t)0x20000, ut_flag(u, (unit_type_t::flags_t)0x8000000));
 		u_set_status_flag(u, (unit_t::status_flags_t)0x100000, !ut_flyer(u));
 		if (u->unit_type->elevation_level < 12) u->pathing_flags |= 1;
@@ -1792,7 +1889,7 @@ struct state_functions {
 				u->status_flags = 0;
 				u->user_action_flags = 0;
 				u->pathing_flags = 0;
-				u->previous_hp = 0;
+				u->previous_hp = 1;
 				u->ai = nullptr;
 
 				if (!initialize_unit_type(u, unit_type, pos, owner)) return false;
@@ -1830,7 +1927,10 @@ struct state_functions {
 					u->current_build_unit = nullptr;
 					u->secondary_order_state = 0;
 				}
-				u->finder = { {-1,-1}, {-1,-1} };
+				u->unit_finder_left_index = -1;
+				u->unit_finder_top_index = -1;
+				u->unit_finder_right_index = -1;
+				u->unit_finder_bottom_index = -1;
 				st.player_units[owner].push_front(*u);
 				increment_unit_counts(u, 1);
 
@@ -1886,16 +1986,314 @@ struct state_functions {
 		return create_unit(get_unit_type(unit_type_id), pos, owner);
 	}
 
+	void replace_sprite_image(sprite_t*sprite, int image_id, int direction) {
+		bool was_selected = !!(sprite->flags & sprite_t::flag_selected);
+		// if (was_selected) remove_selection_circle_and_hp_bar();
+		// else remove_selection_circle();
+
+		// other stuff...
+	}
+
+	void apply_unit_effects(unit_t*u) {
+		if (u->defense_matrix_timer) {
+			xcept("apply_defensive_matrix");
+		}
+		if (u->lockdown_timer) {
+			u->lockdown_timer = 0;
+			xcept("lockdown_hit");
+		}
+		if (u->maelstrom_timer) {
+			u->maelstrom_timer = 0;
+			xcept("set_maelstrom_timer");
+		}
+		if (u->irradiate_timer) {
+			xcept("apply_irradiate");
+		}
+		if (u->ensnare_timer) {
+			u->ensnare_timer = 0;
+
+		}
+	}
+
+	void set_construction_graphic(unit_t*u, bool animated) {
+
+		int burrowed_unpowered_state = (u_unpowered(u) ? 1 : 0) + (u_burrowed(u) ? 2 : 0);
+		int coloring_data = 0;
+		if (burrowed_unpowered_state) {
+			coloring_data = u->sprite->main_image->coloring_data;
+		}
+		iscript_unit_setter ius(this, u);
+		int construction_animation = u->unit_type->construction_animation;
+		if (!animated || construction_animation == 0) construction_animation = u->sprite->sprite_type->image->id;
+		replace_sprite_image(u->sprite, construction_animation, u->current_direction1);
+
+		if (burrowed_unpowered_state) {
+			// some stuff...
+		}
+
+		apply_unit_effects(u);
+
+	}
+
+	void set_unit_direction(unit_t* u, int direction) {
+		// implement me
+	}
+
+	void finish_building_unit(unit_t*u) {
+		if (u->remaining_build_time) {
+			u->hp = u->unit_type->hitpoints;
+			u->shield_points = u->unit_type->shield_points << 8;
+			u->remaining_build_time = 0;
+		}
+		set_current_button_set(u, u->unit_type->id);
+		if (u_grounded_building(u)) {
+			u->parasite_flags = 0;
+			u->is_blind = false;
+			set_construction_graphic(u, false);
+		} else {
+			if (u_non_building(u)) {
+				int dir = u->unit_type->unit_direction;
+				if (dir == 32) dir = lcg_rand(36) % 32;
+				set_unit_direction(u, dir * 8);
+			}
+			if (u->unit_type->id >= UnitTypes::Special_Floor_Missile_Trap && u->unit_type->id <= UnitTypes::Special_Right_Wall_Flame_Trap) {
+				xcept("some trap doodad stuff");
+			}
+		}
+
+	}
+
+	bool place_initial_unit(unit_t* u) {
+		if (u->sprite->flags & SpriteFlags::Hidden) {
+			// implement me
+		}
+		return true;
+	}
+
+	void add_completed_unit(int count, unit_t* u, bool increment_score) {
+		if (u_hallucination(u)) return;
+		if (ut_is_turret(u)) return;
+
+		st.completed_unit_counts[u->owner][u->unit_type->id] += count;
+		if (u->unit_type->staredit_group_flags & GroupFlags::Zerg) {
+			st.supply_available[0][u->owner] += u->unit_type->supply_provided * count;
+		} else if (u->unit_type->staredit_group_flags & GroupFlags::Terran) {
+			st.supply_available[1][u->owner] += u->unit_type->supply_provided * count;
+		} else if (u->unit_type->staredit_group_flags & GroupFlags::Protoss) {
+			st.supply_available[2][u->owner] += u->unit_type->supply_provided * count;
+		}
+
+		if (u->unit_type->staredit_group_flags & GroupFlags::Factory) {
+			st.completed_factory_counts[u->owner] += count;
+		}
+		if (u->unit_type->staredit_group_flags & GroupFlags::Men) {
+			st.completed_building_counts[u->owner] += count;
+		} else if (u->unit_type->staredit_group_flags & GroupFlags::Building) {
+			st.completed_building_counts[u->owner] += count;
+		}
+		if (increment_score) {
+			if (u->owner != 11) {
+				if (u->unit_type->staredit_group_flags & GroupFlags::Men) {
+					bool morphed = false;
+					if (u->unit_type->id == UnitTypes::Zerg_Guardian) morphed = true;
+					if (u->unit_type->id == UnitTypes::Zerg_Devourer) morphed = true;
+					if (u->unit_type->id == UnitTypes::Protoss_Dark_Archon) morphed = true;
+					if (u->unit_type->id == UnitTypes::Protoss_Archon) morphed = true;
+					if (u->unit_type->id == UnitTypes::Zerg_Lurker) morphed = true;
+					if (!morphed) st.total_non_buildings_ever_completed[u->owner] += count;
+					st.unit_score[u->owner] += u->unit_type->build_score * count;
+				} else if (u->unit_type->staredit_group_flags & GroupFlags::Building) {
+					bool morphed = false;
+					if (u->unit_type->id == UnitTypes::Zerg_Lair) morphed = true;
+					if (u->unit_type->id == UnitTypes::Zerg_Hive) morphed = true;
+					if (u->unit_type->id == UnitTypes::Zerg_Greater_Spire) morphed = true;
+					if (u->unit_type->id == UnitTypes::Zerg_Spore_Colony) morphed = true;
+					if (u->unit_type->id == UnitTypes::Zerg_Sunken_Colony) morphed = true;
+					if (!morphed) st.total_buildings_ever_completed[u->owner] += count;
+					st.building_score[u->owner] += u->unit_type->build_score * count;
+				}
+			}
+		}
+
+		if (st.completed_unit_counts[u->owner][u->unit_type->id] < 0) st.completed_unit_counts[u->owner][u->unit_type->id] = 0;
+
+	}
+
+	void set_unit_order(unit_t* u, int order) {
+
+
+	}
+
+	template<typename F>
+	unit_t* find_unit(rect area, const F& predicate) {
+		bool is_max_width = false;
+		if (area.to.x - area.from.x + 1 < game_st.max_unit_width) {
+			area.to.x = area.from.x + 1 + game_st.max_unit_width;
+			is_max_width = true;
+		}
+		bool is_max_height = false;
+		if (area.to.y - area.from.y + 1 < game_st.max_unit_height) {
+			area.to.y = area.from.y + 1 + game_st.max_unit_height;
+			is_max_height = true;
+		}
+
+		size_t left_index = unit_finder_lower_bound_index(st.unit_finder_x, area.from.x);
+		size_t top_index = unit_finder_lower_bound_index(st.unit_finder_y, area.from.y);
+		size_t right_index = unit_finder_lower_bound_index(st.unit_finder_x, area.to.x);
+		size_t bottom_index = unit_finder_lower_bound_index(st.unit_finder_y, area.to.y);
+
+		if (right_index <= left_index) return nullptr;
+		if (bottom_index <= top_index) return nullptr;
+
+		for (size_t i = left_index; i < right_index; ++i) {
+			unit_t* u = st.unit_finder_x[i].first;
+			if (!is_max_width) u->unit_finder_mark = 1;
+			else if (u->sprite->position.x - u->unit_type->dimensions.from.x <= area.to.x) u->unit_finder_mark = 1;
+			else u->unit_finder_mark = 0;
+		}
+		for (size_t i = top_index; i < bottom_index; ++i) {
+			unit_t* u = st.unit_finder_y[i].first;
+			if (u->unit_finder_mark == 1) {
+				if (!is_max_height) u->unit_finder_mark = 3;
+				else if (u->sprite->position.y - u->unit_type->dimensions.from.y <= area.to.y) u->unit_finder_mark = 3;
+			}
+		}
+		for (size_t i = left_index; i < right_index; ++i) {
+			unit_t* u = st.unit_finder_x[i].first;
+			if (u->unit_finder_mark == 3) {
+				auto ret = predicate(u);
+				if (ret) {
+					for (; i < right_index; ++i) {
+						st.unit_finder_x[i].first->unit_finder_mark = 0;
+					}
+					return u;
+				}
+			}
+			u->unit_finder_mark = 0;
+		}
+		return nullptr;
+	}
+
+	rect unit_sprite_bounding_box(unit_t* u) {
+		return { u->sprite->position - u->unit_type->dimensions.from, u->sprite->position + u->unit_type->dimensions.to };
+	}
+
+	bool units_intersecting(unit_t* a, unit_t* b) {
+		if (st.unit_finder_x[a->unit_finder_right_index].second < st.unit_finder_x[b->unit_finder_left_index].second) return false;
+		if (st.unit_finder_y[a->unit_finder_bottom_index].second < st.unit_finder_y[b->unit_finder_top_index].second) return false;
+		if (st.unit_finder_x[a->unit_finder_left_index].second > st.unit_finder_x[b->unit_finder_right_index].second) return false;
+		if (st.unit_finder_y[a->unit_finder_top_index].second > st.unit_finder_y[b->unit_finder_bottom_index].second) return false;
+		return true;
+	}
+
+	void check_unit_collision(unit_t* u) {
+		find_unit(unit_sprite_bounding_box(u), [&](unit_t* nu) {
+			if (u_grounded_building(nu)) u->status_flags |= unit_t::status_flag_collision;
+			else if (!u_flying(nu) && (!u_gathering(nu) || u_grounded_building(u))) {
+				if (units_intersecting(u, nu)) {
+					nu->status_flags |= unit_t::status_flag_collision;
+				}
+			}
+			return false;
+		});
+	}
+
+	void show_unit(unit_t* u) {
+		if (~u->sprite->flags & sprite_t::flag_hidden) return;
+		u->sprite->flags &= ~sprite_t::flag_hidden;
+		if (u->subunit && !ut_is_turret(u)) u->subunit->sprite->flags &= ~sprite_t::flag_hidden;
+		refresh_unit_vision(u);
+		UpdateUnitSpriteInfo(u);
+		update_unit_finder(u);
+		if (u_grounded_building(u)) {
+			xcept("update tiles (mask in flag_occupied)");
+		}
+		check_unit_collision(u);
+		if (u_flying(u)) {
+			xcept("set repulse angle");
+		}
+		log("toggle_unit_path(u)\n");
+		
+		u->movement_state = 0;
+		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
+		else u->pathing_flags &= ~1;
+		if (u->subunit && !ut_is_turret(u)) {
+			log("toggle_unit_path(u->subunit)\n");
+			u->subunit->movement_state = 0;
+			if (u->subunit->sprite->elevation_level < 12) u->subunit->pathing_flags |= 1;
+			else u->subunit->pathing_flags &= ~1;
+		}
+		st.hidden_units.remove(*u);
+		bw_insert_list(st.visible_units, *u);
+	}
+
+	void update_unit_strength_and_apply_default_orders(unit_t* u) {
+
+		if (ut_flyer(u)) {
+			increment_unit_counts(u, -1);
+			u->status_flags |= unit_t::status_flag_completed;
+			increment_unit_counts(u, 1);
+		} else {
+			u->status_flags |= unit_t::status_flag_completed;
+		}
+		add_completed_unit(1, u, true);
+		if (u->unit_type->id == UnitTypes::Spell_Scanner_Sweep || u->unit_type->id == UnitTypes::Special_Map_Revealer) {
+			xcept("fixme scanner/map revealer");
+		} else {
+			if (u->sprite->flags & sprite_t::flag_hidden) {
+				if (u->unit_type->id != UnitTypes::Protoss_Interceptor && u->unit_type->id != UnitTypes::Protoss_Scarab) {
+					show_unit(u);
+				}
+			}
+		}
+		bool is_trap = false;
+		if (u->unit_type->id == UnitTypes::Special_Floor_Missile_Trap) is_trap = true;
+		if (u->unit_type->id == UnitTypes::Special_Floor_Gun_Trap) is_trap = true;
+		if (u->unit_type->id == UnitTypes::Special_Wall_Missile_Trap) is_trap = true;
+		if (u->unit_type->id == UnitTypes::Special_Wall_Flame_Trap) is_trap = true;
+		if (u->unit_type->id == UnitTypes::Special_Right_Wall_Missile_Trap) is_trap = true;
+		if (u->unit_type->id == UnitTypes::Special_Right_Wall_Flame_Trap) is_trap = true;
+		if (is_trap) {
+			u->status_flags |= unit_t::status_flag_cloaked | unit_t::status_flag_requires_detector;
+			u->visibility_flags = 0x80000000;
+			u->secondary_order_timer = 0;
+		}
+		if (st.players[u->owner].controller == state::player_t::controller_rescue_passive) {
+			xcept("fixme rescue passive");
+		} else {
+			if (st.players[u->owner].controller == state::player_t::controller_neutral) set_unit_order(u, Orders::Neutral);
+			else if (st.players[u->owner].controller == state::player_t::controller_computer_game) set_unit_order(u, u->unit_type->computer_ai_idle);
+			else set_unit_order(u, u->unit_type->human_ai_idle);
+		}
+		if (ut_worker(u)) {
+			xcept("fixme worker");
+		}
+		u->air_strength = get_unit_strength(u, false);
+		u->ground_strength = get_unit_strength(u, true);
+
+	}
+
 	unit_t*create_initial_unit(const unit_type_t*unit_type, xy pos, int owner) {
 		unit_t*u = create_unit(unit_type, pos, owner);
 		if (!u) {
-			log("fixme: display last error (%d)\n", st.last_error);
+			display_last_error_for_player(owner);
 			return nullptr;
 		}
 		if (unit_type_spreads_creep(unit_type, true) || unit_type->flags&unit_type_t::flag_creep) {
 			xcept("apply creep");
 		}
-		xcept("create_initial_unit %p\n", u);
+		finish_building_unit(u);
+		if (!place_initial_unit(u)) {
+			xcept("place_initial_unit failed");
+		}
+
+		update_unit_strength_and_apply_default_orders(u);
+
+		return u;
+	}
+
+	void display_last_error_for_player(int player) {
+		log("fixme: display last error (%d)\n", st.last_error);
 	}
 
 };
@@ -1995,6 +2393,16 @@ struct game_load_functions : state_functions {
 		st.building_counts.fill(0);
 		st.non_building_counts.fill(0);
 
+		st.completed_factory_counts.fill(0);
+		st.completed_building_counts.fill(0);
+		st.completed_non_building_counts.fill(0);
+
+		st.total_buildings_ever_completed.fill(0);
+		st.total_non_buildings_ever_completed.fill(0);
+
+		st.unit_score.fill(0);
+		st.building_score.fill(0);
+
 		for (auto&v : st.supply_used) v.fill(0);
 		for (auto&v : st.supply_available) v.fill(0);
 
@@ -2020,6 +2428,8 @@ struct game_load_functions : state_functions {
 
 		st.tiles.resize(game_st.map_tile_width*game_st.map_tile_height);
 		st.tiles_mega_tile_index.resize(st.tiles.size());
+
+		st.gfx_creep_tiles.resize(game_st.map_tile_width * game_st.map_tile_height);
 
 		st.order_timer_counter = 10;
 		st.secondary_order_timer_counter = 150;
@@ -2051,6 +2461,24 @@ struct game_load_functions : state_functions {
 
 		game_st.is_replay = false;
 		game_st.local_player = 0;
+
+		st.unit_finder_size = 0;
+		st.unit_finder_x.clear();
+		st.unit_finder_x.resize(st.units.size() * 2);
+		st.unit_finder_y.clear();
+		st.unit_finder_y.resize(st.units.size() * 2);
+
+		int max_unit_width = 0;
+		int max_unit_height = 0;
+		for (auto&v : game_st.unit_types.vec) {
+			int width = v.dimensions.from.x + 1 + v.dimensions.to.x;
+			int height = v.dimensions.from.y + 1 + v.dimensions.to.y;
+			if (width > max_unit_width) max_unit_width = width;
+			if (height > max_unit_height) max_unit_height = height;
+		}
+		game_st.max_unit_width = max_unit_width;
+		game_st.max_unit_height = max_unit_height;
+
 	}
 
 	int get_unit_strength(const unit_type_t*unit_type, const weapon_type_t*weapon_type) {
@@ -2742,8 +3170,43 @@ struct game_load_functions : state_functions {
 
 				unit_t*u = create_initial_unit(unit_type, { x,y }, owner);
 
-				xcept("created unit %p\n", u);
+				//xcept("created unit %p\n", u);
+				log("created unit %p\n", u);
 
+			}
+		};
+
+		tag_funcs["UPRP"] = [&](data_reader_le r) {
+			for (int i = 0; i < 64; ++i) {
+				int valid_flags = r.get<uint16_t>();
+				int valid_properties = r.get<uint16_t>();
+				int owner = r.get<uint8_t>();
+				int hp_percent = r.get<uint8_t>();
+				int shield_percent = r.get<uint8_t>();
+				int energy_percent = r.get<uint8_t>();
+				int resources = r.get<uint32_t>();
+				int units_in_hangar = r.get<uint16_t>();
+				int flags = r.get<uint16_t>();
+				r.get<uint32_t>();
+			}
+		};
+
+		tag_funcs["MRGN"] = [&](data_reader_le r) {
+			// 64 or 256 entries
+			while (r.left()) {
+				int left = r.get<int32_t>();
+				int top = r.get<int32_t>();
+				int right = r.get<int32_t>();
+				int bottom = r.get<int32_t>();
+				a_string name = game_st.get_string(r.get<uint16_t>());
+				int elevation_flags = r.get<uint16_t>();
+			}
+		};
+
+		tag_funcs["TRIG"] = [&](data_reader_le r) {
+			// todo
+			while (r.left()) {
+				r.skip(2400);
 			}
 		};
 

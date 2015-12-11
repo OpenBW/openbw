@@ -50,7 +50,8 @@ struct unit_type_t {
 
 		flag_creep = 0x20000,
 
-		flag_can_attack = 0x10000000,
+		//flag_can_attack = 0x10000000,
+		flag_non_building = 0x10000000,
 		flag_invincible = 0x20000000,
 	};
 

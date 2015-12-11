@@ -84,6 +84,7 @@ struct sprite_t: link_base {
 	}
 
 	enum flags_t {
+		flag_selected = 0x8,
 		flag_hidden = 0x20
 	};
 
@@ -162,14 +163,22 @@ struct unit_t: flingy_t {
 		status_flag_completed = 1,
 		status_flag_grounded_building = 2,
 		status_flag_flying = 4,
-
+		status_flag_unpowered = 8,
 		status_flag_burrowed = 0x10,
 		status_flag_in_building = 0x20,
 
-		status_flag_can_attack = 0x10000,
-		status_flag_not_building = 0x20000,
+		status_flag_requires_detector = 0x100,
+		status_flag_cloaked = 0x200,
 
+		//status_flag_can_attack = 0x10000,
+		//status_flag_not_building = 0x20000,
+		status_flag_non_building = 0x10000,
+		status_flag_building = 0x20000,
+		//status_flag_ignore_tile_collision = 0x40000,
+		status_flag_collision = 0x40000,
 		status_flag_immovable = 0x80000,
+
+		status_flag_gathering = 0x800000,
 
 		status_flag_invincible = 0x4000000,
 
@@ -350,10 +359,14 @@ struct unit_t: flingy_t {
 	void*ai;
 	int air_strength;
 	int ground_strength;
-	rect finder;
+	size_t unit_finder_left_index;
+	size_t unit_finder_top_index;
+	size_t unit_finder_right_index;
+	size_t unit_finder_bottom_index;
 	int repulse_unknown;
 	int repulse_angle;
 	xy drift_pos;
 
+	int unit_finder_mark;
 };
 
