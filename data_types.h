@@ -16,6 +16,7 @@ struct tech_type_t;
 struct flingy_type_t;
 struct sprite_type_t;
 struct image_type_t;
+struct order_type_t;
 
 // using unit_id_t = type_id_t<unit_type_t>;
 // using weapon_id_t = type_id_t<weapon_type_t>;
@@ -69,11 +70,11 @@ struct unit_type_t {
 	int elevation_level;
 	int unknown1;
 	int sublabel;
-	int computer_ai_idle;
-	int human_ai_idle;
-	int return_to_idle;
-	int attack_unit;
-	int attack_move;
+	const order_type_t* computer_ai_idle;
+	const order_type_t* human_ai_idle;
+	const order_type_t* return_to_idle;
+	const order_type_t* attack_unit;
+	const order_type_t* attack_move;
 	weapon_type_t*ground_weapon;
 	int max_ground_hits;
 	weapon_type_t*air_weapon;
@@ -233,6 +234,31 @@ struct image_type_t {
 };
 
 using image_types_t = type_container<image_type_t>;
+
+struct order_type_t {
+	int id;
+
+	int use_weapon_targeting;
+	int background;
+	int unused3;
+	bool valid_for_turret;
+	int unused5;
+	bool can_be_interrupted;
+	int unk7;
+	bool can_be_queued;
+	int unk9;
+	bool can_be_obstructed;
+	int unk11;
+	int unused12;
+	int weapon;    // weapon and tech_type could be pointers, but then order_types would 
+	int tech_type; // need to live in game_state. Since I'd like to keep it in global_state,
+	int seq;       // they will remain as ints
+	int highlight;
+	int dep_index;
+	int obscured;
+};
+
+using order_types_t = type_container<order_type_t>;
 
 namespace iscript_opcodes {
 	enum {

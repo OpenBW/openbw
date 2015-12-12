@@ -8,7 +8,7 @@ struct unit_t;
 
 struct target_t {
 	xy pos;
-	unit_t*unit;
+	unit_t*unit = nullptr;
 };
 
 struct link_base {
@@ -85,7 +85,9 @@ struct sprite_t: link_base {
 
 	enum flags_t {
 		flag_selected = 0x8,
-		flag_hidden = 0x20
+		flag_hidden = 0x20,
+
+		flag_iscript_nobrk = 0x80,
 	};
 
 	const sprite_type_t*sprite_type;
@@ -132,10 +134,10 @@ struct flingy_t: link_base {
 	int current_direction2;
 	int velocity_direction2;
 	int owner;
-	int order_id;
+	const order_type_t* order_type;
 	int order_state;
 	int order_signal;
-	int order_unit_type;
+	const unit_type_t* order_unit_type;
 	int main_order_timer;
 	int ground_weapon_cooldown;
 	int air_weapon_cooldown;
@@ -144,8 +146,20 @@ struct flingy_t: link_base {
 
 };
 
+struct order_target {
+	xy position;
+	unit_t* unit;
+	unit_type_t* unit_type;
+};
+
 struct order_t : link_base {
 
+	operator order_t*() {
+		return this;
+	}
+
+	const order_type_t* order_type;
+	order_target target;
 };
 
 struct unit_t: flingy_t {
@@ -163,12 +177,15 @@ struct unit_t: flingy_t {
 		status_flag_completed = 1,
 		status_flag_grounded_building = 2,
 		status_flag_flying = 4,
-		status_flag_unpowered = 8,
+		status_flag_disabled = 8,
 		status_flag_burrowed = 0x10,
 		status_flag_in_building = 0x20,
 
 		status_flag_requires_detector = 0x100,
 		status_flag_cloaked = 0x200,
+
+		status_flag_order_not_interruptible = 0x1000,
+		status_flag_iscript_nobrk = 0x2000,
 
 		//status_flag_can_attack = 0x10000,
 		//status_flag_not_building = 0x20000,
@@ -181,6 +198,7 @@ struct unit_t: flingy_t {
 		status_flag_gathering = 0x800000,
 
 		status_flag_invincible = 0x4000000,
+		status_flag_holding_position = 0x8000000,
 
 		status_flag_speed_upgrade = 0x10000000,
 		status_flag_cooldown_upgrade = 0x20000000,
@@ -194,7 +212,7 @@ struct unit_t: flingy_t {
 
 	unit_t*subunit;
 	intrusive_list<order_t, default_link_f> order_queue;
-	unit_t*auto_target_unit;
+	unit_t*auto_target_unit;	
 	unit_t*connected_unit;
 	int order_queue_count;
 	int order_queue_timer;

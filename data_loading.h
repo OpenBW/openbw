@@ -394,6 +394,45 @@ image_types_t load_images_dat(a_string fn) {
 	return image_types;
 }
 
+order_types_t load_orders_dat(a_string fn) {
+	static const size_t count = 189;
+
+	order_types_t order_types;
+	order_types.vec.resize(count);
+	for (size_t i = 0; i < count; ++i) {
+		auto&v = order_types.vec[i];
+		memset(&v, 0, sizeof(v));
+		v.id = i;
+	}
+
+	data_file f(fn);
+	data_file_reader_le r(f);
+
+	auto&arr = order_types.vec;
+
+	rawr(uint8_t, use_weapon_targeting, count);
+	rawr(uint8_t, background, count);
+	rawr(uint8_t, unused3, count);
+	rawr(uint8_t, valid_for_turret, count);
+	rawr(uint8_t, can_be_interrupted, count);
+	rawr(uint8_t, unk7, count);
+	rawr(uint8_t, can_be_queued, count);
+	rawr(uint8_t, unk9, count);
+	rawr(uint8_t, can_be_obstructed, count);
+	rawr(uint8_t, unk11, count);
+	rawr(uint8_t, unused12, count);
+	rawr(uint8_t, weapon, count);
+	rawr(uint8_t, tech_type, count);
+	rawr(uint8_t, seq, count);
+	rawr(int16_t, highlight, count);
+	rawr(uint16_t, dep_index, count);
+	rawr(uint8_t, obscured, count);
+
+	if (r.left()) log(" WARNING: %s: %d bytes left\n", fn, r.left());
+
+	return order_types;
+}
+
 #undef rawr
 
 }
