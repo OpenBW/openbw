@@ -344,7 +344,7 @@ struct state_functions {
 
 	explicit state_functions(state&st) : st(st) {}
 
-	bool in_game_loop = false;
+	bool allow_random = false;
 	bool update_tiles = false;
 	unit_t*iscript_unit = nullptr;
 	unit_t*iscript_order_unit = nullptr;
@@ -486,6 +486,25 @@ struct state_functions {
 		if (u->unit_id_generation != id.generation()) return nullptr;
 		return u;
 	};
+
+	void tiles_flags_and(int offset_x, int offset_y, int width, int height, int flags) {
+		if ((size_t)(offset_x + width) > game_st.map_tile_width) xcept("attempt to mask tile out of bounds");
+		if ((size_t)(offset_y + height) > game_st.map_tile_height) xcept("attempt to mask tile out of bounds");
+		for (int y = offset_y; y < offset_y + height; ++y) {
+			for (int x = offset_x; x < offset_x + width; ++x) {
+				st.tiles[x + y * game_st.map_tile_width].flags &= flags;
+			}
+		}
+	}
+	void tiles_flags_or(int offset_x, int offset_y, int width, int height, int flags) {
+		if ((size_t)(offset_x + width) > game_st.map_tile_width) xcept("attempt to mask tile out of bounds");
+		if ((size_t)(offset_y + height) > game_st.map_tile_height) xcept("attempt to mask tile out of bounds");
+		for (int y = offset_y; y < offset_y + height; ++y) {
+			for (int x = offset_x; x < offset_x + width; ++x) {
+				st.tiles[x + y * game_st.map_tile_width].flags |= flags;
+			}
+		}
+	}
 
 	bool unit_type_spreads_creep(const unit_type_t*ut, bool include_non_evolving) {
 		if (ut->id == UnitTypes::Zerg_Hatchery && include_non_evolving) return true;
@@ -895,7 +914,6 @@ struct state_functions {
 
 	int get_ground_height_at(xy pos) {
 		size_t index = tile_index(pos);
-		log("index %d, st.gfx_creep_tiles.size() is %d\n", index, st.gfx_creep_tiles.size());
 		tile_id creep_tile = st.gfx_creep_tiles.at(index);
 		tile_id tile_id = creep_tile ? creep_tile : game_st.gfx_tiles.at(index);
 		size_t megatile_index = game_st.cv5.at(tile_id.group_index()).megaTileRef[tile_id.subtile_index()];
@@ -908,8 +926,6 @@ struct state_functions {
 	};
 
 	void reveal_sight_at(xy pos, int range, int reveal_to, bool in_air) {
-		log("reveal sight at %d %d\n", pos.x, pos.y);
-		log("map is %dx%d\n", game_st.map_width, game_st.map_height);
 		int visibility_mask = ~reveal_to;
 		int height_mask = 0;
 		if (!in_air) {
@@ -921,8 +937,10 @@ struct state_functions {
 		tile_t reveal_tile_mask;
 		reveal_tile_mask.visible = visibility_mask;
 		reveal_tile_mask.explored = visibility_mask;
-		reveal_tile_mask.flags = 0;
-		tile_t required_tile_mask = reveal_tile_mask;
+		reveal_tile_mask.flags = 0xffff;
+		tile_t required_tile_mask;
+		required_tile_mask.visible = ~visibility_mask;
+		required_tile_mask.explored = ~visibility_mask;
 		required_tile_mask.flags = height_mask;
 		auto&sight_vals = game_st.sight_values.at(range);
 		size_t tile_x = (size_t)pos.x / 32;
@@ -932,6 +950,7 @@ struct state_functions {
 			auto*cur = sight_vals.maskdat.data();
 			auto*end = cur + sight_vals.min_mask_size;
 			for (; cur != end; ++cur) {
+				cur->vision_propagation = 0xff;
 				if (tile_x + cur->x >= game_st.map_tile_width) continue;
 				if (tile_y + cur->y >= game_st.map_tile_height) continue;
 				auto&tile = base_tile[cur->map_index_offset];
@@ -978,10 +997,8 @@ struct state_functions {
 					visible_to |= st.shared_vision[i];
 				}
 			}
-			log("reveal sight!\n");
-			reveal_sight_at(u->sprite->position, unit_sight_range(u), visible_to, u_flying(u));
-			log("done\n");
 		}
+		reveal_sight_at(u->sprite->position, unit_sight_range(u), visible_to, u_flying(u));
 	};
 
 	void update_unit_pathing(unit_t*u) {
@@ -1076,7 +1093,7 @@ struct state_functions {
 
 	void game_loop() {
 
-		in_game_loop = true;
+		allow_random = true;
 
 		if (st.update_tiles_countdown == 0) st.update_tiles_countdown = 100;
 		--st.update_tiles_countdown;
@@ -1084,11 +1101,12 @@ struct state_functions {
 
 		update_units();
 
-		in_game_loop = false;
+		allow_random = false;
 
 	}
 
 	int lcg_rand(int source) {
+		if (!allow_random) return 0;
 		++st.random_counts[source];
 		++st.total_random_counts;
 		st.lcg_rand_state *= 22695477;
@@ -1760,8 +1778,8 @@ struct state_functions {
 	void update_unit_finder(unit_t*u) {
 		if (ut_is_turret(u)) return;
 		
-		xy top_left = u->position - u->unit_type->dimensions.from;
-		xy bottom_right = u->position + u->unit_type->dimensions.to;
+		xy top_left = u->sprite->position - u->unit_type->dimensions.from;
+		xy bottom_right = u->sprite->position + u->unit_type->dimensions.to;
 
 		size_t left_index = unit_finder_lower_bound_index(st.unit_finder_x, top_left.x);
 		size_t top_index = unit_finder_lower_bound_index(st.unit_finder_y, top_left.y);
@@ -1778,8 +1796,6 @@ struct state_functions {
 		insert_unit_finder_x(right_index, u, bottom_right.x);
 		insert_unit_finder_y(bottom_index, u, bottom_right.y);
 		++st.unit_finder_size;
-
-		log("indexes is %d %d %d %d\n", left_index, top_index, right_index, bottom_index);
 		
 	}
 
@@ -1870,9 +1886,7 @@ struct state_functions {
 	unit_t*create_unit(const unit_type_t*unit_type, xy pos, int owner) {
 		if (!unit_type) xcept("attempt to create unit of null type");
 
-		if (in_game_loop) {
-			lcg_rand(14);
-		}
+		lcg_rand(14);
 		auto get_new = [&](const unit_type_t*unit_type) {
 			if (st.free_units.empty()) {
 				net_error_string(61); // Cannot create more units
@@ -1947,8 +1961,7 @@ struct state_functions {
 					if (produces_units()) u->current_button_set = UnitTypes::Factories;
 					else u->current_button_set = UnitTypes::Buildings;
 				}
-				if (in_game_loop) u->wireframe_randomizer = lcg_rand(15);
-				else u->wireframe_randomizer = 0;
+				u->wireframe_randomizer = lcg_rand(15);
 				if (ut_is_turret(u)) u->hp = 1;
 				else u->hp = u->unit_type->hitpoints / 10;
 				if (u_grounded_building(u)) u->order_type = get_order_type(Orders::Nothing);
@@ -2211,6 +2224,8 @@ struct state_functions {
 		u->status_flags &= ~unit_t::status_flag_iscript_nobrk;
 		u->sprite->flags &= ~sprite_t::flag_iscript_nobrk;
 		iscript_unit_setter ius(this, u);
+		unit_t* prev_iscript_order_unit = iscript_order_unit;
+		iscript_order_unit = u;
 		int anim = -1;
 		switch (u->sprite->main_image->iscript_state.animation) {
 		case iscript_anims::AirAttkInit:
@@ -2240,6 +2255,7 @@ struct state_functions {
 			}
 		}
 		u->movement_flags &= ~8;
+		iscript_order_unit = prev_iscript_order_unit;
 	}
 
 	void execute_next_order(unit_t* u) {
@@ -2602,6 +2618,10 @@ struct game_load_functions : state_functions {
 
 		st.tiles.clear();
 		st.tiles.resize(game_st.map_tile_width*game_st.map_tile_height);
+		for (auto&v : st.tiles) {
+			v.visible = 0xff;
+			v.explored = 0xff;
+		}
 		st.tiles_mega_tile_index.clear();
 		st.tiles_mega_tile_index.resize(st.tiles.size());
 
@@ -2844,7 +2864,7 @@ struct game_load_functions : state_functions {
 									else if (prev_x < 0) ++prev_x;
 									if (prev_y > 0) --prev_y;
 									else if (prev_y < 0) ++prev_y;
-									if (std::abs(prev_x) == std::abs(prev_y) || (prev_x == 0 && direction_x[dir]) || (prev_y == 0 && direction_y[dir])) {
+									if (std::abs(prev_x) == std::abs(prev_y) || (this_x == 0 && direction_x[dir]) || (this_y == 0 && direction_y[dir])) {
 										this_entry->prev = this_entry->prev2 = at(prev_y * v.max_width + prev_x).maskdat_node;
 										this_entry->prev_count = 1;
 									} else {
@@ -3078,13 +3098,23 @@ struct game_load_functions : state_functions {
 			for (size_t i = 0; i < game_st.gfx_tiles.size(); ++i) {
 				tile_id tile_id = game_st.gfx_tiles[i];
 				size_t megatile_index = game_st.cv5.at(tile_id.group_index()).megaTileRef[tile_id.subtile_index()];
+				int cv5_flags = game_st.cv5.at(tile_id.group_index()).flags & ~(tile_t::flag_walkable | tile_t::flag_unwalkable | tile_t::flag_very_high | tile_t::flag_middle | tile_t::flag_high | tile_t::partially_walkable);
 				st.tiles_mega_tile_index[i] = (uint16_t)megatile_index;
-				st.tiles[i].flags |= game_st.mega_tile_flags.at(megatile_index);
+				st.tiles[i].flags = game_st.mega_tile_flags.at(megatile_index) | cv5_flags;
 				if (tile_id.has_creep()) {
 					st.tiles_mega_tile_index[i] |= 0x8000;
 					st.tiles[i].flags |= tile_t::flag_has_creep;
 				}
 			}
+
+			tiles_flags_and(0, game_st.map_tile_height - 2, 5, 1, ~(tile_t::flag_walkable | tile_t::flag_has_creep | tile_t::partially_walkable));
+			tiles_flags_or(0, game_st.map_tile_height - 2, 5, 1, tile_t::flag_unbuildable);
+			tiles_flags_and(game_st.map_tile_width - 5, game_st.map_tile_height - 2, 5, 1, ~(tile_t::flag_walkable | tile_t::flag_has_creep | tile_t::partially_walkable));
+			tiles_flags_or(game_st.map_tile_width - 5, game_st.map_tile_height - 2, 5, 1, tile_t::flag_unbuildable);
+
+			tiles_flags_and(0, game_st.map_tile_height - 1, game_st.map_tile_width, 1, ~(tile_t::flag_walkable | tile_t::flag_has_creep | tile_t::partially_walkable));
+			tiles_flags_or(0, game_st.map_tile_height - 1, game_st.map_tile_width, 1, tile_t::flag_unbuildable);
+
 		};
 
 		bool bVictoryCondition = false;
@@ -3386,7 +3416,12 @@ struct game_load_functions : state_functions {
 
 		// This doesn't really belong here, but it can stay until we have proper
 		// game setup code
-		in_game_loop = true;
+		st.local_mask = 1;
+		for (int i = 0; i < 12; ++i) {
+			st.shared_vision[i] = 1 << i;
+		}
+
+		allow_random = true;
 
 		read_chunks({
 			{"VER ", true},
@@ -3431,7 +3466,7 @@ struct game_load_functions : state_functions {
 
 		} else xcept("unsupported map version %d", version);
 
-		in_game_loop = false;
+		allow_random = false;
 
 	}
 };

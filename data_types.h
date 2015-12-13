@@ -94,8 +94,7 @@ struct unit_type_t {
 	int last_pissed_sound;
 	int first_yes_sound;
 	int last_yes_sound;
-	int staredit_placement_box_width;
-	int staredit_placement_box_height;
+	xy staredit_placement_box;
 	int addon_horizontal;
 	int addon_vertical;
 	rect dimensions;

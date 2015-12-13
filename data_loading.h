@@ -94,17 +94,45 @@ to_T data_type_cast(from_T v) {
 	return (to_T)v;
 }
 
-template<typename load_T, typename field_T, typename obj_T, typename reader_T, typename arr_T>
+
+template<typename load_T, typename field_T>
+struct read_data {
+	template<typename reader_T>
+	static field_T read(reader_T&r) {
+		return data_type_cast<field_T>(r.get<load_T>());
+	}
+};
+template<typename load_T>
+struct read_data<load_T, xy> {
+	template<typename reader_T>
+	static xy read(reader_T&r) {
+		int x = data_type_cast<int>(r.get<load_T>());
+		int y = data_type_cast<int>(r.get<load_T>());
+		return xy(x, y);
+	}
+};
+template<typename load_T>
+struct read_data<load_T, rect> {
+	template<typename reader_T>
+	static rect read(reader_T&r) {
+		int x0 = data_type_cast<int>(r.get<load_T>());
+		int y0 = data_type_cast<int>(r.get<load_T>());
+		int x1 = data_type_cast<int>(r.get<load_T>());
+		int y1 = data_type_cast<int>(r.get<load_T>());
+		return { {x0, y0}, {x1, y1} };
+	}
+};
+
+template<typename load_T, typename field_T, typename reader_T, typename arr_T>
 void read_array(reader_T&r, arr_T&arr, size_t num, size_t offset) {
 	static_assert(!std::is_reference<field_T>::value, "field_T can not be a reference");
 	if (offset&(alignof(field_T)-1)) xcept("offset of %d for %s is not aligned to %d bytes", typeid(field_T).name(), offset, alignof(field_T));
 	for (size_t i = 0; i < num; ++i) {
-		auto val = r.get<load_T>();
-		*(field_T*)((uint8_t*)&arr[i] + offset) = data_type_cast<field_T>(val);
+		*(field_T*)((uint8_t*)&arr[i] + offset) = read_data<load_T, field_T>::read(r);
 	}
 }
 
-#define rawr(load_type, name, num) read_array<load_type, decltype(arr[0].name), std::remove_reference<decltype(arr[0])>::type>(r, arr, num, offsetof(std::remove_reference<decltype(arr[0])>::type, name))
+#define rawr(load_type, name, num) read_array<load_type, decltype(arr[0].name)>(r, arr, num, offsetof(std::remove_reference<decltype(arr[0])>::type, name))
 
 unit_types_t load_units_dat(a_string fn) {
 	static const size_t total_count = 228;
@@ -160,14 +188,10 @@ unit_types_t load_units_dat(a_string fn) {
 	rawr(uint16_t, last_pissed_sound, units_count);
 	rawr(uint16_t, first_yes_sound, units_count);
 	rawr(uint16_t, last_yes_sound, units_count);
-	rawr(uint16_t, staredit_placement_box_width, total_count);
-	rawr(uint16_t, staredit_placement_box_height, total_count);
+	rawr(int16_t, staredit_placement_box, total_count);
 	rawr(uint16_t, addon_horizontal, buildings_count);
 	rawr(uint16_t, addon_vertical, buildings_count);
-	rawr(uint16_t, dimensions.from.x, total_count);
-	rawr(uint16_t, dimensions.from.y, total_count);
-	rawr(uint16_t, dimensions.to.x, total_count);
-	rawr(uint16_t, dimensions.to.y, total_count);
+	rawr(int16_t, dimensions, total_count);
 	rawr(uint16_t, portrait, total_count);
 	rawr(uint16_t, mineral_cost, total_count);
 	rawr(uint16_t, gas_cost, total_count);
