@@ -43,17 +43,18 @@ struct unit_type_t {
 		flag_flyer = 4,
 
 		flag_worker = 8,
-		flag_is_turret = 0x10,
-
+		flag_turret = 0x10,
+		flag_flying_building = 0x20,
 		flag_hero = 0x40,
+		flag_regens_hp = 0x80,
 
 		flag_two_units_in_one_egg = 0x400,
 
 		flag_creep = 0x20000,
 
-		//flag_can_attack = 0x10000000,
-		flag_non_building = 0x10000000,
+		flag_can_move_or_attack = 0x10000000,
 		flag_invincible = 0x20000000,
+		flag_can_move = 0x80000000,
 	};
 
 	int id;
@@ -199,7 +200,7 @@ using flingy_types_t = type_container<flingy_type_t>;
 
 struct sprite_type_t {
 	enum flags_t : int {
-		flag_hidden = 0x20
+//		flag_hidden = 0x20
 	};
 
 	int id;

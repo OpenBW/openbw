@@ -183,14 +183,14 @@ struct unit_t: flingy_t {
 
 		status_flag_requires_detector = 0x100,
 		status_flag_cloaked = 0x200,
+		status_flag_frozen = 0x400,
 
 		status_flag_order_not_interruptible = 0x1000,
 		status_flag_iscript_nobrk = 0x2000,
 
-		//status_flag_can_attack = 0x10000,
-		//status_flag_not_building = 0x20000,
-		status_flag_non_building = 0x10000,
-		status_flag_building = 0x20000,
+		status_flag_can_not_attack = 0x8000,
+		status_flag_can_move_or_attack = 0x10000,
+		status_flag_can_move = 0x20000,
 		//status_flag_ignore_tile_collision = 0x40000,
 		status_flag_collision = 0x40000,
 		status_flag_immovable = 0x80000,

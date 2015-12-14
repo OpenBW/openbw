@@ -371,59 +371,50 @@ struct state_functions {
 		else u->status_flags &= ~flag;
 	};
 
-	bool ut_flag(unit_t*u, unit_type_t::flags_t flag) {
+	bool ut_flag(unit_t* u, unit_type_t::flags_t flag) {
 		return !!(u->unit_type->flags & flag);
 	};
-	bool u_status_flag(unit_t*u, unit_t::status_flags_t flag) {
+	bool u_status_flag(unit_t* u, unit_t::status_flags_t flag) {
 		return !!(u->status_flags & flag);
 	};
-	bool st_flag(sprite_t*s, sprite_type_t::flags_t flag) {
+	bool st_flag(sprite_t* s, sprite_type_t::flags_t flag) {
 		return !!(s->sprite_type->flags & flag);
 	};
 
-	bool u_completed(unit_t*u) {
+	bool u_completed(unit_t* u) {
 		return u_status_flag(u, unit_t::status_flag_completed);
 	};
-	bool u_in_building(unit_t*u) {
+	bool u_in_building(unit_t* u) {
 		return u_status_flag(u, unit_t::status_flag_in_building);
 	};
-	bool u_immovable(unit_t*u) {
+	bool u_immovable(unit_t* u) {
 		return u_status_flag(u, unit_t::status_flag_immovable);
 	};
-// 	bool u_unpowered(unit_t*u) {
-// 		return u_status_flag(u, unit_t::status_flag_unpowered);
-// 	};
-	bool u_disabled(unit_t*u) {
+	bool u_disabled(unit_t* u) {
 		return u_status_flag(u, unit_t::status_flag_disabled);
 	};
-	bool u_burrowed(unit_t*u) {
+	bool u_burrowed(unit_t* u) {
 		return u_status_flag(u, unit_t::status_flag_burrowed);
 	};
-// 	bool u_not_building(unit_t*u) {
-// 		return u_status_flag(u, unit_t::status_flag_not_building);
-// 	};
-// 	bool u_can_attack(unit_t*u) {
-// 		return u_status_flag(u, unit_t::status_flag_can_attack);
-// 	};
-	bool u_non_building(unit_t *u) {
-		return u_status_flag(u, unit_t::status_flag_non_building);
+	bool u_can_move_or_attack(unit_t* u) {
+		return u_status_flag(u, unit_t::status_flag_can_move_or_attack);
 	}
-	bool u_building(unit_t *u) {
-		return u_status_flag(u, unit_t::status_flag_building);
+	bool u_can_move(unit_t* u) {
+		return u_status_flag(u, unit_t::status_flag_can_move);
 	}
-	bool u_grounded_building(unit_t*u) {
+	bool u_grounded_building(unit_t* u) {
 		return u_status_flag(u, unit_t::status_flag_grounded_building);
 	};
-	bool u_hallucination(unit_t*u) {
+	bool u_hallucination(unit_t* u) {
 		return u_status_flag(u, unit_t::status_flag_hallucination);
 	};
-	bool u_flying(unit_t*u) {
+	bool u_flying(unit_t* u) {
 		return u_status_flag(u, unit_t::status_flag_flying);
 	};
-	bool u_speed_upgrade(unit_t*u) {
+	bool u_speed_upgrade(unit_t* u) {
 		return u_status_flag(u, unit_t::status_flag_speed_upgrade);
 	};
-	bool u_cooldown_upgrade(unit_t*u) {
+	bool u_cooldown_upgrade(unit_t* u) {
 		return u_status_flag(u, unit_t::status_flag_cooldown_upgrade);
 	};
 	bool u_gathering(unit_t* u) {
@@ -435,38 +426,53 @@ struct state_functions {
 	bool u_cloaked(unit_t* u) {
 		return u_status_flag(u, unit_t::status_flag_cloaked);
 	}
+	bool u_frozen(unit_t* u) {
+		return u_status_flag(u, unit_t::status_flag_frozen);
+	}
+	bool u_can_not_attack(unit_t* u) {
+		return u_status_flag(u, unit_t::status_flag_can_not_attack);
+	}
+	bool u_iscript_nobrk(unit_t* u) {
+		return u_status_flag(u, unit_t::status_flag_iscript_nobrk);
+	}
 
-	bool ut_is_turret(unit_t*u) {
-		return ut_flag(u, unit_type_t::flag_is_turret);
+	bool ut_turret(unit_t* u) {
+		return ut_flag(u, unit_type_t::flag_turret);
 	};
-	bool ut_worker(unit_t*u) {
+	bool ut_worker(unit_t* u) {
 		return ut_flag(u, unit_type_t::flag_worker);
 	};
-	bool ut_hero(unit_t*u) {
+	bool ut_hero(unit_t* u) {
 		return ut_flag(u, unit_type_t::flag_hero);
 	};
-	bool ut_building(unit_t*u) {
+	bool ut_building(unit_t* u) {
 		return ut_flag(u, unit_type_t::flag_building);
 	};
-	bool ut_flyer(unit_t*u) {
+	bool ut_flyer(unit_t* u) {
 		return ut_flag(u, unit_type_t::flag_flyer);
 	};
-// 	bool ut_can_attack(unit_t*u) {
-// 		return ut_flag(u, unit_type_t::flag_can_attack);
-// 	};
-	bool ut_non_building(unit_t*u) {
-		return ut_flag(u, unit_type_t::flag_non_building);
+	bool ut_can_move_or_attack(unit_t* u) {
+		return ut_flag(u, unit_type_t::flag_can_move_or_attack);
 	};
-	bool ut_invincible(unit_t*u) {
+	bool ut_can_move(unit_t* u) {
+		return ut_flag(u, unit_type_t::flag_can_move);
+	};
+	bool ut_invincible(unit_t* u) {
 		return ut_flag(u, unit_type_t::flag_invincible);
 	};
-	bool ut_two_units_in_one_egg(unit_t*u) {
+	bool ut_two_units_in_one_egg(unit_t* u) {
 		return ut_flag(u, unit_type_t::flag_two_units_in_one_egg);
 	};
+	bool ut_regens_hp(unit_t* u) {
+		return ut_flag(u, unit_type_t::flag_regens_hp);
+	}
+	bool ut_flying_building(unit_t* u) {
+		return ut_flag(u, unit_type_t::flag_flying_building);
+	}
 
-	bool st_hidden(sprite_t*sprite) {
-		return st_flag(sprite, sprite_type_t::flag_hidden);
-	};
+// 	bool st_hidden(sprite_t*sprite) {
+// 		return st_flag(sprite, sprite_type_t::flag_hidden);
+// 	};
 
 	const unit_type_t*get_unit_type(int id) {
 		if ((size_t)id >= 228) xcept("invalid unit id %d", id);
@@ -572,8 +578,8 @@ struct state_functions {
 		}
 	};
 
-	bool is_frozen_or_flying(unit_t*u) {
-		if (u_flying(u)) return true;
+	bool is_frozen(unit_t*u) {
+		if (u_frozen(u)) return true;
 		if (u->lockdown_timer) return true;
 		if (u->stasis_timer) return true;
 		if (u->maelstrom_timer) return true;
@@ -582,7 +588,7 @@ struct state_functions {
 
 	void set_current_button_set(unit_t*u, int type) {
 		if (type != UnitTypes::None && !ut_building(u)) {
-			if (is_frozen_or_flying(u)) return;
+			if (is_frozen(u)) return;
 		}
 		u->current_button_set = type;
 	};
@@ -595,7 +601,7 @@ struct state_functions {
 	};
 
 	void freeze_effect_end(unit_t*u, int first, int last) {
-		bool still_frozen = is_frozen_or_flying(u);
+		bool still_frozen = is_frozen(u);
 		if (u->subunit && !still_frozen) {
 			u->status_flags &= ~StatusFlags::DoodadStatesThing;
 			xcept("freeze_effect_end: orderComputer_cl");
@@ -748,8 +754,8 @@ struct state_functions {
 				updateUnitStatusTimers(u);
 			}
 		}
-		if (u->status_flags & StatusFlags::Completed) {
-			if (u->unit_type->flags & UnitPrototypeFlags::RegeneratesHP) {
+		if (u_completed(u)) {
+			if (ut_regens_hp(u)) {
 				if (u->hp > 0 && u->unit_type->hitpoints) {
 					set_unit_hp(u, u->hp + 4);
 				}
@@ -766,7 +772,7 @@ struct state_functions {
 			}
 			int gf = u->unit_type->staredit_group_flags;
 			if (gf&GroupFlags::Terran && ~gf&(GroupFlags::Zerg | GroupFlags::Protoss)) {
-				if (u->status_flags&StatusFlags::GroundedBuilding || u->unit_type->flags & UnitPrototypeFlags::FlyingBuilding) {
+				if (u_grounded_building(u) || ut_flying_building(u)) {
 					if (unit_hp_below_33_percent(u)) {
 						xcept("killTargetUnitCheck(...)");
 					}
@@ -775,14 +781,595 @@ struct state_functions {
 		}
 	};
 
-	void update_unit_orders(unit_t*u) {
-		if (~u->unit_type->flags & UnitPrototypeFlags::Subunit && ~u->sprite->flags&SpriteFlags::Hidden) {
+	void order_destroy(unit_t* u) {
+		xcept("order destroy %p\n", u);
+	}
+
+	void order_Guard(unit_t* u) {
+		u->main_order_timer = lcg_rand(29, 0, 15);
+		u->order_type = get_order_type(Orders::PlayerGuard);
+	}
+
+	bool execute_main_order(unit_t* u) {
+
+		switch (u->order_type->id) {
+		case Orders::Die:
+			xcept("Die");
+			return false;
+		case Orders::IncompleteWarping:
+			xcept("IncompleteWarping");
+			return true;
+		case Orders::NukeTrack:
+			xcept("NukeTrack");
+			return true;
+		case Orders::WarpIn:
+			xcept("WarpIn");
+			return true;
+		}
+
+		if (is_frozen(u) || (!u_can_move(u) && u_can_not_attack(u))) {
+			if (u->main_order_timer == 0) u->main_order_timer = 15;
+			if (is_frozen(u)) return true;
+		}
+
+		switch (u->order_type->id) {
+		case Orders::TurretGuard:
+			xcept("TurretGuard");
+			break;
+		case Orders::TurretAttack:
+			xcept("TurretAttack");
+			break;
+		case Orders::DroneBuild:
+			xcept("DroneBuild");
+			break;
+		case Orders::PlaceBuilding:
+			xcept("PlaceBuilding");
+			break;
+		case Orders::PlaceProtossBuilding:
+			xcept("PlaceProtossBuilding");
+			break;
+		case Orders::ConstructingBuilding:
+			xcept("ConstructingBuilding");
+			break;
+		case Orders::Repair:
+			xcept("Repair");
+			break;
+		case Orders::ZergBirth:
+			xcept("ZergBirth");
+			break;
+		case Orders::ZergUnitMorph:
+			xcept("ZergUnitMorph");
+			break;
+		case Orders::IncompleteBuilding:
+			xcept("IncompleteBuilding");
+			break;
+		case Orders::IncompleteMorphing:
+			xcept("IncompleteMorphing");
+			break;
+		case Orders::ScarabAttack:
+			xcept("ScarabAttack");
+			break;
+		case Orders::RechargeShieldsUnit:
+			xcept("RechargeShieldsUnit");
+			break;
+		case Orders::BuildingLand:
+			xcept("BuildingLand");
+			break;
+		case Orders::BuildingLiftOff:
+			xcept("BuildingLiftOff");
+			break;
+		case Orders::ResearchTech:
+			xcept("ResearchTech");
+			break;
+		case Orders::Upgrade:
+			xcept("Upgrade");
+			break;
+		case Orders::Harvest3:
+			xcept("Harvest3");
+			break;
+		case Orders::Harvest4:
+			xcept("Harvest4");
+			break;
+		case Orders::Interrupted:
+			xcept("Interrupted");
+			break;
+		case Orders::Sieging:
+			xcept("Siegeing");
+			break;
+		case Orders::Unsieging:
+			xcept("Unsiegeing");
+			break;
+		case Orders::ArchonWarp:
+			xcept("ArchonWarp");
+			break;
+		case Orders::CompletingArchonSummon:
+			xcept("CompletingArchonSummon");
+			break;
+		case Orders::NukeTrain:
+			xcept("NukeTrain");
+			break;
+		case Orders::InitializeArbiter:
+			xcept("InitializeArbiter");
+			break;
+		case Orders::ResetCollision:
+			xcept("ResetCollision");
+			break;
+		case Orders::ResetHarvestCollision:
+			xcept("ResetHarvestCollision");
+			break;
+		case Orders::CTFCOP2:
+			xcept("CTFCOP2");
+			break;
+		case Orders::SelfDestructing:
+			xcept("SelfDestructing");
+			break;
+		case Orders::Critter:
+			xcept("Critter");
+			break;
+		case Orders::MedicHeal:
+			xcept("MedicHeal");
+			break;
+		case Orders::HealMove:
+			xcept("HealMove");
+			break;
+		case Orders::MedicHoldPosition:
+			xcept("MedicHoldPosition");
+			break;
+		case Orders::MedicHealToIdle:
+			xcept("MedicHealToIdle");
+			break;
+		case Orders::DarkArchonMeld:
+			xcept("DarkArchonMeld");
+			break;
+		}
+		if (u->order_queue_timer) {
+			--u->order_queue_timer;
+			return true;
+		}
+		u->order_queue_timer = 8;
+		switch (u->order_type->id) {
+		case Orders::Die:
+			xcept("Die");
+			break;
+		case Orders::Stop:
+			xcept("Stop");
+			break;
+		case Orders::Guard:
+			order_Guard(u);
+			break;
+		case Orders::BunkerGuard:
+			xcept("BunkerGuard");
+			break;
+		case Orders::Move:
+			xcept("Move");
+			break;
+		case Orders::Attack1:
+			xcept("Attack1");
+			break;
+		case Orders::Attack2:
+			xcept("Attack2");
+			break;
+		case Orders::AttackUnit:
+			xcept("AttackUnit");
+			break;
+		case Orders::Hover:
+			xcept("Hover");
+			break;
+		case Orders::AttackMove:
+			xcept("AttackMove");
+			break;
+		case Orders::UnusedNothing:
+			xcept("UnusedNothing");
+			break;
+		case Orders::UnusedPowerup:
+			xcept("UnusedPowerup");
+			break;
+		case Orders::TowerGuard:
+			xcept("TowerGuard");
+			break;
+		case Orders::TowerAttack:
+			xcept("TowerAttack");
+			break;
+		case Orders::VultureMine:
+			xcept("VultureMine");
+			break;
+		case Orders::TurretAttack:
+			xcept("TurretAttack");
+			break;
+		case Orders::Unused_24:
+			xcept("Unused_24");
+			break;
+		case Orders::DroneBuild:
+			xcept("DroneBuild");
+			break;
+		case Orders::CastInfestation:
+			xcept("CastInfestation");
+			break;
+		case Orders::MoveToInfest:
+			xcept("MoveToInfest");
+			break;
+		case Orders::PlaceProtossBuilding:
+			xcept("PlaceProtossBuilding");
+			break;
+		case Orders::Repair:
+			xcept("Repair");
+			break;
+		case Orders::MoveToRepair:
+			xcept("MoveToRepair");
+			break;
+		case Orders::ZergUnitMorph:
+			xcept("ZergUnitMorph");
+			break;
+		case Orders::IncompleteMorphing:
+			xcept("IncompleteMorphing");
+			break;
+		case Orders::BuildNydusExit:
+			xcept("BuildNydusExit");
+			break;
+		case Orders::IncompleteWarping:
+			xcept("IncompleteWarping");
+			break;
+		case Orders::Follow:
+			xcept("Follow");
+			break;
+		case Orders::Carrier:
+			xcept("Carrier");
+			break;
+		case Orders::ReaverCarrierMove:
+			xcept("ReaverCarrierMove");
+			break;
+		case Orders::CarrierStop:
+			xcept("CarrierStop");
+			break;
+		case Orders::CarrierAttack:
+			xcept("CarrierAttack");
+			break;
+		case Orders::CarrierMoveToAttack:
+			xcept("CarrierMoveToAttack");
+			break;
+		case Orders::CarrierIgnore2:
+			xcept("CarrierIgnore2");
+			break;
+		case Orders::CarrierFight:
+			xcept("CarrierFight");
+			break;
+		case Orders::CarrierHoldPosition:
+			xcept("CarrierHoldPosition");
+			break;
+		case Orders::Reaver:
+			xcept("Reaver");
+			break;
+		case Orders::ReaverAttack:
+			xcept("ReaverAttack");
+			break;
+		case Orders::ReaverMoveToAttack:
+			xcept("ReaverMoveToAttack");
+			break;
+		case Orders::ReaverFight:
+			xcept("ReaverFight");
+			break;
+		case Orders::TrainFighter:
+			xcept("TrainFighter");
+			break;
+		case Orders::RechargeShieldsUnit:
+			xcept("RechargeShieldsUnit");
+			break;
+		case Orders::ShieldBattery:
+			xcept("ShieldBattery");
+			break;
+		case Orders::InterceptorReturn:
+			xcept("InterceptorReturn");
+			break;
+		case Orders::DroneLiftOff:
+			xcept("DroneLiftOff");
+			break;
+		case Orders::Upgrade:
+			xcept("Upgrade");
+			break;
+		case Orders::SpawningLarva:
+			xcept("SpawningLarva");
+			break;
+		case Orders::Harvest1:
+			xcept("Harvest1");
+			break;
+		case Orders::Harvest2:
+			xcept("Harvest2");
+			break;
+		case Orders::MoveToGas:
+			xcept("MoveToGas");
+			break;
+		case Orders::WaitForGas:
+			xcept("WaitForGas");
+			break;
+		case Orders::HarvestGas:
+			xcept("HarvestGas");
+			break;
+		case Orders::ReturnGas:
+			xcept("ReturnGas");
+			break;
+		case Orders::MoveToMinerals:
+			xcept("MoveToMinerals");
+			break;
+		case Orders::WaitForMinerals:
+			xcept("WaitForMinerals");
+			break;
+		case Orders::Harvest4:
+			xcept("Harvest4");
+			break;
+		case Orders::Interrupted:
+			xcept("Interrupted");
+			break;
+		case Orders::EnterTransport:
+			xcept("EnterTransport");
+			break;
+		case Orders::PickupIdle:
+			xcept("PickupIdle");
+			break;
+		case Orders::PickupTransport:
+			xcept("PickupTransport");
+			break;
+		case Orders::PickupBunker:
+			xcept("PickupBunker");
+			break;
+		case Orders::Pickup4:
+			xcept("Pickup4");
+			break;
+		case Orders::Unsieging:
+			xcept("Unsieging");
+			break;
+		case Orders::WatchTarget:
+			xcept("WatchTarget");
+			break;
+		case Orders::SpreadCreep:
+			xcept("SpreadCreep");
+			break;
+		case Orders::CompletingArchonSummon:
+			xcept("CompletingArchonSummon");
+			break;
+		case Orders::HoldPosition:
+			xcept("HoldPosition");
+			break;
+		case Orders::Decloak:
+			xcept("Decloak");
+			break;
+		case Orders::Unload:
+			xcept("Unload");
+			break;
+		case Orders::MoveUnload:
+			xcept("MoveUnload");
+			break;
+		case Orders::FireYamatoGun:
+			xcept("FireYamatoGun");
+			break;
+		case Orders::MoveToFireYamatoGun:
+			xcept("MoveToFireYamatoGun");
+			break;
+		case Orders::CastLockdown:
+			xcept("CastLockdown");
+			break;
+		case Orders::Burrowing:
+			xcept("Burrowing");
+			break;
+		case Orders::Burrowed:
+			xcept("Burrowed");
+			break;
+		case Orders::Unburrowing:
+			xcept("Unburrowing");
+			break;
+		case Orders::CastDarkSwarm:
+			xcept("CastDarkSwarm");
+			break;
+		case Orders::CastParasite:
+			xcept("CastParasite");
+			break;
+		case Orders::CastSpawnBroodlings:
+			xcept("CastSpawnBroodlings");
+			break;
+		case Orders::NukeTrain:
+			xcept("NukeTrain");
+			break;
+		case Orders::NukeLaunch:
+			xcept("NukeLaunch");
+			break;
+		case Orders::NukePaint:
+			xcept("NukePaint");
+			break;
+		case Orders::NukeUnit:
+			xcept("NukeUnit");
+			break;
+		case Orders::CloakNearbyUnits:
+			xcept("CloakNearbyUnits");
+			break;
+		case Orders::PlaceMine:
+			xcept("PlaceMine");
+			break;
+		case Orders::RightClickAction:
+			xcept("RightClickAction");
+			break;
+		case Orders::SuicideUnit:
+			xcept("SuicideUnit");
+			break;
+		case Orders::SuicideLocation:
+			xcept("SuicideLocation");
+			break;
+		case Orders::SuicideHoldPosition:
+			xcept("SuicideHoldPosition");
+			break;
+		case Orders::Teleport:
+			xcept("Teleport");
+			break;
+		case Orders::CastScannerSweep:
+			xcept("CastScannerSweep");
+			break;
+		case Orders::Scanner:
+			xcept("Scanner");
+			break;
+		case Orders::CastDefensiveMatrix:
+			xcept("CastDefensiveMatrix");
+			break;
+		case Orders::CastPsionicStorm:
+			xcept("CastPsionicStorm");
+			break;
+		case Orders::CastIrradiate:
+			xcept("CastIrradiate");
+			break;
+		case Orders::CastPlague:
+			xcept("CastPlague");
+			break;
+		case Orders::CastConsume:
+			xcept("CastConsume");
+			break;
+		case Orders::CastEnsnare:
+			xcept("CastEnsnare");
+			break;
+		case Orders::CastStasisField:
+			xcept("CastStasisField");
+			break;
+		case Orders::ResetHarvestCollision:
+			xcept("ResetHarvestCollision");
+			break;
+		case Orders::Patrol:
+			xcept("Patrol");
+			break;
+		case Orders::CTFCOPInit:
+			xcept("CTFCOPInit");
+			break;
+		case Orders::CTFCOP2:
+			xcept("CTFCOP2");
+			break;
+		case Orders::ComputerAI:
+			xcept("ComputerAI");
+			break;
+		case Orders::AtkMoveEP:
+			xcept("AtkMoveEP");
+			break;
+		case Orders::HarassMove:
+			xcept("HarassMove");
+			break;
+		case Orders::AIPatrol:
+			xcept("AIPatrol");
+			break;
+		case Orders::GuardPost:
+			xcept("GuardPost");
+			break;
+		case Orders::RescuePassive:
+			xcept("RescuePassive");
+			break;
+		case Orders::Neutral:
+			xcept("Neutral");
+			break;
+		case Orders::ComputerReturn:
+			xcept("ComputerReturn");
+			break;
+		case Orders::Critter:
+			xcept("Critter");
+			break;
+		case Orders::HiddenGun:
+			xcept("HiddenGun");
+			break;
+		case Orders::OpenDoor:
+			xcept("OpenDoor");
+			break;
+		case Orders::CloseDoor:
+			xcept("CloseDoor");
+			break;
+		case Orders::HideTrap:
+			xcept("HideTrap");
+			break;
+		case Orders::RevealTrap:
+			xcept("RevealTrap");
+			break;
+		case Orders::EnableDoodad:
+			xcept("EnableDoodad");
+			break;
+		case Orders::WarpIn:
+			xcept("WarpIn");
+			break;
+		case Orders::MedicHealToIdle:
+			xcept("MedicHealToIdle");
+			break;
+		case Orders::CastRestoration:
+			xcept("CastRestoration");
+			break;
+		case Orders::CastDisruptionWeb:
+			xcept("CastDisruptionWeb");
+			break;
+		case Orders::DarkArchonMeld:
+			xcept("DarkArchonMeld");
+			break;
+		case Orders::CastFeedback:
+			xcept("CastFeedback");
+			break;
+		case Orders::CastOpticalFlare:
+			xcept("CastOpticalFlare");
+			break;
+		case Orders::CastMaelstrom:
+			xcept("CastMaelstrom");
+			break;
+		}
+
+		return true;
+	}
+
+	void execute_secondary_order(unit_t* u) {
+		if (u->secondary_order_id == Orders::Hallucination2) {
+			if (u->defense_matrix_damage || u->stim_timer || u->ensnare_timer || u->lockdown_timer || u->irradiate_timer || u->stasis_timer || u->parasite_flags || u->storm_timer || u->plague_timer || u->is_blind || u->maelstrom_timer) {
+				order_destroy(u);
+			}
+			return;
+		}
+		if (is_frozen(u)) return;
+		switch (u->secondary_order_id) {
+		case Orders::Train:
+			xcept("Train");
+			break;
+		case Orders::BuildAddon:
+			xcept("BuildAddon");
+			break;
+		case Orders::TrainFighter:
+			xcept("TrainFighter");
+			break;
+		case Orders::ShieldBattery:
+			xcept("ShieldBattery");
+			break;
+		case Orders::SpawningLarva:
+			xcept("SpawningLarva");
+			break;
+		case Orders::SpreadCreep:
+			xcept("SpreadCreep");
+			break;
+		case Orders::Cloak:
+			xcept("Cloak");
+			break;
+		case Orders::Decloak:
+			xcept("Decloak");
+			break;
+		case Orders::CloakNearbyUnits:
+			xcept("CloakNearbyUnits");
+			break;
+		}
+	}
+
+	void update_unit_orders(unit_t* u) {
+		if (!ut_turret(u) && ~u->sprite->flags & sprite_t::flag_hidden) {
 			update_selection_sprite(u->sprite, st.selection_circle_color[u->owner]);
 		}
 
 		update_unit_timers(u);
 
-		xcept("...");
+		if (!execute_main_order(u)) return;
+		execute_secondary_order(u);
+
+		if (u->subunit && !ut_turret(u)) {
+			iscript_unit_setter ius(this, u->subunit);
+			update_unit_orders(u->subunit);
+		}
+
+		if (u->sprite) {
+			if (!iscript_execute_sprite(u->sprite)) u->sprite = nullptr;
+		}
+
+		if (!u->sprite) xcept("unit has null sprite");
 
 	};
 
@@ -791,44 +1378,51 @@ struct state_functions {
 		return u_immovable(u) ? 2 : 1;
 	};
 
-	bool unit_order_dead(unit_t*u) {
+	bool unit_dead(unit_t*u) {
+		// I don't like this very much, since order_state 1 means the unit is being or has been destroyed.
 		return u->order_type->id == Orders::Die && u->order_state == 1;
 	};
 
-	bool Unit_ExecPathingState(unit_t*u) {
+	void movement_UM_Init(unit_t*u) {
+		u->pathing_flags &= ~(1 | 2);
+		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
+		u->contour_bounds = { { 0,0 },{ 0,0 } };
+		int next_state = movement_states::UM_Lump;
+		if (!ut_turret(u) && u_iscript_nobrk(u)) {
+			next_state = movement_states::UM_InitSeq;
+		} else if (!u->sprite || unit_dead(u)) {
+			// Should be unreachable, since if we get here the unit is almost certainly already destroyed.
+			// If this throws, eliminate the code path that leads to it.
+			xcept("unreachable?");
+			next_state = movement_states::UM_Lump;
+		} else if (u_in_building(u)) {
+			next_state = movement_states::UM_Bunker;
+		} else if (u->sprite->flags & sprite_t::flag_hidden) {
+			if (u->movement_flags & MovementFlags::Accelerating || unit_movepos_state(u) == 0) {
+				// SetMoveTarget_xy(u)
+				// ...
+				xcept("todo hidden sprite pathing stuff");
+			}
+			next_state = movement_states::UM_Hidden;
+		} else if (u_burrowed(u)) {
+			next_state = movement_states::UM_Lump;
+		} else if (u_can_move(u)) {
+			next_state = u->pathing_flags & 1 ? movement_states::UM_AtRest : movement_states::UM_Flyer;
+		} else if (u_can_move_or_attack(u)) {
+			next_state = ut_turret(u) ? movement_states::UM_Turret : movement_states::UM_BldgTurret;
+		} else if (u->pathing_flags & 1 && (u->movement_flags & MovementFlags::Accelerating || unit_movepos_state(u) == 0)) {
+			next_state = movement_states::UM_LumpWannabe;
+		}
+		u->movement_state = next_state;
+	};
+
+	bool execute_movement(unit_t*u) {
 
 		bool refresh_vision = update_tiles;
 
-		auto UMInitialize = [&](unit_t*u) {
-			u->pathing_flags &= ~(1 | 2);
-			if (u->sprite->elevation_level) u->pathing_flags |= 1;
-			u->contour_bounds = { {0,0},{0,0} };
-			int next_state = UM_Lump;
-			if (!ut_is_turret(u) && u_in_building(u)) {
-				next_state = UM_InitSeq;
-			} else if (!u->sprite || unit_order_dead(u)) {
-				next_state = UM_Lump;
-			} else if (u_in_building(u)) {
-				next_state = UM_Bunker;
-			} else if (st_hidden(u->sprite)) {
-				if (u->movement_flags & MovementFlags::Accelerating || unit_movepos_state(u) == 0) {
-					// SetMoveTarget_xy(u)
-					// ...
-					xcept("todo hidden sprite pathing stuff");
-				}
-				next_state = UM_Hidden;
-			} else if (u_burrowed(u)) {
-				next_state = UM_Lump;
-			}
-			//else if (u_not_building(u)) next_state = u->pathing_flags & 1 ? UM_AtRest : UM_Flyer;
-			//else if (u_can_attack(u)) next_state = ut_is_turret(u) ? UM_BldgTurret : UM_Turret;
-			else if (u->pathing_flags & 1 && (u->movement_flags & MovementFlags::Accelerating || unit_movepos_state(u) == 0)) next_state = UM_LumpWannabe;
-			u->movement_state = next_state;
-		};
-
 		switch (u->movement_state) {
-		case UM_Init:
-			UMInitialize(u);
+		case movement_states::UM_Init:
+			movement_UM_Init(u);
 			break;
 		default:
 			xcept("fixme: movement state %d\n", u->movement_state);
@@ -898,7 +1492,7 @@ struct state_functions {
 		for (auto idx : u->loaded_units) {
 			unit_t*lu = get_unit(idx);
 			if (!lu || !lu->sprite) continue;
-			if (unit_order_dead(lu)) continue;
+			if (unit_dead(lu)) continue;
 			if (!ut_worker(lu)) continue;
 			if (lu->worker.powerup && lu->worker.powerup->unit_type->id == UnitTypes::Powerup_Flag) return true;
 		}
@@ -1003,18 +1597,120 @@ struct state_functions {
 
 	void update_unit_pathing(unit_t*u) {
 
-		bool refresh_vision = Unit_ExecPathingState(u);
+		bool refresh_vision = execute_movement(u);
 		if (refresh_vision) refresh_unit_vision(u);
-		if (u->status_flags&StatusFlags::Completed) {
-			if (u->subunit && ~u->unit_type->flags & UnitPrototypeFlags::Subunit) {
-				xcept("update_unit_pathing: subunit stuff");
-			}
+
+		if (u_completed(u) && u->subunit && !ut_turret(u)) {
+			xcept("update_unit_pathing: turret stuff");
 		}
 	};
 
 	void UpdateUnitSpriteInfo(unit_t*u) {
 
 	};
+
+	bool execute_hidden_unit_main_order(unit_t* u) {
+		switch (u->order_type->id) {
+		case Orders::Die:
+			xcept("hidden Die");
+			return false;
+		case Orders::PlayerGuard:
+			xcept("hidden PlayerGuard");
+			return true;
+		case Orders::TurretGuard:
+			xcept("hidden TurretGuard");
+			return true;
+		case Orders::UnusedPowerup:
+			xcept("hidden UnusedPowerup");
+			return true;
+		case Orders::TurretAttack:
+			xcept("hidden TurretAttack");
+			return true;
+		case Orders::Nothing:
+			return true;
+		case Orders::Unused_24:
+			return true;
+		case Orders::InfestingCommandCenter:
+			xcept("hidden InfestingCommandCenter");
+			return true;
+		case Orders::HarvestGas:
+			xcept("hidden HarvestGas");
+			return true;
+		case Orders::PowerupIdle:
+			xcept("hidden PowerupIdle");
+			return true;
+		case Orders::EnterTransport:
+			xcept("hidden EnterTransport");
+			return true;
+		case Orders::NukeLaunch:
+			xcept("hidden NukeLaunch");
+			return true;
+		case Orders::ResetCollision:
+			xcept("hidden ResetCollision");
+			return true;
+		case Orders::ResetHarvestCollision:
+			xcept("hidden ResetHarvestCollision");
+			return true;
+		case Orders::Neutral:
+			return true;
+		case Orders::Medic:
+			return true;
+		case Orders::MedicHeal:
+			return true;
+		}
+		if (u->order_queue_timer) {
+			--u->order_queue_timer;
+			return true;
+		}
+		u->order_queue_timer = 8;
+		switch (u->order_type->id) {
+		case Orders::BunkerGuard:
+			xcept("hidden BunkerGuard");
+			break;
+		case Orders::EnterTransport:
+			xcept("hidden EnterTransport");
+			break;
+		case Orders::ComputerAI:
+			xcept("hidden ComputerAI");
+			break;
+		case Orders::RescuePassive:
+			xcept("hidden RescuePassive");
+			break;
+		}
+		return true;
+	}
+
+	void execute_hidden_unit_secondary_order(unit_t* u) {
+		switch (u->secondary_order_id) {
+		case Orders::TrainFighter:
+			xcept("hidden TrainFighter");
+			break;
+		case Orders::Cloak:
+			xcept("hidden Cloak");
+			break;
+		case Orders::Decloak:
+			xcept("hidden Decloak");
+			break;
+		}
+	}
+
+	void update_hidden_unit(unit_t* u) {
+		if (u->subunit && !ut_turret(u)) {
+			iscript_unit_setter ius(this, u->subunit);
+			update_hidden_unit(u->subunit);
+		}
+		execute_movement(u);
+		update_unit_timers(u);
+
+		if (!execute_hidden_unit_main_order(u)) return;
+		execute_hidden_unit_secondary_order(u);
+
+		if (u->sprite) {
+			if (!iscript_execute_sprite(u->sprite)) u->sprite = nullptr;
+		}
+
+		if (!u->sprite) xcept("unit has null sprite");
+	}
 
 	void update_units() {
 
@@ -1076,7 +1772,9 @@ struct state_functions {
 
 		for (unit_t*u : st.visible_units) {
 			UpdateUnitSpriteInfo(u);
-			xcept("...");
+			if (u_cloaked(u) || u_requires_detector(u)) {
+				xcept("update_units cloaked stuff");
+			}
 		}
 
 		for (unit_t*u : st.visible_units) {
@@ -1085,7 +1783,20 @@ struct state_functions {
 			update_unit_orders(u);
 		}
 
-		xcept("...");
+		for (unit_t*u : st.hidden_units) {
+			iscript_order_unit = u;
+			iscript_unit = u;
+			update_hidden_unit(u);
+		}
+		// burrowed/cloaked units
+		// update_psi()
+		// some lurker stuff
+
+		for (unit_t*u : st.scanner_sweep_units) {
+			iscript_order_unit = u;
+			iscript_unit = u;
+			update_unit_orders(u);
+		}
 
 		iscript_order_unit = nullptr;
 		iscript_unit = nullptr;
@@ -1105,13 +1816,17 @@ struct state_functions {
 
 	}
 
+	// returns a random number in the range [0, 0x7fff]
 	int lcg_rand(int source) {
 		if (!allow_random) return 0;
 		++st.random_counts[source];
 		++st.total_random_counts;
-		st.lcg_rand_state *= 22695477;
-		++st.lcg_rand_state;
+		st.lcg_rand_state = st.lcg_rand_state * 22695477 + 1;
 		return (st.lcg_rand_state >> 16) & 0x7fff;
+	}
+	// returns a random number in the range [from, to]
+	int lcg_rand(int source, int from, int to) {
+		return from + ((lcg_rand(source) * (to - from + 1)) >> 15);
 	}
 
 	void net_error_string(int str_index) {
@@ -1663,7 +2378,7 @@ struct state_functions {
 		if (u->unit_type->id == UnitTypes::Hero_Mojo) speed = true;
 		if (u->unit_type->id == UnitTypes::Hero_Artanis) speed = true;
 		if (u->unit_type->id == UnitTypes::Zerg_Lurker) speed = true;
-		if (cooldown!=u_cooldown_upgrade(u) || speed!=u_speed_upgrade(u)) {
+		if (cooldown != u_cooldown_upgrade(u) || speed != u_speed_upgrade(u)) {
 			if (cooldown) u->status_flags |= unit_t::status_flag_cooldown_upgrade;
 			if (speed) u->status_flags |= unit_t::status_flag_speed_upgrade;
 			update_unit_speed(u);
@@ -1714,7 +2429,7 @@ struct state_functions {
 
 	void increment_unit_counts(unit_t*u, int count) {
 		if (u_hallucination(u)) return;
-		if (ut_is_turret(u)) return;
+		if (ut_turret(u)) return;
 
 		st.unit_counts[u->owner][u->unit_type->id] += count;
 		int supply_required = u->unit_type->supply_required;
@@ -1776,7 +2491,7 @@ struct state_functions {
 	}
 
 	void update_unit_finder(unit_t*u) {
-		if (ut_is_turret(u)) return;
+		if (ut_turret(u)) return;
 		
 		xy top_left = u->sprite->position - u->unit_type->dimensions.from;
 		xy bottom_right = u->sprite->position + u->unit_type->dimensions.to;
@@ -1830,8 +2545,8 @@ struct state_functions {
 		u->sprite->elevation_level = unit_type->elevation_level;
 		u_set_status_flag(u, unit_t::status_flag_grounded_building, ut_building(u));
 		u_set_status_flag(u, unit_t::status_flag_flying, ut_flyer(u));
-		u_set_status_flag(u, unit_t::status_flag_non_building, ut_non_building(u));
-		u_set_status_flag(u, (unit_t::status_flags_t)0x20000, ut_flag(u, (unit_type_t::flags_t)0x8000000));
+		u_set_status_flag(u, unit_t::status_flag_can_move_or_attack, ut_can_move_or_attack(u));
+		u_set_status_flag(u, unit_t::status_flag_can_move, ut_can_move(u));
 		u_set_status_flag(u, (unit_t::status_flags_t)0x100000, !ut_flyer(u));
 		if (u->unit_type->elevation_level < 12) u->pathing_flags |= 1;
 		else u->pathing_flags &= ~1;
@@ -1878,9 +2593,7 @@ struct state_functions {
 	}
 
 	void destroy_unit(unit_t*u) {
-
-		xcept("destroy unit %p\n", u);
-		
+		xcept("destroy %p\n", u);
 	}
 
 	unit_t*create_unit(const unit_type_t*unit_type, xy pos, int owner) {
@@ -1957,12 +2670,12 @@ struct state_functions {
 					if (u->unit_type->id == UnitTypes::Protoss_Gateway) return true;
 					return false;
 				};
-				if (!is_frozen_or_flying(u) || u_completed(u)) {
+				if (!is_frozen(u) || u_completed(u)) {
 					if (produces_units()) u->current_button_set = UnitTypes::Factories;
 					else u->current_button_set = UnitTypes::Buildings;
 				}
 				u->wireframe_randomizer = lcg_rand(15);
-				if (ut_is_turret(u)) u->hp = 1;
+				if (ut_turret(u)) u->hp = 1;
 				else u->hp = u->unit_type->hitpoints / 10;
 				if (u_grounded_building(u)) u->order_type = get_order_type(Orders::Nothing);
 				else u->order_type = u->unit_type->human_ai_idle;
@@ -1991,7 +2704,7 @@ struct state_functions {
 					set_sprite_visibility(u->sprite, 0);
 				}
 				u->visibility_flags = ~0;
-				if (ut_is_turret(u)) {
+				if (ut_turret(u)) {
 					u->sprite->flags |= 0x10;
 				} else {
 					if (~u->sprite->flags & sprite_t::flag_hidden) {
@@ -2109,7 +2822,7 @@ struct state_functions {
 			u->is_blind = false;
 			set_construction_graphic(u, false);
 		} else {
-			if (u_non_building(u)) {
+			if (u_can_move_or_attack(u)) {
 				int dir = u->unit_type->unit_direction;
 				if (dir == 32) dir = lcg_rand(36) % 32;
 				set_unit_direction(u, dir * 8);
@@ -2130,7 +2843,7 @@ struct state_functions {
 
 	void add_completed_unit(int count, unit_t* u, bool increment_score) {
 		if (u_hallucination(u)) return;
-		if (ut_is_turret(u)) return;
+		if (ut_turret(u)) return;
 
 		st.completed_unit_counts[u->owner][u->unit_type->id] += count;
 		if (u->unit_type->staredit_group_flags & GroupFlags::Zerg) {
@@ -2258,7 +2971,7 @@ struct state_functions {
 		iscript_order_unit = prev_iscript_order_unit;
 	}
 
-	void execute_next_order(unit_t* u) {
+	void activate_next_order(unit_t* u) {
 		if (u->order_queue.empty()) return;
 		if (u->ai) xcept("ai stuff");
 		if ((u_in_building(u) || u_burrowed(u)) && u->order_queue.front().order_type->id != Orders::Die) return;
@@ -2286,7 +2999,7 @@ struct state_functions {
 		}
 		if (!u->ai) u->auto_target_unit = nullptr;
 		iscript_run_to_idle(u);
-		if (!ut_is_turret(u) && u->subunit && ut_is_turret(u->subunit)) {
+		if (!ut_turret(u) && u->subunit && ut_turret(u->subunit)) {
 			const order_type_t* turret_order_type = order_type;
 			if (order_type == u->unit_type->return_to_idle) turret_order_type = u->subunit->unit_type->return_to_idle;
 			else if (order_type == u->unit_type->attack_unit) turret_order_type = u->subunit->unit_type->attack_unit;
@@ -2302,7 +3015,7 @@ struct state_functions {
 	void set_unit_order(unit_t* u, const order_type_t* order_type, order_target target = order_target()) {
 		u->user_action_flags |= 1;
 		set_queued_order(u, true, order_type, target);
-		execute_next_order(u);
+		activate_next_order(u);
 	}
 
 	template<typename F>
@@ -2382,7 +3095,7 @@ struct state_functions {
 	void show_unit(unit_t* u) {
 		if (~u->sprite->flags & sprite_t::flag_hidden) return;
 		u->sprite->flags &= ~sprite_t::flag_hidden;
-		if (u->subunit && !ut_is_turret(u)) u->subunit->sprite->flags &= ~sprite_t::flag_hidden;
+		if (u->subunit && !ut_turret(u)) u->subunit->sprite->flags &= ~sprite_t::flag_hidden;
 		refresh_unit_vision(u);
 		UpdateUnitSpriteInfo(u);
 		update_unit_finder(u);
@@ -2398,7 +3111,7 @@ struct state_functions {
 		u->movement_state = 0;
 		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
 		else u->pathing_flags &= ~1;
-		if (u->subunit && !ut_is_turret(u)) {
+		if (u->subunit && !ut_turret(u)) {
 			log("toggle_unit_path(u->subunit)\n");
 			u->subunit->movement_state = 0;
 			if (u->subunit->sprite->elevation_level < 12) u->subunit->pathing_flags |= 1;
@@ -3820,7 +4533,7 @@ void global_init(global_state&st) {
 	load_images();
 
 
-	// This function returns std::round(std::sin(PI / 128 * i) * 256) for i [0, 63]
+	// This function returns (int)std::round(std::sin(PI / 128 * i) * 256) for i [0, 63]
 	// using only integer arithmetic.
 	auto int_sin = [&](int x) {
 		int x2 = x*x;
@@ -3866,9 +4579,9 @@ void init() {
 	game_load_functions game_load_funcs(st);
 	game_load_funcs.load_map_file(R"(X:\Starcraft\StarCraft\maps\testone.scm)");
 
-	for (unit_t* u : st.visible_units) {
-		log("visible unit %p\n", u);
-	}
+	advance(st);
+
+
 }
 
 }
