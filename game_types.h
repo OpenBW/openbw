@@ -194,7 +194,7 @@ struct unit_t: flingy_t {
 		//status_flag_ignore_tile_collision = 0x40000,
 		status_flag_collision = 0x40000,
 		status_flag_immovable = 0x80000,
-
+		status_flag_ground_unit = 0x100000,
 		status_flag_gathering = 0x800000,
 
 		status_flag_invincible = 0x4000000,
@@ -347,7 +347,7 @@ struct unit_t: flingy_t {
 	};
 
 	path_t*path;
-	int pathing_collision_interval;
+	unsigned int pathing_collision_interval;
 	int pathing_flags;
 	int unused_0x106;
 	bool is_being_healed;

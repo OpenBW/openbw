@@ -52,9 +52,9 @@ struct unit_type_t {
 
 		flag_creep = 0x20000,
 
+		flag_can_move = 0x8000000,
 		flag_can_move_or_attack = 0x10000000,
 		flag_invincible = 0x20000000,
-		flag_can_move = 0x80000000,
 	};
 
 	int id;

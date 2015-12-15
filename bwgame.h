@@ -164,6 +164,7 @@ struct global_state {
 	a_vector<std::array<a_vector<a_vector<xy>>*, 6>> image_lo_offsets;
 
 	std::array<xy, 256> direction_table;
+	std::array<unsigned int, 64> arctan_inv_table;
 };
 
 struct game_state {
@@ -434,6 +435,12 @@ struct state_functions {
 	}
 	bool u_iscript_nobrk(unit_t* u) {
 		return u_status_flag(u, unit_t::status_flag_iscript_nobrk);
+	}
+	bool u_collision(unit_t* u) {
+		return u_status_flag(u, unit_t::status_flag_collision);
+	}
+	bool u_ground_unit(unit_t* u) {
+		return u_status_flag(u, unit_t::status_flag_ground_unit);
 	}
 
 	bool ut_turret(unit_t* u) {
@@ -1383,7 +1390,24 @@ struct state_functions {
 		return u->order_type->id == Orders::Die && u->order_state == 1;
 	};
 
-	void movement_UM_Init(unit_t*u) {
+	// atan is done with an inverse lookup using binary search.
+	// Returns (int)(std::atan(x / 256.0) / PI * 128)
+	int sc_atan(int x) {
+		bool negative = x < 0;
+		if (negative) x = -x;
+		int r = std::upper_bound(global_st.arctan_inv_table.begin(), global_st.arctan_inv_table.end(), (unsigned int)x) - global_st.arctan_inv_table.begin();
+		return negative ? -r : r;
+	};
+
+	int sc_atan2(xy pos) {
+		if (pos.x == 0) return pos.y <= 0 ? 0 : 128;
+		if (pos.x > 0) return sc_atan((pos.y << 8) / pos.x);
+		int r = sc_atan((pos.y << 8) / pos.x);
+		if (r != 64) r += 192;
+		return r;
+	}
+
+	bool movement_UM_Init(unit_t*u) {
 		u->pathing_flags &= ~(1 | 2);
 		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
 		u->contour_bounds = { { 0,0 },{ 0,0 } };
@@ -1414,18 +1438,81 @@ struct state_functions {
 			next_state = movement_states::UM_LumpWannabe;
 		}
 		u->movement_state = next_state;
+		return true;
 	};
+
+	bool movement_UM_AtRest(unit_t* u) {
+		if (unit_movepos_state(u) == 0) {
+			if (u->pathing_collision_interval) {
+				if (u->pathing_collision_interval > 2) u->pathing_collision_interval = 2;
+				else --u->pathing_collision_interval;
+			}
+		} else u->pathing_collision_interval = 0;
+		auto go_to_next_waypoint = [&]() {
+			if (u->movement_flags & 4) return true;
+			if (unit_movepos_state(u) == 0) {
+				if (u->movement_flags & 2) return true;
+				if (u->position != u->next_target_waypoint) {
+					int dir = sc_atan2(u->next_target_waypoint - u->position);
+					if (u->current_direction1 == dir) return true;
+					if (u->velocity_direction1 == dir) return true;
+				}
+			}
+			return false;
+		};
+		bool going_to_next_waypoint = false;
+		if (go_to_next_waypoint()) {
+			going_to_next_waypoint = true;
+			xcept("go to next waypoint!");
+		}
+		if (u_collision(u) && u_ground_unit(u)) {
+			u->movement_state = movement_states::UM_CheckIllegal;
+			return false;
+		}
+		if (unit_movepos_state(u) == 0 && ~u->movement_flags & 4) {
+			u->movement_state = movement_states::UM_StartPath;
+			return true;
+		}
+		if (!going_to_next_waypoint) {
+			u->current_speed2 = 0;
+			if (u->current_speed1) {
+				u->current_speed1 = 0;
+				u->current_speed.x = 0;
+				u->current_speed.y = 0;
+			}
+			if (u->sprite->position != u->next_target_waypoint) {
+				u->next_target_waypoint = u->sprite->position;
+			}
+			u->movement_state = movement_states::UM_Dormant;
+		}
+		return false;
+	}
+
+	bool movement_UM_CheckIllegal(unit_t* u) {
+		xcept("UM_CheckIllegal");
+		return false;
+	}
 
 	bool execute_movement(unit_t*u) {
 
 		bool refresh_vision = update_tiles;
 
-		switch (u->movement_state) {
-		case movement_states::UM_Init:
-			movement_UM_Init(u);
-			break;
-		default:
-			xcept("fixme: movement state %d\n", u->movement_state);
+		while (true) {
+			bool cont = false;
+			switch (u->movement_state) {
+			case movement_states::UM_Init:
+				cont = movement_UM_Init(u);
+				break;
+			case movement_states::UM_AtRest:
+				cont = movement_UM_AtRest(u);
+				break;
+			case movement_states::UM_CheckIllegal:
+				cont = movement_UM_CheckIllegal(u);
+				break;
+			default:
+				xcept("fixme: movement state %d\n", u->movement_state);
+			}
+			if (!cont) break;
 		}
 
 		return refresh_vision;
@@ -2547,7 +2634,7 @@ struct state_functions {
 		u_set_status_flag(u, unit_t::status_flag_flying, ut_flyer(u));
 		u_set_status_flag(u, unit_t::status_flag_can_move_or_attack, ut_can_move_or_attack(u));
 		u_set_status_flag(u, unit_t::status_flag_can_move, ut_can_move(u));
-		u_set_status_flag(u, (unit_t::status_flags_t)0x100000, !ut_flyer(u));
+		u_set_status_flag(u, unit_t::status_flag_ground_unit, !ut_flyer(u));
 		if (u->unit_type->elevation_level < 12) u->pathing_flags |= 1;
 		else u->pathing_flags &= ~1;
 		if (ut_building(u)) {
@@ -2800,7 +2887,7 @@ struct state_functions {
 		u->velocity_direction1 = direction;
 		u->current_direction1 = direction;
 		u->current_direction2 = direction;
-		u->current_speed = global_st.direction_table[direction] * u->current_speed1 / 256;
+		u->current_speed = global_st.direction_table.at(direction) * u->current_speed1 / 256;
 		if (u->next_target_waypoint != u->sprite->position) {
 			u->next_target_waypoint = u->sprite->position;
 		}
@@ -4541,14 +4628,13 @@ void global_init(global_state&st) {
 		int x4 = x3*x;
 		int x5 = x4*x;
 
-		int64_t a0 = 690668267770;
-		int64_t a1 = 29198338;
-		int64_t a2 = -71311096;
-		int64_t a3 = 55269;
-		int64_t a4 = 1482;
-		int64_t a5 = 109946188959;
+		int64_t a0 = 26980449732;
+		int64_t a1 = 1140609;
+		int64_t a2 = -2785716;
+		int64_t a3 = 2159;
+		int64_t a4 = 58;
 
-		return (int)(((x * a0 + x2 * a1 + x3 * a2 + x4 * a3 + x5 * a4) + a5 / 2) / a5);
+		return (int)((x * a0 + x2 * a1 + x3 * a2 + x4 * a3 + x5 * a4 + (1ll << 31)) >> 32);
 	};
 
 	// The sin lookup table is hardcoded into Broodwar. We generate it here.
@@ -4563,6 +4649,14 @@ void global_init(global_state&st) {
 		st.direction_table[(193 + (63 - i)) % 256].x = -v;
 		st.direction_table[191 + i].y = -v;
 	}
+	st.arctan_inv_table = {
+		7, 13, 19, 26, 32, 38, 45, 51, 58, 65, 71, 78, 85, 92,
+		99, 107, 114, 122, 129, 137, 146, 154, 163, 172, 181,
+		190, 200, 211, 221, 233, 244, 256, 269, 283, 297, 312,
+		329, 346, 364, 384, 405, 428, 452, 479, 509, 542, 578,
+		619, 664, 716, 775, 844, 926, 1023, 1141, 1287, 1476,
+		1726, 2076, 2600, 3471, 5211, 10429, std::numeric_limits<unsigned int>::max()
+	};
 
 }
 
