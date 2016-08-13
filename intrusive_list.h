@@ -2,7 +2,7 @@
 
 template<typename T, std::pair<T*, T*> T::*link_ptr>
 struct intrusive_list_member_link {
-	std::pair<T*, T*>*operator()(T*ptr) {
+	std::pair<T*, T*>* operator()(T* ptr) {
 		return &(ptr->*link_ptr);
 	}
 };
@@ -120,31 +120,43 @@ private:
 		p -= (intptr_t)link_T()((T*)nullptr);
 		return (T*)p;
 	}
+	pointer ptr_front() const {
+		return header.second;
+	}
 	pointer ptr_back() const {
 		return header.first;
 	}
+	void set_front_back_ptrs() {
+		link_T()(ptr_front())->first = ptr_end();
+		link_T()(ptr_back())->second = ptr_end();
+	}
 public:
 	intrusive_list() = default;
-	intrusive_list(const intrusive_list&) = delete;
+	intrusive_list(const intrusive_list &) = delete;
 	intrusive_list(intrusive_list&& n) noexcept {
 		*this = std::move(n);
 	}
-	intrusive_list&operator=(const intrusive_list& n) = delete;
-	intrusive_list&operator=(intrusive_list&& n) noexcept {
-		swap(n);
+	intrusive_list& operator=(const intrusive_list& n) = delete;
+	intrusive_list& operator=(intrusive_list&& n) noexcept {
+		if (n.empty()) clear();
+		else {
+			header = n.header;
+			n.clear();
+			set_front_back_ptrs();
+		}
 		return *this;
 	}
 	reference front() {
-		return *ptr_begin();
+		return *ptr_front();
 	}
 	const_reference front() const {
-		return *ptr_begin();
+		return *ptr_front();
 	}
 	reference back() {
-		return *(--end());
+		return *ptr_back();
 	}
 	const_reference back() const {
-		return *(--end());
+		return *ptr_back();
 	}
 	iterator begin() {
 		return iterator(ptr_begin());
@@ -223,12 +235,19 @@ public:
 		erase(iterator(front()));
 	}
 	void swap(intrusive_list& n) noexcept {
-		if (n.empty()) clear();
-		else {
+		if (n.empty()) {
+			if (empty()) return;
+			n.header = header;
+			n.set_front_back_ptrs();
+			clear();
+		} else if (empty()) {
 			header = n.header;
+			set_front_back_ptrs();
 			n.clear();
-			link_T()(ptr_begin())->first = ptr_end();
-			link_T()(ptr_begin())->second = ptr_end();
+		} else {
+			std::swap(header, n.header);
+			set_front_back_ptrs();
+			n.set_front_back_ptrs();
 		}
 	}
 	iterator iterator_to(reference v) {

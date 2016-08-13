@@ -113,24 +113,24 @@ struct flingy_t: link_base {
 	}
 
 	int hp;
-	sprite_t*sprite;
+	sprite_t* sprite;
 	target_t move_target;
 	xy next_movement_waypoint;
 	xy next_target_waypoint;
 	int movement_flags;
 	int current_direction1;
-	int flingy_turn_rate;
+	ufp8 flingy_turn_rate;
 	int velocity_direction1;
-	const flingy_type_t*flingy_type;
+	const flingy_type_t* flingy_type;
 	int unknown_0x026;
 	int flingy_movement_type;
 	xy position;
 	xy halt;
-	int flingy_top_speed;
+	ufp8 flingy_top_speed;
 	int current_speed1;
 	int current_speed2;
 	xy current_speed;
-	int flingy_acceleration;
+	ufp8 flingy_acceleration;
 	int current_direction2;
 	int velocity_direction2;
 	int owner;
@@ -188,13 +188,14 @@ struct unit_t: flingy_t {
 		status_flag_order_not_interruptible = 0x1000,
 		status_flag_iscript_nobrk = 0x2000,
 
-		status_flag_can_not_attack = 0x8000,
-		status_flag_can_move_or_attack = 0x10000,
+		status_flag_cannot_attack = 0x8000,
+		status_flag_can_turn = 0x10000,
 		status_flag_can_move = 0x20000,
-		//status_flag_ignore_tile_collision = 0x40000,
 		status_flag_collision = 0x40000,
 		status_flag_immovable = 0x80000,
 		status_flag_ground_unit = 0x100000,
+		status_flag_no_collide = 0x200000,
+
 		status_flag_gathering = 0x800000,
 
 		status_flag_invincible = 0x4000000,
@@ -206,14 +207,14 @@ struct unit_t: flingy_t {
 	};
 
 	int shield_points;
-	const unit_type_t*unit_type;
+	const unit_type_t* unit_type;
 
 	std::pair<unit_t*, unit_t*> player_units_link;
 
-	unit_t*subunit;
+	unit_t* subunit;
 	intrusive_list<order_t, default_link_f> order_queue;
-	unit_t*auto_target_unit;	
-	unit_t*connected_unit;
+	unit_t* auto_target_unit;	
+	unit_t* connected_unit;
 	int order_queue_count;
 	int order_queue_timer;
 	int unknown_0x086;
@@ -248,7 +249,7 @@ struct unit_t: flingy_t {
 			int spider_mine_count;
 		} vulture;
 		struct {
-			unit_t*parent;
+			unit_t* parent;
 			std::pair<unit_t*, unit_t*> fighter_link;
 			bool in_hangar;
 		} fighter;
@@ -260,9 +261,9 @@ struct unit_t: flingy_t {
 		struct {
 			intrusive_list<unit_t, fighter_link> inside_units;
 			intrusive_list<unit_t, fighter_link> outside_units;
-			int inside_count;
-			int outside_count;
-		} carrier;
+			size_t inside_count;
+			size_t outside_count;
+		} carrier, reaver;
 		struct {
 			int unknown_00;
 			int unknown_04;
@@ -271,13 +272,13 @@ struct unit_t: flingy_t {
 	};
 
 	struct {
-		unit_t*powerup;
+		unit_t* powerup;
 		xy target_resource;
 		unit_t*target_resource_unit;
 		int repair_resource_loss_timer;
 		bool is_carrying_something;
 		int resource_carry_count;
-		unit_t*harvest_target;
+		unit_t* harvest_target;
 		std::pair<unit_t*, unit_t*> gather_link;
 	} worker;
 	struct worker_gather_link {
@@ -289,10 +290,10 @@ struct unit_t: flingy_t {
 	struct building_t {
 		building_t() {}
 		unit_t*addon;
-		unit_type_t*addon_build_type;
+		unit_type_t* addon_build_type;
 		int upgrade_research_time;
-		tech_type_t*tech_type;
-		upgrade_type_t*upgrade_type;
+		tech_type_t* tech_type;
+		upgrade_type_t* upgrade_type;
 		int larva_timer;
 		int landing_timer;
 		int creep_timer;
@@ -307,13 +308,13 @@ struct unit_t: flingy_t {
 				bool resource_belongs_to_ai;
 			} resource;
 			struct {
-				unit_t*exit;
+				unit_t* exit;
 			} nydus;
 			struct {
-				sprite_t*nuke_dot;
+				sprite_t* nuke_dot;
 			} ghost;
 			struct {
-				sprite_t*pylon_aura;
+				sprite_t* pylon_aura;
 			} pylon;
 			struct {
 				unit_t*nuke;
@@ -333,13 +334,13 @@ struct unit_t: flingy_t {
 	int visibility_flags;
 	int secondary_order_unk_a;
 	int secondary_order_unk_b;
-	unit_t*current_build_unit;
+	unit_t* current_build_unit;
 	std::pair<unit_t*, unit_t*> burrowed_unit_link;
 
 	union {
 		struct {
 			xy position;
-			unit_t*unit;
+			unit_t* unit;
 		} rally;
 		struct {
 			std::pair<unit_t*, unit_t*> psi_link;
@@ -363,7 +364,7 @@ struct unit_t: flingy_t {
 	int stasis_timer;
 	int plague_timer;
 	int storm_timer;
-	unit_t*irradiated_by;
+	unit_t* irradiated_by;
 	int irradiate_owner;
 	int parasite_flags;
 	int cycle_counter;
@@ -374,17 +375,14 @@ struct unit_t: flingy_t {
 	std::array<int, 9> acid_spore_time;
 
 	int bullet_behavior_3_by_3_attack_sequence;
-	void*ai;
+	void* ai;
 	int air_strength;
 	int ground_strength;
-	size_t unit_finder_left_index;
-	size_t unit_finder_top_index;
-	size_t unit_finder_right_index;
-	size_t unit_finder_bottom_index;
 	int repulse_unknown;
 	int repulse_angle;
 	xy drift_pos;
 
-	int unit_finder_mark;
+
+	rect unit_finder_bounding_box;
 };
 

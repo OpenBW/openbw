@@ -15,16 +15,16 @@ struct data_reader {
 	data_reader() = default;
 	data_reader(uint8_t*ptr, uint8_t*end) : ptr(ptr), end(end) {}
 	template<typename T, bool little_endian, typename std::enable_if<is_std_array<T>::value>::type* = nullptr>
-	T value_at(uint8_t*ptr) {
+	T value_at(uint8_t* ptr) {
 		T r;
-		for (auto&v : r) {
+		for (auto& v : r) {
 			v = value_at<std::remove_reference<decltype(v)>::type, little_endian>(ptr);
 			ptr += sizeof(v);
 		}
 		return r;
 	}
 	template<typename T, bool little_endian, typename std::enable_if<!is_std_array<T>::value>::type* = nullptr>
-	T value_at(uint8_t*ptr) {
+	T value_at(uint8_t* ptr) {
 		static_assert(std::is_integral<T>::value, "can only read integers and arrays of integers");
 		T r = 0;
 		for (size_t i = 0; i < sizeof(T); ++i) {
@@ -38,15 +38,15 @@ struct data_reader {
 		ptr += sizeof(T);
 		return value_at<T, little_endian>(ptr - sizeof(T));
 	}
-	uint8_t*get_n(size_t n) {
-		uint8_t*r = ptr;
+	uint8_t* get_n(size_t n) {
+		uint8_t* r = ptr;
 		if (ptr + n > end || ptr + n < ptr) xcept("data_reader: attempt to read past end");
 		ptr += n;
 		return r;
 	}
 	template<typename T, bool little_endian = default_little_endian>
 	a_vector<T> get_vec(size_t n) {
-		uint8_t*data = get_n(n*sizeof(T));
+		uint8_t* data = get_n(n*sizeof(T));
 		a_vector<T> r(n);
 		for (size_t i = 0; i < n; ++i, data += sizeof(T)) {
 			r[i] = value_at<T, little_endian>(data);
@@ -142,7 +142,7 @@ unit_types_t load_units_dat(a_string fn) {
 	unit_types_t unit_types;
 	unit_types.vec.resize(total_count);
 	for (size_t i = 0; i < total_count; ++i) {
-		auto&v = unit_types.vec[i];
+		auto& v = unit_types.vec[i];
 		memset(&v, 0, sizeof(v));
 		v.id = i;
 	}
@@ -150,7 +150,7 @@ unit_types_t load_units_dat(a_string fn) {
 	data_file f(fn);
 	data_file_reader_le r(f);
 
-	auto&arr = unit_types.vec;
+	auto& arr = unit_types.vec;
 
 	rawr(uint8_t, flingy, total_count);
 	rawr(uint16_t, turret_unit_type, total_count);
@@ -220,7 +220,7 @@ weapon_types_t load_weapons_dat(a_string fn) {
 	weapon_types_t weapon_types;
 	weapon_types.vec.resize(count);
 	for (size_t i = 0; i < count; ++i) {
-		auto&v = weapon_types.vec[i];
+		auto& v = weapon_types.vec[i];
 		memset(&v, 0, sizeof(v));
 		v.id = i;
 	}
@@ -228,7 +228,7 @@ weapon_types_t load_weapons_dat(a_string fn) {
 	data_file f(fn);
 	data_file_reader_le r(f);
 
-	auto&arr = weapon_types.vec;
+	auto& arr = weapon_types.vec;
 
 	rawr(uint16_t, label, count);
 	rawr(uint32_t, flingy, count);
@@ -266,7 +266,7 @@ upgrade_types_t load_upgrades_dat(a_string fn) {
 	upgrade_types_t upgrade_types;
 	upgrade_types.vec.resize(count);
 	for (size_t i = 0; i < count; ++i) {
-		auto&v = upgrade_types.vec[i];
+		auto& v = upgrade_types.vec[i];
 		memset(&v, 0, sizeof(v));
 		v.id = i;
 	}
@@ -274,7 +274,7 @@ upgrade_types_t load_upgrades_dat(a_string fn) {
 	data_file f(fn);
 	data_file_reader_le r(f);
 
-	auto&arr = upgrade_types.vec;
+	auto& arr = upgrade_types.vec;
 
 	rawr(uint16_t, mineral_cost_base, count);
 	rawr(uint16_t, mineral_cost_factor, count);
@@ -286,7 +286,7 @@ upgrade_types_t load_upgrades_dat(a_string fn) {
 	rawr(uint16_t, icon, count);
 	rawr(uint16_t, label, count);
 	rawr(uint8_t, race, count);
-	rawr(uint8_t, max_repeats, count);
+	rawr(uint8_t, max_level, count);
 	rawr(uint8_t, is_broodwar, count);
 
 	if (r.left()) log(" WARNING: %s: %d bytes left\n", fn, r.left());
@@ -300,7 +300,7 @@ tech_types_t load_techdata_dat(a_string fn) {
 	tech_types_t tech_types;
 	tech_types.vec.resize(count);
 	for (size_t i = 0; i < count; ++i) {
-		auto&v = tech_types.vec[i];
+		auto& v = tech_types.vec[i];
 		memset(&v, 0, sizeof(v));
 		v.id = i;
 	}
@@ -308,7 +308,7 @@ tech_types_t load_techdata_dat(a_string fn) {
 	data_file f(fn);
 	data_file_reader_le r(f);
 
-	auto&arr = tech_types.vec;
+	auto& arr = tech_types.vec;
 
 	rawr(uint16_t, mineral_cost, count);
 	rawr(uint16_t, gas_cost, count);
@@ -331,7 +331,7 @@ flingy_types_t load_flingy_dat(a_string fn) {
 	flingy_types_t flingy_types;
 	flingy_types.vec.resize(count);
 	for (size_t i = 0; i < count; ++i) {
-		auto&v = flingy_types.vec[i];
+		auto& v = flingy_types.vec[i];
 		memset(&v, 0, sizeof(v));
 		v.id = i;
 	}
@@ -339,7 +339,7 @@ flingy_types_t load_flingy_dat(a_string fn) {
 	data_file f(fn);
 	data_file_reader_le r(f);
 
-	auto&arr = flingy_types.vec;
+	auto& arr = flingy_types.vec;
 
 	rawr(uint16_t, sprite, count);
 	rawr(uint32_t, top_speed, count);
@@ -361,7 +361,7 @@ sprite_types_t load_sprites_dat(a_string fn) {
 	sprite_types_t sprite_types;
 	sprite_types.vec.resize(count);
 	for (size_t i = 0; i < count; ++i) {
-		auto&v = sprite_types.vec[i];
+		auto& v = sprite_types.vec[i];
 		memset(&v, 0, sizeof(v));
 		v.id = i;
 	}
@@ -369,7 +369,7 @@ sprite_types_t load_sprites_dat(a_string fn) {
 	data_file f(fn);
 	data_file_reader_le r(f);
 
-	auto&arr = sprite_types.vec;
+	auto& arr = sprite_types.vec;
 
 	rawr(uint16_t, image, count);
 	rawr(uint8_t, health_bar_size, selectable_count);
@@ -388,7 +388,7 @@ image_types_t load_images_dat(a_string fn) {
 	image_types_t image_types;
 	image_types.vec.resize(count);
 	for (size_t i = 0; i < count; ++i) {
-		auto&v = image_types.vec[i];
+		auto& v = image_types.vec[i];
 		memset(&v, 0, sizeof(v));
 		v.id = i;
 	}
@@ -396,7 +396,7 @@ image_types_t load_images_dat(a_string fn) {
 	data_file f(fn);
 	data_file_reader_le r(f);
 
-	auto&arr = image_types.vec;
+	auto& arr = image_types.vec;
 
 	rawr(uint32_t, grp_filename_index, count);
 	rawr(uint8_t, has_directional_frames, count);
@@ -424,7 +424,7 @@ order_types_t load_orders_dat(a_string fn) {
 	order_types_t order_types;
 	order_types.vec.resize(count);
 	for (size_t i = 0; i < count; ++i) {
-		auto&v = order_types.vec[i];
+		auto& v = order_types.vec[i];
 		memset(&v, 0, sizeof(v));
 		v.id = i;
 	}
@@ -432,7 +432,7 @@ order_types_t load_orders_dat(a_string fn) {
 	data_file f(fn);
 	data_file_reader_le r(f);
 
-	auto&arr = order_types.vec;
+	auto& arr = order_types.vec;
 
 	rawr(uint8_t, use_weapon_targeting, count);
 	rawr(uint8_t, background, count);

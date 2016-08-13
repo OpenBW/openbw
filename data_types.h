@@ -32,8 +32,8 @@ struct type_container {
 	type_container() = default;
 	type_container(const type_container&) = delete;
 	type_container(type_container&&) = default;
-	type_container&operator=(const type_container&) = delete;
-	type_container&operator=(type_container&&) = default;
+	type_container& operator=(const type_container&) = delete;
+	type_container& operator=(type_container&&) = default;
 };
 
 struct unit_type_t {
@@ -53,15 +53,15 @@ struct unit_type_t {
 		flag_creep = 0x20000,
 
 		flag_can_move = 0x8000000,
-		flag_can_move_or_attack = 0x10000000,
+		flag_can_turn = 0x10000000,
 		flag_invincible = 0x20000000,
 	};
 
 	int id;
 
-	const flingy_type_t*flingy;
-	unit_type_t*turret_unit_type;
-	unit_type_t*subunit2;
+	const flingy_type_t* flingy;
+	unit_type_t* turret_unit_type;
+	unit_type_t* subunit2;
 	int infestation;
 	int construction_animation;
 	int unit_direction;
@@ -76,15 +76,15 @@ struct unit_type_t {
 	const order_type_t* return_to_idle;
 	const order_type_t* attack_unit;
 	const order_type_t* attack_move;
-	weapon_type_t*ground_weapon;
+	const weapon_type_t* ground_weapon;
 	int max_ground_hits;
-	weapon_type_t*air_weapon;
+	const weapon_type_t* air_weapon;
 	int max_air_hits;
 	int ai_internal;
 	flags_t flags;
 	int target_acquisition_range;
 	int sight_range;
-	upgrade_type_t*armor_upgrade;
+	upgrade_type_t* armor_upgrade;
 	int unit_size;
 	int armor;
 	int right_click_action;
@@ -107,8 +107,8 @@ struct unit_type_t {
 	int staredit_group_flags;
 	int supply_provided;
 	int supply_required;
-	int space_required;
-	int space_provided;
+	size_t space_required;
+	size_t space_provided;
 	int build_score;
 	int destroy_score;
 	size_t unit_map_string_index;
@@ -122,12 +122,12 @@ struct weapon_type_t {
 	int id;
 
 	int label;
-	const flingy_type_t*flingy;
+	const flingy_type_t* flingy;
 	int unused;
 	int target_flags;
 	int min_range;
 	int max_range;
-	upgrade_type_t*damage_upgrade;
+	upgrade_type_t* damage_upgrade;
 	int weapon_type;
 	int weapon_behavior;
 	int remove_after;
@@ -162,7 +162,7 @@ struct upgrade_type_t {
 	int icon;
 	int label;
 	int race;
-	int max_repeats;
+	int max_level;
 	bool is_broodwar;
 };
 
@@ -187,7 +187,7 @@ using tech_types_t = type_container<tech_type_t>;
 struct flingy_type_t {
 	int id;
 
-	sprite_type_t*sprite;
+	sprite_type_t* sprite;
 	int top_speed;
 	int acceleration;
 	int halt_distance;
