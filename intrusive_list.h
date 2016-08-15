@@ -1,14 +1,15 @@
 
-
-template<typename T, std::pair<T*, T*> T::*link_ptr>
+template<typename T, std::pair<T*, T*> T::* link_ptr>
 struct intrusive_list_member_link {
 	std::pair<T*, T*>* operator()(T* ptr) {
 		return &(ptr->*link_ptr);
 	}
 };
 
-template<typename T, typename link_T>
-struct intrusive_list {
+template<typename T, typename link_T, std::pair<T*, T*> T::* link_ptr = nullptr>
+class intrusive_list {
+	using link_f = std::conditional_t<link_ptr == nullptr, link_T, intrusive_list_member_link<T, link_ptr>>;
+public:
 	typedef T value_type;
 	typedef size_t size_type;
 	typedef ptrdiff_t difference_type;
@@ -17,7 +18,8 @@ struct intrusive_list {
 	typedef T* pointer;
 	typedef const T* const_pointer;
 
-	struct const_iterator {
+	class const_iterator {
+	public:
 		typedef std::bidirectional_iterator_tag iterator_category;
 		typedef typename intrusive_list::value_type value_type;
 		typedef typename intrusive_list::difference_type difference_type;
@@ -37,21 +39,21 @@ struct intrusive_list {
 			return ptr;
 		}
 		this_t& operator++() {
-			ptr = link_T()(ptr)->second;
+			ptr = link_f()(ptr)->second;
 			return *this;
 		}
 		this_t& operator++(int) {
 			auto r = *this;
-			ptr = link_T()(ptr)->second;
+			ptr = link_f()(ptr)->second;
 			return r;
 		}
 		this_t& operator--() {
-			ptr = link_T()(ptr)->first;
+			ptr = link_f()(ptr)->first;
 			return *this;
 		}
 		this_t& operator--(int) {
 			auto r = *this;
-			ptr = link_T()(ptr)->first;
+			ptr = link_f()(ptr)->first;
 			return r;
 		}
 		bool operator==(const this_t& rhs) const {
@@ -62,7 +64,8 @@ struct intrusive_list {
 		}
 	};
 
-	struct iterator {
+	class iterator {
+	public:
 		typedef std::bidirectional_iterator_tag iterator_category;
 		typedef typename intrusive_list::value_type value_type;
 		typedef typename intrusive_list::difference_type difference_type;
@@ -82,21 +85,21 @@ struct intrusive_list {
 			return ptr;
 		}
 		this_t& operator++() {
-			ptr = link_T()(ptr)->second;
+			ptr = link_f()(ptr)->second;
 			return *this;
 		}
 		this_t operator++(int) {
 			auto r = *this;
-			ptr = link_T()(ptr)->second;
+			ptr = link_f()(ptr)->second;
 			return r;
 		}
 		this_t& operator--() {
-			ptr = link_T()(ptr)->first;
+			ptr = link_f()(ptr)->first;
 			return *this;
 		}
 		this_t& operator--(int) {
 			auto r = *this;
-			ptr = link_T()(ptr)->first;
+			ptr = link_f()(ptr)->first;
 			return r;
 		}
 		bool operator==(const this_t& rhs) const {
@@ -117,7 +120,7 @@ private:
 	}
 	pointer ptr_end() const {
 		uint8_t* p = (uint8_t*)&header;
-		p -= (intptr_t)link_T()((T*)nullptr);
+		p -= (intptr_t)link_f()((T*)nullptr);
 		return (T*)p;
 	}
 	pointer ptr_front() const {
@@ -126,23 +129,20 @@ private:
 	pointer ptr_back() const {
 		return header.first;
 	}
-	void set_front_back_ptrs() {
-		link_T()(ptr_front())->first = ptr_end();
-		link_T()(ptr_back())->second = ptr_end();
-	}
 public:
 	intrusive_list() = default;
-	intrusive_list(const intrusive_list &) = delete;
+	intrusive_list(const intrusive_list&) = delete;
 	intrusive_list(intrusive_list&& n) noexcept {
 		*this = std::move(n);
 	}
-	intrusive_list& operator=(const intrusive_list& n) = delete;
-	intrusive_list& operator=(intrusive_list&& n) noexcept {
+	intrusive_list&operator=(const intrusive_list& n) = delete;
+	intrusive_list&operator=(intrusive_list&& n) noexcept {
 		if (n.empty()) clear();
 		else {
 			header = n.header;
 			n.clear();
-			set_front_back_ptrs();
+			link_f()(ptr_front())->first = ptr_end();
+			link_f()(ptr_back())->second = ptr_end();
 		}
 		return *this;
 	}
@@ -200,23 +200,23 @@ public:
 	size_type size() const = delete;
 	constexpr size_type max_size() const = delete;
 	void clear() {
-		header = { &*end(), &*end() };
+		header = { ptr_end(), ptr_end() };
 	}
 	iterator insert(iterator pos, reference v) {
 		pointer before = &*pos;
-		pointer after = link_T()(before)->first;
-		link_T()(before)->first = &v;
-		link_T()(after)->second = &v;
-		link_T()(&v)->first = after;
-		link_T()(&v)->second = before;
+		pointer after = link_f()(before)->first;
+		link_f()(before)->first = &v;
+		link_f()(after)->second = &v;
+		link_f()(&v)->first = after;
+		link_f()(&v)->second = before;
 		return iterator(v);
 	}
 	iterator erase(iterator pos) {
 		pointer ptr = &*pos;
-		pointer prev = link_T()(ptr)->first;
-		pointer next = link_T()(ptr)->second;
-		link_T()(prev)->second = next;
-		link_T()(next)->first = prev;
+		pointer prev = link_f()(ptr)->first;
+		pointer next = link_f()(ptr)->second;
+		link_f()(prev)->second = next;
+		link_f()(next)->first = prev;
 		return iterator(*next);
 	}
 	void remove(reference v) {
@@ -235,19 +235,23 @@ public:
 		erase(iterator(front()));
 	}
 	void swap(intrusive_list& n) noexcept {
-		if (n.empty()) {
-			if (empty()) return;
-			n.header = header;
-			n.set_front_back_ptrs();
-			clear();
-		} else if (empty()) {
+		if (empty()) {
+			if (n.empty()) return;
 			header = n.header;
-			set_front_back_ptrs();
 			n.clear();
+			link_f()(ptr_front())->first = ptr_end();
+			link_f()(ptr_back())->second = ptr_end();
+		} else if (n.empty()) {
+			n.header = header;
+			clear();
+			link_f()(n.ptr_front())->first = n.ptr_end();
+			link_f()(n.ptr_back())->second = n.ptr_end();
 		} else {
 			std::swap(header, n.header);
-			set_front_back_ptrs();
-			n.set_front_back_ptrs();
+			link_f()(n.ptr_front())->first = n.ptr_end();
+			link_f()(n.ptr_back())->second = n.ptr_end();
+			link_f()(ptr_front())->first = ptr_end();
+			link_f()(ptr_back())->second = ptr_end();
 		}
 	}
 	iterator iterator_to(reference v) {
