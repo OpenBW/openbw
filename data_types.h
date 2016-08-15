@@ -1,14 +1,4 @@
 
-// template<typename T>
-// struct type_id_t {
-// 	size_t index = ~(size_t)0;
-// 	type_id_t() = default;
-// 	explicit type_id_t(size_t index) : index(index) {}
-// 	explicit operator size_t() {
-// 		return index;
-// 	}
-// };
-
 struct unit_type_t;
 struct weapon_type_t;
 struct upgrade_type_t;
@@ -18,13 +8,6 @@ struct sprite_type_t;
 struct image_type_t;
 struct order_type_t;
 
-// using unit_id_t = type_id_t<unit_type_t>;
-// using weapon_id_t = type_id_t<weapon_type_t>;
-// using upgrade_id_t = type_id_t<upgrade_type_t>;
-// using tech_id_t = type_id_t<tech_type_t>;
-// using flingy_id_t = type_id_t<flingy_type_t>;
-// using sprite_id_t = type_id_t<sprite_type_t>;
-// using image_id_t = type_id_t<image_type_t>;
 
 template<typename T>
 struct type_container {
@@ -50,7 +33,11 @@ struct unit_type_t {
 
 		flag_two_units_in_one_egg = 0x400,
 
+		flag_resource = 0x2000,
+
 		flag_creep = 0x20000,
+
+		flag_has_energy = 0x200000,
 
 		flag_can_move = 0x8000000,
 		flag_can_turn = 0x10000000,
@@ -63,11 +50,11 @@ struct unit_type_t {
 	unit_type_t* turret_unit_type;
 	unit_type_t* subunit2;
 	int infestation;
-	int construction_animation;
+	const image_type_t* construction_animation;
 	int unit_direction;
 	int has_shield;
 	int shield_points;
-	int hitpoints;
+	fp8 hitpoints;
 	int elevation_level;
 	int unknown1;
 	int sublabel;
@@ -139,7 +126,7 @@ struct weapon_type_t {
 	int damage_bonus;
 	int cooldown;
 	int damage_factor;
-	int attack_angle;
+	direction_t attack_angle;
 	int launch_spin;
 	int forward_offset;
 	int upward_offset;
@@ -199,15 +186,12 @@ struct flingy_type_t {
 using flingy_types_t = type_container<flingy_type_t>;
 
 struct sprite_type_t {
-	enum flags_t : int {
-//		flag_hidden = 0x20
-	};
-
 	int id;
 
-	image_type_t*image;
+	image_type_t* image;
 	int health_bar_size;
-	flags_t flags;
+	int unk0;
+	bool visible;
 	int selection_circle;
 	int selection_circle_vpos;
 };

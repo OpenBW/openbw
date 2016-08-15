@@ -26,9 +26,10 @@ using uint_fastn_t = typename std::conditional<bits <= 8, std::uint_fast8_t,
 template<typename T, std::enable_if<std::is_integral<T>::value && std::numeric_limits<T>::radix == 2>* = nullptr>
 using int_bits = std::integral_constant<size_t, std::numeric_limits<T>::digits + std::is_signed<T>::value>;
 
-template<size_t integer_bits, size_t fractional_bits, bool is_signed>
+template<size_t integer_bits, size_t fractional_bits, bool is_signed, bool exact_integer_bits = false>
 struct fixed_point {
 	static const bool is_signed = is_signed;
+	static const bool exact_integer_bits = exact_integer_bits;
 	static const size_t integer_bits = integer_bits;
 	static const size_t fractional_bits = fractional_bits;
 	static const size_t total_bits = integer_bits + fractional_bits;
@@ -39,9 +40,16 @@ struct fixed_point {
 
 	using double_size_fixed_point = fixed_point<total_bits * 2 - fractional_bits, fractional_bits, is_signed>;
 
+	void wrap() {
+		if (!exact_integer_bits) return;
+		raw_value <<= int_bits<raw_type>::value - total_bits;
+		raw_value >>= int_bits<raw_type>::value - total_bits;
+	}
+
 	static fixed_point from_raw(raw_type raw_value) {
 		fixed_point r;
 		r.raw_value = raw_value;
+		r.wrap();
 		return r;
 	}
 
@@ -64,9 +72,32 @@ struct fixed_point {
 		return raw_value & (((raw_type)1 << fractional_bits) - 1);
 	}
 
-	template<size_t n_integer_bits, size_t result_integer_bits = integer_bits, typename std::enable_if<(n_integer_bits > result_integer_bits)>::type* = nullptr>
-	static auto truncate(const fixed_point<n_integer_bits, fractional_bits, is_signed>& n) {
-		return fixed_point<result_integer_bits, fractional_bits, is_signed>::from_raw((raw_type)n.raw_value);
+	template<size_t n_integer_bits, bool n_exact_integer_bits, size_t result_integer_bits = integer_bits, typename std::enable_if<(n_integer_bits > result_integer_bits)>::type* = nullptr>
+	static auto truncate(const fixed_point<n_integer_bits, fractional_bits, is_signed, n_exact_integer_bits>& n) {
+		return fixed_point<result_integer_bits, fractional_bits, is_signed, exact_integer_bits>::from_raw((raw_type)n.raw_value);
+	}
+
+	template<size_t n_integer_bits, bool n_exact_integer_bits, size_t result_integer_bits = integer_bits, typename std::enable_if<(result_integer_bits > n_integer_bits)>::type* = nullptr >
+	static auto extend(const fixed_point<n_integer_bits, fractional_bits, is_signed, n_exact_integer_bits>& n) {
+		return fixed_point<result_integer_bits, fractional_bits, is_signed, exact_integer_bits>::from_raw((raw_type)n.raw_value);
+	}
+
+	fixed_point floor() const {
+		return integer(integer_part());
+	}
+	fixed_point ceil() const {
+		return (*this + integer(1) - from_raw(1)).floor();
+	}
+	fixed_point abs() const {
+		if (*this >= zero()) return *this;
+		else return from_raw(-raw_value);
+	}
+
+	auto as_signed() const {
+		return fixed_point<integer_bits + (is_signed ? 0 : 1), fractional_bits, true, exact_integer_bits>::from_raw(raw_value);
+	}
+	auto as_unsigned() const {
+		return fixed_point<integer_bits, fractional_bits, false, exact_integer_bits>::from_raw(abs());
 	}
 
 	bool operator==(const fixed_point& n) const {
@@ -88,8 +119,14 @@ struct fixed_point {
 		return raw_value >= n.raw_value;
 	}
 
+	fixed_point operator-() const {
+		static_assert(is_signed, "fixed_point: cannot negate an unsigned number");
+		return from_raw(-raw_value);
+	}
+
 	fixed_point& operator+=(const fixed_point& n) {
 		raw_value += n.raw_value;
+		wrap();
 		return *this;
 	}
 	fixed_point operator+(const fixed_point& n) const {
@@ -97,6 +134,7 @@ struct fixed_point {
 	}
 	fixed_point& operator-=(const fixed_point& n) {
 		raw_value -= n.raw_value;
+		wrap();
 		return *this;
 	}
 	fixed_point operator-(const fixed_point& n) const {
@@ -104,47 +142,58 @@ struct fixed_point {
 	}
 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
 	fixed_point operator/=(T integer_value) {
-		static_assert(std::is_signed<T>::value == is_signed, "cannot mix signed/unsigned in division");
+		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in division");
 		raw_value /= integer_value;
+		wrap();
 		return *this;
 	}
 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
 	fixed_point operator/(T integer_value) const {
-		static_assert(std::is_signed<T>::value == is_signed, "cannot mix signed/unsigned in division");
+		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in division");
 		return from_raw(raw_value / integer_value);
 	}
 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
 	fixed_point operator*=(T integer_value) {
-		static_assert(std::is_signed<T>::value == is_signed, "cannot mix signed/unsigned in multiplication");
+		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in multiplication");
 		raw_value *= integer_value;
+		wrap();
 		return *this;
 	}
-
 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
 	auto operator*(T integer_value) const {
-		static_assert(std::is_signed<T>::value == is_signed, "cannot mix signed/unsigned in multiplication");
-		using result_type = fixed_point<integer_bits + int_bits<T>::value, fractional_bits, is_signed>;
+		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in multiplication");
+		using result_type = fixed_point<integer_bits + int_bits<T>::value, fractional_bits, is_signed, exact_integer_bits>;
 		return result_type::from_raw((result_type::raw_type)raw_value * integer_value);
 	}
 
 	template<size_t n_integer_bits>
-	auto operator*(const fixed_point<n_integer_bits, fractional_bits, is_signed>& n) {
-		using result_type = fixed_point<integer_bits + n_integer_bits, fractional_bits, is_signed>;
-		using itmp_t = int_fastn_t<integer_bits + n_integer_bits + fractional_bits>;
-		using tmp_t = std::conditional<is_signed, itmp_t, std::make_unsigned<itmp_t>::type>::type;
-		auto tmp = ((tmp_t)raw_value * (tmp_t)n.raw_value) >> fractional_bits;
+	auto operator*=(const fixed_point<n_integer_bits, fractional_bits, is_signed, exact_integer_bits>& n) {
+		return *this = truncate(*this * n);
+	}
+
+	template<size_t n_integer_bits>
+	auto operator/=(const fixed_point<n_integer_bits, fractional_bits, is_signed, exact_integer_bits>& n) const {
+		return *this = truncate(*this / n);
+	}
+
+	template<size_t n_integer_bits>
+	auto operator*(const fixed_point<n_integer_bits, fractional_bits, is_signed, exact_integer_bits>& n) {
+		using result_type = fixed_point<integer_bits + n_integer_bits, fractional_bits, is_signed, exact_integer_bits>;
+		constexpr size_t tmp_bits = integer_bits + n_integer_bits + fractional_bits;
+		using tmp_t = std::conditional<is_signed, int_fastn_t<tmp_bits>, uint_fastn_t<tmp_bits>>::type;
+		tmp_t tmp = ((tmp_t)raw_value * (tmp_t)n.raw_value) >> fractional_bits;
 		return result_type::from_raw((result_type::raw_type)tmp);
 	}
 
 	template<size_t n_integer_bits>
-	auto operator/(const fixed_point<n_integer_bits, fractional_bits, is_signed>& n) const {
+	auto operator/(const fixed_point<n_integer_bits, fractional_bits, is_signed, exact_integer_bits>& n) const {
 		constexpr size_t result_integer_bits = integer_bits + fractional_bits;
-		using result_type = fixed_point<result_integer_bits, fractional_bits, is_signed>;
+		using result_type = fixed_point<result_integer_bits, fractional_bits, is_signed, exact_integer_bits>;
 		constexpr size_t result_bits = result_integer_bits + fractional_bits;
 		constexpr size_t n_bits = n_integer_bits + fractional_bits;
-		using itmp_t = int_fastn_t<(result_bits > n_bits ? result_bits : n_bits)>;
-		using tmp_t = std::conditional<is_signed, itmp_t, std::make_unsigned<itmp_t>::type>::type;
-		auto tmp = ((tmp_t)raw_value << fractional_bits) / (tmp_t)n.raw_value;
+		constexpr size_t tmp_bits = result_bits > n_bits ? result_bits : n_bits;
+		using tmp_t = std::conditional<is_signed, int_fastn_t<tmp_bits>, uint_fastn_t<tmp_bits>>::type;
+		tmp_t tmp = ((tmp_t)raw_value << fractional_bits) / (tmp_t)n.raw_value;
 		return result_type::from_raw((result_type::raw_type)tmp);
 	}
 
@@ -153,6 +202,8 @@ struct fixed_point {
 using fp8 = fixed_point<24, 8, true>;
 using ufp8 = fixed_point<24, 8, false>;
 
+using direction_t = fixed_point<0, 8, true, true>;
+
 #include "bwenums.h"
 
 namespace bwgame {
@@ -160,10 +211,21 @@ namespace bwgame {
 
 #include "util.h"
 
+using xy_fp8 = xy_t<fp8>;
+
 #include "data_types.h"
 #include "game_types.h"
 
 #include "data_loading.h"
+
+static const std::array<unsigned int, 64> arctan_inv_table = {
+	7, 13, 19, 26, 32, 38, 45, 51, 58, 65, 71, 78, 85, 92,
+	99, 107, 114, 122, 129, 137, 146, 154, 163, 172, 181,
+	190, 200, 211, 221, 233, 244, 256, 269, 283, 297, 312,
+	329, 346, 364, 384, 405, 428, 452, 479, 509, 542, 578,
+	619, 664, 716, 775, 844, 926, 1023, 1141, 1287, 1476,
+	1726, 2076, 2600, 3471, 5211, 10429, std::numeric_limits<unsigned int>::max()
+};
 
 // Broodwar linked lists insert new elements between the first and second entry.
 template<typename cont_T, typename T>
@@ -371,8 +433,7 @@ struct global_state {
 	a_vector<a_vector<a_vector<xy>>> lo_offsets;
 	a_vector<std::array<a_vector<a_vector<xy>>*, 6>> image_lo_offsets;
 
-	std::array<xy, 256> direction_table;
-	std::array<unsigned int, 64> arctan_inv_table;
+	std::array<xy_fp8, 256> direction_table;
 };
 
 struct game_state {
@@ -549,9 +610,11 @@ struct state_base_non_copyable {
 	struct unit_finder_entry {
 		unit_t* u;
 		int value;
-		unit_finder_entry* next;
+		std::pair<unit_finder_entry*, unit_finder_entry*> link;
 	};
 	a_vector<a_vector<unit_finder_entry>> unit_finder_groups;
+	intrusive_list<unit_finder_entry, default_link_f> unit_finder_list;
+	using unit_finder_list_iterator = decltype(unit_finder_list)::iterator;
 
 	paths_t paths;
 };
@@ -571,8 +634,9 @@ struct state_functions {
 	bool update_tiles = false;
 	unit_t* iscript_unit = nullptr;
 	unit_t* iscript_order_unit = nullptr;
+	mutable bool unit_finder_search_active = false;
 
-	const order_type_t* get_order_type(int id) {
+	const order_type_t* get_order_type(int id) const {
 		if ((size_t)id >= 189) xcept("invalid order id %d", id);
 		return &global_st.order_types.vec[id];
 	}
@@ -589,10 +653,24 @@ struct state_functions {
 		}
 	};
 
+	void u_set_status_flag(unit_t* u, unit_t::status_flags_t flag) {
+		u->status_flags |= flag;
+	};
+	void u_unset_status_flag(unit_t* u, unit_t::status_flags_t flag) {
+		u->status_flags &= ~flag;
+	};
+
 	void u_set_status_flag(unit_t* u, unit_t::status_flags_t flag, bool value) {
 		if (value) u->status_flags |= flag;
 		else u->status_flags &= ~flag;
 	};
+	
+	void u_set_movement_flag(unit_t* u, int flag) {
+		u->movement_flags |= flag;
+	}
+	void u_unset_movement_flag(unit_t* u, int flag) {
+		u->movement_flags &= ~flag;
+	}
 
 	bool ut_flag(const unit_t* u, unit_type_t::flags_t flag) const {
 		return (u->unit_type->flags & flag) != 0;
@@ -600,11 +678,14 @@ struct state_functions {
 	bool u_status_flag(const unit_t* u, unit_t::status_flags_t flag) const {
 		return (u->status_flags & flag) != 0;
 	};
-	bool st_flag(sprite_t* s, sprite_type_t::flags_t flag) const {
-		return (s->sprite_type->flags & flag) != 0;
-	};
 	bool us_flag(const unit_t* u, sprite_t::flags_t flag) const {
 		return (u->sprite->flags & flag) != 0;
+	}
+	bool s_flag(const sprite_t* s, sprite_t::flags_t flag) const {
+		return (s->flags & flag) != 0;
+	}
+	bool u_movement_flag(const unit_t* u, int flag) const {
+		return (u->movement_flags & flag) != 0;
 	}
 
 	bool u_completed(const unit_t* u) const {
@@ -710,14 +791,19 @@ struct state_functions {
 	bool ut_flying_building(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_flying_building);
 	}
+	bool ut_has_energy(const unit_t* u) const {
+		return ut_flag(u, unit_type_t::flag_has_energy);
+	}
+	bool ut_resource(const unit_t* u) const {
+		return ut_flag(u, unit_type_t::flag_resource);
+	}
 
+	bool us_selected(const unit_t* u) const {
+		return us_flag(u, sprite_t::flag_selected);
+	}
 	bool us_hidden(const unit_t* u) const {
 		return us_flag(u, sprite_t::flag_hidden);
 	}
-
-// 	bool st_hidden(sprite_t* sprite) const {
-// 		return st_flag(sprite, sprite_type_t::flag_hidden);
-// 	};
 
 	const unit_type_t* get_unit_type(int id) const {
 		if ((size_t)id >= 228) xcept("invalid unit id %d", id);
@@ -764,12 +850,13 @@ struct state_functions {
 		return{ u->sprite->position - u->unit_type->dimensions.from, u->sprite->position + u->unit_type->dimensions.to };
 	}
 
-	void restrict_unit_pos_to_map_bounds(xy& pos, const unit_type_t* ut) {
+	xy restrict_unit_pos_to_map_bounds(xy pos, const unit_type_t* ut) const {
 		rect bb = unit_type_bounding_box(ut, pos);
 		if (bb.from.x < 0) pos.x -= bb.from.x;
 		else if ((size_t)bb.to.x >= game_st.map_width) pos.x -= (size_t)bb.to.x - game_st.map_width + 1;
 		if (bb.from.y < 0) pos.y -= bb.from.y;
 		else if ((size_t)bb.to.y >= game_st.map_height - 32) pos.y -= (size_t)bb.to.y - game_st.map_height + 32 + 1;
+		return pos;
 	}
 
 	bool is_walkable(xy pos) const {
@@ -816,21 +903,21 @@ struct state_functions {
 		return false;
 	}
 
-	void setAllImageGroupFlagsPal11(sprite_t* sprite) {
-		for (image_t*img : sprite->images) {
-			if (img->palette_type == 0xb) img->flags |= 1;
+	void update_sprite_some_images_set_redraw(sprite_t* sprite) {
+		for (image_t* img : ptr(sprite->images)) {
+			if (img->palette_type == 0xb) img->flags |= image_t::flag_redraw;
 		}
 	};
 
 	int visible_hp_plus_shields(const unit_t* u) const {
 		int r = 0;
-		if (u->unit_type->has_shield) r += u->shield_points >> 8;
-		r += (u->hp + 0xff) >> 8;
+		if (u->unit_type->has_shield) r += u->shield_points.integer_part();
+		r += u->hp.ceil().integer_part();
 		return r;
 	};
 	int max_visible_hp(const unit_t* u) const {
-		int hp = u->unit_type->hitpoints >> 8;
-		if (hp == 0) hp = (u->hp + 0xff) >> 8;
+		int hp = u->unit_type->hitpoints.integer_part();
+		if (hp == 0) hp = u->hp.ceil().integer_part();
 		if (hp == 0) hp = 1;
 		return hp;
 	};
@@ -840,37 +927,70 @@ struct state_functions {
 		return max_visible_hp(u) + shields;
 	};
 
+	size_t unit_space_occupied(const unit_t* u) const {
+		size_t r = 0;
+		for (auto id : u->loaded_units) {
+			unit_t* nu = get_unit(id);
+			if (!nu || unit_dead(nu)) continue;
+			r += nu->unit_type->space_required;;
+		}
+		return r;
+	}
+
 	int get_unit_strength(unit_t* u, bool ground) const {
 		if (u->unit_type->id == UnitTypes::Zerg_Larva || u->unit_type->id == UnitTypes::Zerg_Egg || u->unit_type->id == UnitTypes::Zerg_Cocoon || u->unit_type->id == UnitTypes::Zerg_Lurker_Egg) return 0;
 		int vis_hp_shields = visible_hp_plus_shields(u);
 		int max_vis_hp_shields = max_visible_hp_plus_shields(u);
-		if (u->status_flags&StatusFlags::IsHallucination) {
+		if (u_hallucination(u)) {
 			if (vis_hp_shields < max_vis_hp_shields) return 0;
 		}
 
 		int r = ground ? game_st.unit_ground_strength[u->unit_type->id] : game_st.unit_air_strength[u->unit_type->id];
 		if (u->unit_type->id == UnitTypes::Terran_Bunker) {
-			xcept("fixme getUnitStrength bunker; see getUnitStrength_AirOrGround");
+			r = ground ? game_st.unit_ground_strength[UnitTypes::Terran_Marine] : game_st.unit_air_strength[UnitTypes::Terran_Marine];
+			r *= unit_space_occupied(u);
 		}
-		if (u->unit_type->flags & UnitPrototypeFlags::Spellcaster) {
-			if (~u->status_flags&StatusFlags::IsHallucination) r += (u->energy >> 8) / 2;
+		if (ut_has_energy(u) && !u_hallucination(u)) {
+			r += u->energy.integer_part() / 2;
 		}
 		return r * vis_hp_shields / max_vis_hp_shields;
 	};
 
-	void set_unit_hp(unit_t* u, int hitpoints) {
-		u->hp = hitpoints;
-		if (u->hp > u->unit_type->hitpoints) u->hp = u->unit_type->hitpoints;
-		if (u->sprite->flags & SpriteFlags::Selected && u->sprite->visibility_flags&st.local_mask) {
-			setAllImageGroupFlagsPal11(u->sprite);
+	void set_unit_hp(unit_t* u, fp8 hitpoints) {
+		u->hp = std::min(hitpoints, u->unit_type->hitpoints);
+		if (us_selected(u) && u->sprite->visibility_flags&st.local_mask) {
+			update_sprite_some_images_set_redraw(u->sprite);
 		}
-		if (u->status_flags & StatusFlags::Completed) {
+		if (u_completed(u)) {
 			// damage overlay stuff
 
 			u->air_strength = get_unit_strength(u, false);
 			u->ground_strength = get_unit_strength(u, true);
 		}
 	};
+
+	void set_unit_shield_points(unit_t* u, fp8 shield_points) {
+		u->shield_points = std::min(shield_points, fp8::integer(u->unit_type->shield_points));
+	}
+
+	void set_unit_energy(unit_t* u, fp8 energy) {
+		u->energy = std::min(energy, unit_max_energy(u));
+	}
+
+	void set_unit_resources(unit_t* u, int resources) {
+		if (ut_resource(u)) return;
+		u->building.resource.resource_count = resources;
+		if (u->unit_type->id >= UnitTypes::Resource_Mineral_Field && u->unit_type->id <= UnitTypes::Resource_Mineral_Field_Type_3) {
+			int anim = iscript_anims::WorkingToIdle;
+			if (resources < 250) anim = iscript_anims::SpecialState1;
+			else if (resources < 500) anim = iscript_anims::SpecialState2;
+			else if (resources < 7500) anim = iscript_anims::AlmostBuilt;
+			if (u->building.resource.resource_iscript != anim) {
+				u->building.resource.resource_iscript = anim;
+				sprite_run_anim(u->sprite, anim);
+			}
+		}
+	}
 
 	bool is_frozen(const unit_t* u) const {
 		if (u_frozen(u)) return true;
@@ -888,7 +1008,7 @@ struct state_functions {
 	};
 
 	image_t* find_image(sprite_t* sprite, int first_id, int last_id) const {
-		for (image_t*i : sprite->images) {
+		for (image_t* i : ptr(sprite->images)) {
 			if (i->image_type->id >= first_id && i->image_type->id <= last_id) return i;
 		}
 		return nullptr;
@@ -992,7 +1112,7 @@ struct state_functions {
 		return false;
 	};
 
-	void removeSelectionCircle(sprite_t* sprite) {
+	void remove_selection_circle(sprite_t* sprite) {
 
 	};
 
@@ -1006,32 +1126,78 @@ struct state_functions {
 					sprite->flags |= SpriteFlags::DrawSelection;
 				}
 			}
-		} else removeSelectionCircle(sprite);
+		} else remove_selection_circle(sprite);
 	};
 
-	void updateEnergyTimer(unit_t* u) {
-		if (~u->unit_type->flags & UnitPrototypeFlags::Spellcaster) return;
-		xcept("updateEnergyTimer");
+	fp8 unit_cloak_energy_cost(const unit_t* u) const {
+		switch (u->unit_type->id) {
+		case UnitTypes::Terran_Ghost:
+		case UnitTypes::Hero_Sarah_Kerrigan:
+		case UnitTypes::Hero_Alexei_Stukov:
+		case UnitTypes::Hero_Samir_Duran:
+		case UnitTypes::Hero_Infested_Duran:
+		case UnitTypes::Hero_Infested_Kerrigan:
+			return fp8::integer(10) / 256;
+		case UnitTypes::Terran_Wraith:
+		case UnitTypes::Hero_Tom_Kazansky:
+			return fp8::integer(13) / 256;
+		}
+		return fp8::zero();
+	}
+
+	void set_secondary_order(unit_t* u, const order_type_t* order_type) {
+		if (u->secondary_order_type == order_type) return;
+		u->secondary_order_type = order_type;
+		u->secondary_order_state = 0;
+		u->secondary_order_unk_a = 0;
+		u->secondary_order_unk_b = 0;
+		u->current_build_unit = nullptr;
+	}
+
+	void update_unit_energy(unit_t* u) {
+		if (!ut_has_energy(u)) return;
+		if (u_hallucination(u)) return;
+		if (!u_completed(u)) return;
+		if (u_cloaked(u) || u_requires_detector(u)) {
+			fp8 cost = unit_cloak_energy_cost(u);
+			if (u->energy < cost) {
+				if (u->secondary_order_type->id == Orders::Cloak) set_secondary_order(u, get_order_type(Orders::Nothing));
+			} else {
+				u->energy -= cost;
+				if (us_selected(u)) {
+					update_sprite_some_images_set_redraw(u->sprite);
+				}
+			}
+		} else {
+			fp8 max_energy = unit_max_energy(u);
+			if (u->unit_type->id == UnitTypes::Protoss_Dark_Archon && u->order_type->id == Orders::CompletingArchonSummon && u->order_state) {
+				max_energy = fp8::integer(50);
+			}
+			u->energy = std::min(u->energy + fp8::integer(8) / 256, max_energy);
+			if (us_selected(u)) {
+				update_sprite_some_images_set_redraw(u->sprite);
+			}
+		}
 	};
 
 	int unit_hp_percent(const unit_t* u) const {
 		int max_hp = max_visible_hp(u);
-		int hp = (u->hp + 0xff) >> 8;
+		int hp = u->hp.ceil().integer_part();
 		return hp * 100 / max_hp;
 	};
 
-	void update_unit_timers(unit_t* u) {
+	void update_unit_values(unit_t* u) {
 		if (u->main_order_timer) --u->main_order_timer;
 		if (u->ground_weapon_cooldown) --u->ground_weapon_cooldown;
 		if (u->air_weapon_cooldown) --u->air_weapon_cooldown;
 		if (u->spell_cooldown) --u->spell_cooldown;
 		if (u->unit_type->has_shield) {
-			int max_shields = u->unit_type->shield_points << 8;
+			fp8 max_shields = fp8::integer(u->unit_type->shield_points);
 			if (u->shield_points != max_shields) {
-				u->shield_points += 7;
+				u->shield_points += fp8::integer(7) / 256;
 				if (u->shield_points > max_shields) u->shield_points = max_shields;
-				if (u->sprite->flags & SpriteFlags::Selected) {
-					setAllImageGroupFlagsPal11(u->sprite);
+				if (us_selected(u)) {
+					update_sprite_some_images_set_redraw(u->sprite);
 				}
 			}
 		}
@@ -1039,7 +1205,7 @@ struct state_functions {
 			if (u->ground_weapon_cooldown == 0) u->order_queue_timer = 0;
 		}
 		u->is_being_healed = false;
-		if (u->status_flags & StatusFlags::Completed || ~u->sprite->flags & SpriteFlags::Hidden) {
+		if (u_completed(u) || ~u->sprite->flags & sprite_t::flag_hidden) {
 			++u->cycle_counter;
 			if (u->cycle_counter >= 8) {
 				u->cycle_counter = 0;
@@ -1048,11 +1214,11 @@ struct state_functions {
 		}
 		if (u_completed(u)) {
 			if (ut_regens_hp(u)) {
-				if (u->hp > 0 && u->unit_type->hitpoints) {
-					set_unit_hp(u, u->hp + 4);
+				if (u->hp > fp8::zero() && u->hp != u->unit_type->hitpoints) {
+					set_unit_hp(u, u->hp + fp8::integer(4) / 256);
 				}
 			}
-			updateEnergyTimer(u);
+			update_unit_energy(u);
 			if (u->recent_order_timer) --u->recent_order_timer;
 			bool remove_timer_hit_zero = false;
 			if (u->remove_timer) {
@@ -1199,13 +1365,50 @@ struct state_functions {
 		return xy_length(rect_difference(a_rect, b_rect));
 	}
 
-	int units_direction(const unit_t* from, const unit_t* to) const {
+	// atan is done with an inverse lookup using binary search.
+	template<size_t integer_bits>
+	direction_t sc_atan(fixed_point<integer_bits, 8, true> x) const {
+		bool negative = x < decltype(x)::zero();
+		if (negative) x = -x;
+		int r;
+		if ((unsigned int)x.raw_value > std::numeric_limits<unsigned int>::max()) r = 63;
+		else r = std::upper_bound(arctan_inv_table.begin(), arctan_inv_table.end(), (unsigned int)x.raw_value) - arctan_inv_table.begin();
+		return negative ? -direction_t::from_raw(r) : direction_t::from_raw(r);
+	};
+
+	direction_t xy_direction(xy_fp8 pos) const {
+		if (pos.x == fp8::zero()) return pos.y <= fp8::zero() ? direction_t::zero() : direction_t::from_raw(-128);
+		direction_t r = sc_atan(pos.y / pos.x);
+		if (pos.x > fp8::zero()) r += direction_t::from_raw(64);
+		else r = -r;
+		return r;
+	}
+
+	direction_t xy_direction(xy pos) const {
+		if (pos.x == 0) return pos.y <= 0 ? direction_t::zero() : direction_t::from_raw(-128);
+		direction_t r = sc_atan(fp8::integer(pos.y) / pos.x);
+		if (pos.x > 0) r += direction_t::from_raw(64);
+		else r = -r;
+		return r;
+	}
+
+	xy_fp8 direction_xy(direction_t dir, fp8 length) {
+		return global_st.direction_table[direction_index(dir)] * length;
+	}
+
+	size_t direction_index(direction_t dir) {
+		auto v = dir.fractional_part();
+		if (v < 0) return 256 + v;
+		else return v;
+	}
+
+	direction_t units_direction(const unit_t* from, const unit_t* to) const {
 		xy relpos = to->sprite->position - from->sprite->position;
-		return sc_atan2(relpos);
+		return xy_direction(relpos);
 	}
 
 	bool unit_target_in_attack_angle(const unit_t* u, const unit_t* target, const weapon_type_t* weapon) const {
-		int dir = units_direction(u, target);
+		auto dir = units_direction(u, target);
 		if (u->unit_type->id == UnitTypes::Zerg_Lurker) {
 			xcept("unit_target_in_attack_angle lurker: fixme");
 			// For some reason, this field is set here for lurkers, but I would really like u to be const.
@@ -1213,10 +1416,7 @@ struct state_functions {
 			//u->current_direction1 = dir;
 			return true;
 		}
-		int diff = u->current_direction1 - dir;
-		if (diff < 0) diff += 256;
-		if (diff > 128) diff = 256 - 128;
-		return diff <= weapon->attack_angle;
+		return (dir - u->heading).abs() <= weapon->attack_angle;
 	}
 
 	int weapon_max_range(const unit_t* u, const weapon_type_t* w) const {
@@ -1249,16 +1449,11 @@ struct state_functions {
 		return r;
 	}
 
-	int dir_diff(int dir_from, int dir_to) const {
-		uint8_t v = (uint8_t)dir_to - (uint8_t)dir_from;
-		if (v > 128) v = 256 - v;
-		return v;
-	}
-
 	int unit_target_movement_range(const unit_t* u, const unit_t* target) const {
-		if (~u->movement_flags & 2) return 0;
-		if (~target->movement_flags & 2) return 0;
-		if (dir_diff(u->velocity_direction1, target->velocity_direction1) <= 32) return 0;
+		if (!u_movement_flag(u, 2)) return 0;
+		if (u_movement_flag(target, 2)) {
+			if ((target->velocity_direction - u->velocity_direction).abs() <= direction_t::from_raw(32)) return 0;
+		}
 		return unit_halt_distance(u).integer_part();
 	}
 
@@ -1340,9 +1535,9 @@ struct state_functions {
 		std::array<static_vector<unit_t*, 0x10>, 6> targets {};
 		for (unit_t* target : find_units(bounds)) {
 			if (target == u) continue;
+			if (!unit_target_is_enemy(u, target)) continue;
 			if (!unit_target_is_visible(u, target)) continue;
 			if (!unit_can_attack_target(u, target)) continue;
-			if (!unit_target_is_enemy(u, target)) continue;
 			int distance = units_distance(u, target);
 			if (min_distance && distance < min_distance) continue;
 			if (distance > max_distance) continue;
@@ -1400,7 +1595,7 @@ struct state_functions {
 				u->main_order_timer = 15;
 				if (ut_turret(u)) {
 					if (u->next_target_waypoint != u->subunit->next_target_waypoint) {
-						u->subunit->next_target_waypoint;
+						u->next_target_waypoint = u->subunit->next_target_waypoint;
 					}
 				}
 				if (unit_target_acquisition_range(u)) {
@@ -1409,6 +1604,13 @@ struct state_functions {
 				}
 			}
 		}
+	}
+
+	void order_TurretGuard(unit_t* u) {
+		if (u->next_target_waypoint != u->subunit->next_target_waypoint) {
+			u->next_target_waypoint = u->subunit->next_target_waypoint;
+		}
+		order_PlayerGuard(u);
 	}
 
 	bool execute_main_order(unit_t* u) {
@@ -1435,7 +1637,7 @@ struct state_functions {
 
 		switch (u->order_type->id) {
 		case Orders::TurretGuard:
-			xcept("TurretGuard");
+			order_TurretGuard(u);
 			break;
 		case Orders::TurretAttack:
 			xcept("TurretAttack");
@@ -1930,21 +2132,20 @@ struct state_functions {
 		case Orders::CastMaelstrom:
 			xcept("CastMaelstrom");
 			break;
-		default: xcept("unhandled order %d\n", u->order_type->id);
 		}
 
 		return true;
 	}
 
 	void execute_secondary_order(unit_t* u) {
-		if (u->secondary_order_id == Orders::Hallucination2) {
+		if (u->secondary_order_type->id == Orders::Hallucination2) {
 			if (u->defense_matrix_damage || u->stim_timer || u->ensnare_timer || u->lockdown_timer || u->irradiate_timer || u->stasis_timer || u->parasite_flags || u->storm_timer || u->plague_timer || u->is_blind || u->maelstrom_timer) {
 				order_destroy(u);
 			}
 			return;
 		}
 		if (is_frozen(u)) return;
-		switch (u->secondary_order_id) {
+		switch (u->secondary_order_type->id) {
 		case Orders::Train:
 			xcept("Train");
 			break;
@@ -1975,19 +2176,19 @@ struct state_functions {
 		}
 	}
 
-	void update_unit_orders(unit_t* u) {
+	void update_unit(unit_t* u) {
 		if (!ut_turret(u) && !us_hidden(u)) {
 			update_selection_sprite(u->sprite, st.selection_circle_color[u->owner]);
 		}
 
-		update_unit_timers(u);
+		update_unit_values(u);
 
 		if (!execute_main_order(u)) return;
 		execute_secondary_order(u);
 
 		if (u->subunit && !ut_turret(u)) {
 			iscript_unit_setter ius(this, u->subunit);
-			update_unit_orders(u->subunit);
+			update_unit(u->subunit);
 		}
 
 		if (u->sprite) {
@@ -2004,107 +2205,8 @@ struct state_functions {
 	};
 
 	bool unit_dead(unit_t* u) const {
-		// I don't like this very much, since order_state 1 means the unit is being or has been destroyed.
 		return u->order_type->id == Orders::Die && u->order_state == 1;
 	};
-
-	// atan is done with an inverse lookup using binary search.
-	// Returns (int)(std::atan(x / 256.0) / PI * 128)
-	int sc_atan(int x) const {
-		bool negative = x < 0;
-		if (negative) x = -x;
-		int r = std::upper_bound(global_st.arctan_inv_table.begin(), global_st.arctan_inv_table.end(), (unsigned int)x) - global_st.arctan_inv_table.begin();
-		return negative ? -r : r;
-	};
-
-	int sc_atan2(xy pos) const {
-		if (pos.x == 0) return pos.y <= 0 ? 0 : 128;
-		if (pos.x > 0) return sc_atan((pos.y << 8) / pos.x) + 64;
-		int r = sc_atan((pos.y << 8) / pos.x);
-		r = (r + 192) % 256;
-		return r;
-	}
-
-	bool movement_UM_Init(unit_t* u) {
-		u->pathing_flags &= ~(1 | 2);
-		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
-		u->contour_bounds = { { 0,0 },{ 0,0 } };
-		int next_state = movement_states::UM_Lump;
-		if (!ut_turret(u) && u_iscript_nobrk(u)) {
-			next_state = movement_states::UM_InitSeq;
-		} else if (!u->sprite || unit_dead(u)) {
-			// Should be unreachable, since if we get here the unit is almost certainly already destroyed.
-			// If this throws, eliminate the code path that leads to it.
-			xcept("unreachable?");
-			next_state = movement_states::UM_Lump;
-		} else if (u_in_building(u)) {
-			next_state = movement_states::UM_Bunker;
-		} else if (us_hidden(u)) {
-			if (u->movement_flags & MovementFlags::Accelerating || unit_movepos_state(u) == 0) {
-				// SetMoveTarget_xy(u)
-				// ...
-				xcept("todo hidden sprite pathing stuff");
-			}
-			next_state = movement_states::UM_Hidden;
-		} else if (u_burrowed(u)) {
-			next_state = movement_states::UM_Lump;
-		} else if (u_can_move(u)) {
-			next_state = u->pathing_flags & 1 ? movement_states::UM_AtRest : movement_states::UM_Flyer;
-		} else if (u_can_turn(u)) {
-			next_state = ut_turret(u) ? movement_states::UM_Turret : movement_states::UM_BldgTurret;
-		} else if (u->pathing_flags & 1 && (u->movement_flags & MovementFlags::Accelerating || unit_movepos_state(u) == 0)) {
-			next_state = movement_states::UM_LumpWannabe;
-		}
-		u->movement_state = next_state;
-		return true;
-	};
-
-	bool movement_UM_AtRest(unit_t* u) {
-		if (unit_movepos_state(u) == 0) {
-			if (u->pathing_collision_interval) {
-				if (u->pathing_collision_interval > 2) u->pathing_collision_interval = 2;
-				else --u->pathing_collision_interval;
-			}
-		} else u->pathing_collision_interval = 0;
-		auto go_to_next_waypoint = [&]() {
-			if (u->movement_flags & 4) return true;
-			if (unit_movepos_state(u)) {
-				if (u->movement_flags & 2) return true;
-				if (u->position != u->next_target_waypoint) {
-					int dir = sc_atan2(u->next_target_waypoint - u->position);
-					if (u->current_direction1 == dir) return true;
-					if (u->velocity_direction1 == dir) return true;
-				}
-			}
-			return false;
-		};
-		bool going_to_next_waypoint = false;
-		if (go_to_next_waypoint()) {
-			going_to_next_waypoint = true;
-			xcept("go to next waypoint!");
-		}
-		if (u_collision(u) && u_ground_unit(u)) {
-			u->movement_state = movement_states::UM_CheckIllegal;
-			return false;
-		}
-		if (unit_movepos_state(u) == 0 && ~u->movement_flags & 4) {
-			u->movement_state = movement_states::UM_StartPath;
-			return true;
-		}
-		if (!going_to_next_waypoint) {
-			u->current_speed2 = 0;
-			if (u->current_speed1) {
-				u->current_speed1 = 0;
-				u->current_speed.x = 0;
-				u->current_speed.y = 0;
-			}
-			if (u->sprite->position != u->next_target_waypoint) {
-				u->next_target_waypoint = u->sprite->position;
-			}
-			u->movement_state = movement_states::UM_Dormant;
-		}
-		return false;
-	}
 
 	struct contour_search {
 		std::array<int, 4> inner;
@@ -2199,12 +2301,189 @@ struct state_functions {
 		return std::make_pair(false, largest_unit);
 	}
 
-	bool movement_UM_CheckIllegal(unit_t* u) {
-		u->status_flags &= ~unit_t::status_flag_collision;
+	void set_flingy_move_target(flingy_t* f, xy move_target) {
+		if (f->move_target.pos == move_target) return;
+		f->move_target.pos = move_target;
+		f->move_target.unit = nullptr;
+		f->next_movement_waypoint = move_target;
+		f->movement_flags |= 1;
+	}
+
+	void set_unit_move_target(unit_t* u, xy move_target) {
+		if (u->move_target.pos == move_target) return;
+		if (u->path) xcept("set_unit_move_target: fixme");
+		move_target = restrict_unit_pos_to_map_bounds(move_target, u->unit_type);
+		set_flingy_move_target(u, move_target);
+		if (u_immovable(u)) u_unset_status_flag(u, unit_t::status_flag_immovable);
+		u->recent_order_timer = 15;
+		if (!u->order_queue.empty() && u->order_queue.front().order_type->unk7) {
+			u_set_movement_flag(u, 0x20);
+		} else {
+			u_unset_movement_flag(u, 0x20);
+		}
+	}
+
+	void set_current_velocity_direction(unit_t* u, direction_t current_velocity_direction) {
+		if (u->current_velocity_direction == current_velocity_direction) return;
+		u->current_velocity_direction = current_velocity_direction;
+		u->velocity = direction_xy(current_velocity_direction, u->speed);
+	}
+
+	direction_t unit_turn_rate(const unit_t* u, direction_t desired_turn) const {
+		ufp8 uturn_rate = u->flingy_turn_rate;
+		if (u->flingy_movement_type != 2) uturn_rate /= 2u;
+		fp8 turn_rate = fp8::truncate(uturn_rate.as_signed());
+		fp8 turn = fp8::extend(desired_turn);
+		if (turn > turn_rate) turn = turn_rate;
+		else if (turn < -turn_rate) turn = -turn_rate;
+		return direction_t::truncate(turn);
+	}
+
+	void set_desired_velocity_direction(unit_t* u, direction_t desired_velocity_direction) {
+		u->desired_velocity_direction = desired_velocity_direction;
+		if (u->velocity_direction != desired_velocity_direction) {
+			auto turn = unit_turn_rate(u, desired_velocity_direction - u->velocity_direction);
+			set_current_velocity_direction(u, u->velocity_direction + turn);
+		} else {
+			set_current_velocity_direction(u, desired_velocity_direction);
+		}
+	}
+
+	void update_current_velocity_direction_towards_waypoint(unit_t* u) {
+		if (u->position != u->next_movement_waypoint) {
+			set_desired_velocity_direction(u, xy_direction(u->next_movement_waypoint - u->position));
+		} else {
+			if (u->position != u->next_target_waypoint) {
+				set_desired_velocity_direction(u, xy_direction(u->next_target_waypoint - u->position));
+			} else {
+				set_desired_velocity_direction(u, u->heading);
+			}
+		}
+	}
+
+	void update_unit_heading(unit_t* u, direction_t velocity_direction) {
+		u->velocity_direction = velocity_direction;
+		if (!u_movement_flag(u, 2) || u_movement_flag(u, 1)) {
+			u->heading += unit_turn_rate(u, u->desired_velocity_direction - u->heading);
+			if (u->unit_type->id >= UnitTypes::Zerg_Spire && u->unit_type->id <= UnitTypes::Protoss_Robotics_Support_Bay) {
+				u->flingy_turn_rate += ufp8::from_raw(1);
+			} else if (u->unit_type->id >= UnitTypes::Special_Overmind && u->unit_type->id <= UnitTypes::Special_Right_Upper_Level_Door) {
+				u->flingy_turn_rate += ufp8::from_raw(1);
+			}
+			if (velocity_direction == u->desired_velocity_direction) {
+				u_unset_movement_flag(u, 1);
+			}
+		}
+		auto heading = u->heading;
+		for (image_t* image : ptr(u->sprite->images)) {
+			set_image_heading(image, heading);
+		}
+	}
+
+	struct execute_movement_state {
+		bool refresh_vision = false;
+		bool some_movement_flag0 = false;
+		bool some_movement_flag1 = false;
+	};
+
+	void some_movement_func(unit_t* u, execute_movement_state& ems) {
+		ems.some_movement_flag0 = false;
+		ems.some_movement_flag1 = false;
+		if (u_movement_flag(u, 2)) {
+			u_unset_movement_flag(u, 2);
+			if (!u_movement_flag(u, 8)) ems.some_movement_flag1 = true;
+		} else if (u->position != u->move_target.pos) {
+			if (u->flingy_movement_type != 2 || u_movement_flag(u, 8)) u_set_movement_flag(u, 2);
+			if (!u_movement_flag(u, 8)) ems.some_movement_flag0 = true;
+		}
+	}
+
+	bool movement_UM_Init(unit_t* u, execute_movement_state& ems) {
+		u->pathing_flags &= ~(1 | 2);
+		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
+		u->contour_bounds = { { 0,0 }, { 0,0 } };
+		int next_state = movement_states::UM_Lump;
+		if (!ut_turret(u) && u_iscript_nobrk(u)) {
+			next_state = movement_states::UM_InitSeq;
+		} else if (!u->sprite || unit_dead(u)) {
+			// Should be unreachable, since if we get here the unit is almost certainly already destroyed.
+			// If this throws, eliminate the code path that leads to it.
+			xcept("unreachable?");
+			next_state = movement_states::UM_Lump;
+		} else if (u_in_building(u)) {
+			next_state = movement_states::UM_Bunker;
+		} else if (us_hidden(u)) {
+			if (u_movement_flag(u, 2) || unit_movepos_state(u) == 0) {
+				// SetMoveTarget_xy(u)
+				// ...
+				xcept("todo hidden sprite pathing stuff");
+			}
+			next_state = movement_states::UM_Hidden;
+		} else if (u_burrowed(u)) {
+			next_state = movement_states::UM_Lump;
+		} else if (u_can_move(u)) {
+			next_state = u->pathing_flags & 1 ? movement_states::UM_AtRest : movement_states::UM_Flyer;
+		} else if (u_can_turn(u)) {
+			next_state = ut_turret(u) ? movement_states::UM_Turret : movement_states::UM_BldgTurret;
+		} else if (u->pathing_flags & 1 && (u_movement_flag(u, 2) || unit_movepos_state(u) == 0)) {
+			next_state = movement_states::UM_LumpWannabe;
+		}
+		u->movement_state = next_state;
+		return true;
+	};
+
+	bool movement_UM_AtRest(unit_t* u, execute_movement_state& ems) {
+		if (unit_movepos_state(u) == 0) {
+			if (u->pathing_collision_interval) {
+				if (u->pathing_collision_interval > 2) u->pathing_collision_interval = 2;
+				else --u->pathing_collision_interval;
+			}
+		} else u->pathing_collision_interval = 0;
+		auto go_to_next_waypoint = [&]() {
+			if (u_movement_flag(u, 4)) return true;
+			if (unit_movepos_state(u)) {
+				if (u_movement_flag(u, 2)) return true;
+				if (u->position != u->next_target_waypoint) {
+					auto dir = xy_direction(u->next_target_waypoint - u->position);
+					if (u->heading != dir) return true;
+					if (u->velocity_direction != dir) return true;
+				}
+			}
+			return false;
+		};
+		bool going_to_next_waypoint = false;
+		if (go_to_next_waypoint()) {
+			going_to_next_waypoint = true;
+			xcept("go to next waypoint!");
+		}
+		if (u_collision(u) && u_ground_unit(u)) {
+			u->movement_state = movement_states::UM_CheckIllegal;
+			return false;
+		}
+		if (unit_movepos_state(u) == 0 && !u_movement_flag(u, 4)) {
+			u->movement_state = movement_states::UM_StartPath;
+			return true;
+		}
+		if (!going_to_next_waypoint) {
+			u->current_speed2 = 0;
+			if (u->speed != fp8::zero()) {
+				u->speed = fp8::zero();
+				u->velocity = {};
+			}
+			if (u->sprite->position != u->next_target_waypoint) {
+				u->next_target_waypoint = u->sprite->position;
+			}
+			u->movement_state = movement_states::UM_Dormant;
+		}
+		return false;
+	}
+
+	bool movement_UM_CheckIllegal(unit_t* u, execute_movement_state& ems) {
+		u_unset_status_flag(u, unit_t::status_flag_collision);
 		auto should_move_to_legal = [&]() {
 			if (!u_ground_unit(u) || !is_blocked(u, u->sprite->position).first) return false;
-			if (u_order_not_interruptible(u) || u_iscript_nobrk(u) || u->movement_flags & 8) {
-				u->status_flags |= unit_t::status_flag_collision;
+			if (u_order_not_interruptible(u) || u_iscript_nobrk(u) || u_movement_flag(u, 8)) {
+				u_set_status_flag(u, unit_t::status_flag_collision);
 				return false;
 			}
 			xy move_to = u->sprite->position;
@@ -2218,7 +2497,7 @@ struct state_functions {
 				xcept("should_move_to_legal: can't fit fixme");
 			}
 
-			restrict_unit_pos_to_map_bounds(move_to, u->unit_type);
+			move_to = restrict_unit_pos_to_map_bounds(move_to, u->unit_type);
 			if (move_to != u->sprite->position) {
 				xcept("should_move_to_legal fixme");
 				return true;
@@ -2229,7 +2508,7 @@ struct state_functions {
 		};
 		if (!should_move_to_legal()) {
 			u->pathing_flags &= ~(2 | 4);
-			if (unit_movepos_state(u) || u->movement_flags & 4) {
+			if (unit_movepos_state(u) || u_movement_flag(u, 4)) {
 				u->movement_state = movement_states::UM_AtRest;
 			} else {
 				u->movement_state = movement_states::UM_AnotherPath;
@@ -2242,7 +2521,7 @@ struct state_functions {
 		return false;
 	}
 
-	bool movement_UM_Dormant(unit_t* u) {
+	bool movement_UM_Dormant(unit_t* u, execute_movement_state& ems) {
 		bool rest = false;
 		if (u_collision(u) && u_ground_unit(u)) rest = true;
 		if (unit_movepos_state(u) == 0) rest = true;
@@ -2254,32 +2533,54 @@ struct state_functions {
 		return false;
 	}
 
+	bool movement_UM_Turret(unit_t* u, execute_movement_state& ems) {
+		ems.refresh_vision = false;
+		set_unit_move_target(u, u->sprite->position);
+		auto dir_error = u->desired_velocity_direction - u->heading;
+		if (dir_error != direction_t::from_raw(-128)) {
+			if (dir_error >= direction_t::from_raw(-10) && dir_error <= direction_t::from_raw(10)) {
+				u_unset_movement_flag(u, 1);
+			}
+		}
+		if (u_status_flag(u, (unit_t::status_flags_t)0x2000000)) {
+			some_movement_func(u, ems);
+		} else {
+			update_current_velocity_direction_towards_waypoint(u);
+			some_movement_func(u, ems);
+			update_unit_heading(u, u->velocity_direction);
+		}
+		return false;
+	}
+
 	bool execute_movement(unit_t* u) {
 
-		bool refresh_vision = update_tiles;
+		execute_movement_state ems;
+		ems.refresh_vision = update_tiles;
 
 		while (true) {
 			bool cont = false;
 			switch (u->movement_state) {
 			case movement_states::UM_Init:
-				cont = movement_UM_Init(u);
+				cont = movement_UM_Init(u, ems);
 				break;
 			case movement_states::UM_AtRest:
-				cont = movement_UM_AtRest(u);
+				cont = movement_UM_AtRest(u, ems);
 				break;
 			case movement_states::UM_CheckIllegal:
-				cont = movement_UM_CheckIllegal(u);
+				cont = movement_UM_CheckIllegal(u, ems);
 				break;
 			case movement_states::UM_Dormant:
-				cont = movement_UM_Dormant(u);
+				cont = movement_UM_Dormant(u, ems);
+				break;
+			case movement_states::UM_Turret:
+				cont = movement_UM_Turret(u, ems);
 				break;
 			default:
 				xcept("fixme: movement state %d\n", u->movement_state);
 			}
 			if (!cont) break;
 		}
-
-		return refresh_vision;
+		return ems.refresh_vision;
 	};
 
 	bool is_transforming_zerg_building(const unit_t* u) const {
@@ -2327,8 +2628,8 @@ struct state_functions {
 		return u->unit_type->target_acquisition_range + bonus;
 	}
 
-	int unit_max_energy(const unit_t* u) const {
-		if (ut_hero(u)) return 250 << 8;
+	fp8 unit_max_energy(const unit_t* u) const {
+		if (ut_hero(u)) return fp8::integer(250);
 		auto energy_upgrade = [&]() {
 			switch (u->unit_type->id) {
 			case UnitTypes::Terran_Ghost: return UpgradeTypes::Moebius_Reactor;
@@ -2346,9 +2647,8 @@ struct state_functions {
 			return UpgradeTypes::None;
 		};
 		int upg = energy_upgrade();
-		if (upg == UpgradeTypes::None) return 200 << 8;
-		if (st.upgrade_levels[u->owner][upg]) return 250 << 8;
-		return 200 << 8;
+		if (upg != UpgradeTypes::None && st.upgrade_levels[u->owner][upg]) return fp8::integer(250);
+		else return fp8::integer(200);
 	}
 
 
@@ -2407,13 +2707,13 @@ struct state_functions {
 		required_tile_mask.visible = ~visibility_mask;
 		required_tile_mask.explored = ~visibility_mask;
 		required_tile_mask.flags = height_mask;
-		auto&sight_vals = game_st.sight_values.at(range);
+		auto& sight_vals = game_st.sight_values.at(range);
 		size_t tile_x = (size_t)pos.x / 32;
 		size_t tile_y = (size_t)pos.y / 32;
 		tile_t*base_tile = &st.tiles[tile_x + tile_y*game_st.map_tile_width];
 		if (!in_air) {
-			auto*cur = sight_vals.maskdat.data();
-			auto*end = cur + sight_vals.min_mask_size;
+			auto* cur = sight_vals.maskdat.data();
+			auto* end = cur + sight_vals.min_mask_size;
 			for (; cur != end; ++cur) {
 				cur->vision_propagation = 0xff;
 				if (tile_x + cur->x >= game_st.map_tile_width) continue;
@@ -2431,15 +2731,15 @@ struct state_functions {
 				okay |= !(cur->prev->vision_propagation&required_tile_mask.raw);
 				if (cur->prev_count == 2) okay |= !(cur->prev2->vision_propagation&required_tile_mask.raw);
 				if (!okay) continue;
-				auto&tile = base_tile[cur->map_index_offset];
+				auto& tile = base_tile[cur->map_index_offset];
 				tile.raw &= reveal_tile_mask.raw;
 				cur->vision_propagation = tile.raw;
 			}
 		} else {
 			// This seems bugged; even for air units, if you only traverse ext_masked_count nodes,
 			// then you will still miss out on the min_mask_size (9) last ones
-			auto*cur = sight_vals.maskdat.data();
-			auto*end = cur + sight_vals.ext_masked_count;
+			auto* cur = sight_vals.maskdat.data();
+			auto* end = cur + sight_vals.ext_masked_count;
 			for (; cur != end; ++cur) {
 				if (tile_x + cur->x >= game_st.map_tile_width) continue;
 				if (tile_y + cur->y >= game_st.map_tile_height) continue;
@@ -2466,18 +2766,101 @@ struct state_functions {
 		reveal_sight_at(u->sprite->position, unit_sight_range(u), visible_to, u_flying(u));
 	};
 
-	void update_unit_pathing(unit_t*u) {
+	void turn_turret(unit_t* tu, direction_t turn) {
+		if (tu->order_target.unit) u_unset_status_flag(tu, (unit_t::status_flags_t)0x2000000);
+		else {
+			if (tu->heading == tu->subunit->heading) u_set_status_flag(tu, (unit_t::status_flags_t)0x2000000);
+		}
+		if (u_status_flag(tu, (unit_t::status_flags_t)0x2000000)) set_unit_heading(tu, tu->subunit->heading);
+		else {
+			tu->velocity_direction = (tu->velocity_direction + turn);
+			tu->heading = tu->velocity_direction;
+		}
+		if (tu->unit_type->id == UnitTypes::Terran_Goliath_Turret || tu->unit_type->id == UnitTypes::Hero_Alan_Schezar_Turret) {
+			auto diff = tu->subunit->heading - tu->heading;
+			if (diff == direction_t::from_raw(-128)) {
+				tu->heading = tu->subunit->heading - direction_t::from_raw(96);
+			} else if (diff > direction_t::from_raw(32)) {
+				tu->heading = tu->subunit->heading - direction_t::from_raw(32);
+			} else if (diff < direction_t::from_raw(-32)) {
+				tu->heading = tu->subunit->heading + direction_t::from_raw(32);
+			}
+		}
+	}
 
+	void update_unit_movement(unit_t* u) {
+
+		auto prev_velocity_direction = u->velocity_direction;
 		bool refresh_vision = execute_movement(u);
 		if (refresh_vision) refresh_unit_vision(u);
 
 		if (u_completed(u) && u->subunit && !ut_turret(u)) {
-			xcept("update_unit_pathing: turret stuff");
+			turn_turret(u->subunit, u->velocity_direction - prev_velocity_direction);
+			u->subunit->halt = u->halt;
+			u->subunit->position = { u->halt.x.integer_part(), u->halt.y.integer_part() };
+			move_sprite(u->subunit->sprite, u->subunit->position);
+			update_image_special_offset(u->sprite->main_image);
+			iscript_unit_setter ius(this, u->subunit);
+			if (!u_movement_flag(u, 2)) {
+				if (u_status_flag(u->subunit, (unit_t::status_flags_t)0x1000000)) {
+					u_unset_status_flag(u->subunit, (unit_t::status_flags_t)0x1000000);
+					if (u_can_move(u) && !u_movement_flag(u->subunit, 8)) {
+						sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
+					}
+				}
+			} else {
+				if (!u_status_flag(u->subunit, (unit_t::status_flags_t)0x1000000)) {
+					u_set_status_flag(u->subunit, (unit_t::status_flags_t)0x1000000);
+					if (u_can_move(u) && !u_movement_flag(u->subunit, 8)) {
+						sprite_run_anim(u->sprite, iscript_anims::Walking);
+					}
+				}
+			}
+			update_unit_movement(u->subunit);
 		}
 	};
 
-	void UpdateUnitSpriteInfo(unit_t*u) {
+	bool update_thingy_visibility(thingy_t* t, xy size) {
+		if (!t->sprite || s_flag(t->sprite, sprite_t::flag_hidden)) return true;
+		int tile_from_x = (t->sprite->position.x - size.x / 2) / 32;
+		int tile_from_y = (t->sprite->position.y - size.y / 2) / 32;
+		size_t tile_to_x = tile_from_x + (size.x + 31) / 32u;
+		size_t tile_to_y = tile_from_y + (size.y + 31) / 32u;
+		if (tile_from_x < 0) tile_from_x = 0;
+		if (tile_from_y < 0) tile_from_y = 0;
+		if (tile_to_x > game_st.map_tile_width) tile_to_x = game_st.map_tile_width;
+		if (tile_to_y > game_st.map_tile_height) tile_to_y = game_st.map_tile_height;
 
+		if (tile_from_x == tile_to_x && tile_from_y == tile_to_y) return t->sprite->visibility_flags == 0;
+
+		uint8_t visibility_flags = 0;
+		for (size_t y = tile_from_y; y < tile_to_y; ++y) {
+			for (size_t x = tile_from_x; x < tile_to_y; ++x) {
+				visibility_flags |= ~st.tiles[y * game_st.map_tile_width + x].visible;
+			}
+		}
+		if (t->sprite->visibility_flags != visibility_flags) {
+			set_sprite_visibility(t->sprite, visibility_flags);
+			return true;
+		}
+		return true;
+	}
+
+	void update_unit_sprite(unit_t* u) {
+		bool was_visible = (u->sprite->visibility_flags & st.local_mask) != 0;
+		bool failed = update_thingy_visibility(u, u->unit_type->staredit_placement_box);
+		bool is_visible = (u->sprite->visibility_flags & st.local_mask) != 0;
+		if (u->subunit && !us_hidden(u->subunit)) {
+			set_sprite_visibility(u->subunit->sprite, u->sprite->visibility_flags);
+		}
+		if (failed || (was_visible && !is_visible)) {
+			// some selection stuff
+			if (u_grounded_building(u) || (u->unit_type->id >= UnitTypes::Special_Floor_Missile_Trap && u->unit_type->id <= UnitTypes::Special_Right_Wall_Flame_Trap)) {
+				if (!unit_dead(u)) {
+					xcept("fixme create thingy");
+				}
+			}
+		}
 	};
 
 	bool execute_hidden_unit_main_order(unit_t* u) {
@@ -2552,7 +2935,7 @@ struct state_functions {
 	}
 
 	void execute_hidden_unit_secondary_order(unit_t* u) {
-		switch (u->secondary_order_id) {
+		switch (u->secondary_order_type->id) {
 		case Orders::TrainFighter:
 			xcept("hidden TrainFighter");
 			break;
@@ -2571,7 +2954,7 @@ struct state_functions {
 			update_hidden_unit(u->subunit);
 		}
 		execute_movement(u);
-		update_unit_timers(u);
+		update_unit_values(u);
 
 		if (!execute_hidden_unit_main_order(u)) return;
 		execute_hidden_unit_secondary_order(u);
@@ -2583,6 +2966,18 @@ struct state_functions {
 		if (!u->sprite) xcept("unit has null sprite");
 	}
 
+	int unit_calculate_visibility_flags(const unit_t* u) const {
+		xcept("unit_calculate_visibility_flags: fixme");
+		return 0;
+	}
+
+	void update_unit_visibilty(unit_t* u) {
+		int visibility_flags = unit_calculate_visibility_flags(u);
+		if (u->visibility_flags != visibility_flags) {
+			xcept("update_unit_visibility: fixme");
+		}
+	}
+
 	void update_units() {
 
 		// place box/target order cursor/whatever
@@ -2591,7 +2986,7 @@ struct state_functions {
 		if (!st.order_timer_counter) {
 			st.order_timer_counter = 150;
 			int v = 0;
-			for (unit_t*u : st.visible_units) {
+			for (unit_t* u : ptr(st.visible_units)) {
 				u->order_queue_timer = v;
 				++v;
 				if (v == 8) v = 0;
@@ -2601,7 +2996,7 @@ struct state_functions {
 		if (!st.secondary_order_timer_counter) {
 			st.secondary_order_timer_counter = 300;
 			int v = 0;
-			for (unit_t* u : st.visible_units) {
+			for (unit_t* u : ptr(st.visible_units)) {
 				u->secondary_order_timer = v;
 				++v;
 				if (v == 30) v = 0;
@@ -2609,7 +3004,7 @@ struct state_functions {
 		}
 
 		// some_units_loaded_and_disruption_web begin
-		for (unit_t* u : st.visible_units) {
+		for (unit_t* u : ptr(st.visible_units)) {
 			if (!u_flying(u) || u_status_flag(u, (unit_t::status_flags_t)0x80)) {
 				u_set_status_flag(u, unit_t::status_flag_cannot_attack, false);
 				if (!u_hallucination(u) && (u->unit_type->id != UnitTypes::Zerg_Overlord || st.upgrade_levels[u->owner][UpgradeTypes::Ventral_Sacs]) && u->unit_type->space_provided) {
@@ -2625,36 +3020,41 @@ struct state_functions {
 		// some_units_loaded_and_disruption_web end
 
 
-		for (unit_t* u : st.sight_related_units) {
-			xcept("fixme first_sight_related_unit stuff in UpdateUnits");
+		for (unit_t* u : ptr(st.sight_related_units)) {
+			xcept("fixme first_sight_related_unit stuff in update_units");
 		}
 
-		for (unit_t* u : st.visible_units) {
+		for (unit_t* u : ptr(st.visible_units)) {
 			iscript_order_unit = u;
 			iscript_unit = u;
-			update_unit_pathing(u);
+			update_unit_movement(u);
 		}
 
 		if (update_tiles) {
-			for (unit_t* u : st.scanner_sweep_units) {
+			for (unit_t* u : ptr(st.scanner_sweep_units)) {
 				refresh_unit_vision(u);
 			}
 		}
 
-		for (unit_t* u : st.visible_units) {
-			UpdateUnitSpriteInfo(u);
+		for (unit_t* u : ptr(st.visible_units)) {
+			update_unit_sprite(u);
 			if (u_cloaked(u) || u_requires_detector(u)) {
-				xcept("update_units cloaked stuff");
+				u->is_cloaked = false;
+				if (u->secondary_order_timer) --u->secondary_order_timer;
+				else {
+					update_unit_visibilty(u);
+					u->secondary_order_timer = 30;
+				}
 			}
 		}
 
-		for (unit_t* u : st.visible_units) {
+		for (unit_t* u : ptr(st.visible_units)) {
 			iscript_order_unit = u;
 			iscript_unit = u;
-			update_unit_orders(u);
+			update_unit(u);
 		}
 
-		for (unit_t* u : st.hidden_units) {
+		for (unit_t* u : ptr(st.hidden_units)) {
 			iscript_order_unit = u;
 			iscript_unit = u;
 			update_hidden_unit(u);
@@ -2663,10 +3063,10 @@ struct state_functions {
 		// update_psi()
 		// some lurker stuff
 
-		for (unit_t* u : st.scanner_sweep_units) {
+		for (unit_t* u : ptr(st.scanner_sweep_units)) {
 			iscript_order_unit = u;
 			iscript_unit = u;
-			update_unit_orders(u);
+			update_unit(u);
 		}
 
 		iscript_order_unit = nullptr;
@@ -2724,11 +3124,22 @@ struct state_functions {
 		st.sprites_on_tile_line[index].remove(*sprite);
 	}
 
+	void move_sprite(sprite_t* sprite, xy new_position) {
+		if (sprite->position == new_position) return;
+		size_t old_index = get_sprite_tile_line_index(sprite->position.y);
+		size_t new_index = get_sprite_tile_line_index(new_position.y);
+		sprite->position = new_position;
+		if (old_index != new_index) {
+			st.sprites_on_tile_line[old_index].remove(*sprite);
+			bw_insert_list(st.sprites_on_tile_line[new_index], *sprite);
+		}
+	}
+
 	void set_sprite_visibility(sprite_t* sprite, int visibility_flags) {
-		visibility_flags &= st.local_mask;
-		if ((sprite->visibility_flags&visibility_flags) == visibility_flags) return;
+		if ((sprite->visibility_flags & st.local_mask) != (visibility_flags & st.local_mask)) {
+			for (image_t* i : ptr(sprite->images)) i->flags |= image_t::flag_redraw;
+		}
 		sprite->visibility_flags = visibility_flags;
-		for (image_t*i : sprite->images) i->flags |= image_t::flag_redraw;
 	}
 
 	void set_image_offset(image_t* image, xy offset) {
@@ -2760,34 +3171,51 @@ struct state_functions {
 		image->flags |= image_t::flag_hidden;
 	}
 
-	void update_image_offset(image_t* image) {
-		xcept("update_image_offset");
+	void update_image_special_offset(image_t* image) {
+		set_image_offset(image, get_image_lo_offset(image->sprite->main_image, 2, 0));
 	}
 
 	void update_image_frame_index(image_t* image) {
-		int frame_index = image->frame_set + image->direction;
+		size_t frame_index = image->frame_index_base + image->frame_index_offset;
 		if (image->frame_index != frame_index) {
 			image->frame_index = frame_index;
 			image->flags |= image_t::flag_redraw;
 		}
 	}
-
-	void set_image_direction(image_t* image, int direction) {
+	
+	void set_image_heading(image_t* image, direction_t heading) {
+		if (image->flags & image_t::flag_uses_special_offset) update_image_special_offset(image);
 		if (image->flags & image_t::flag_has_directional_frames) {
-			bool facing;
-			if (direction <= 16) {
-				facing = false;
-			} else {
-				direction = 32 - direction;
-				facing = true;
+			size_t frame_index_offset = (direction_index(heading) + 4) / 32;
+			bool flipped = false;
+			if (frame_index_offset > 16) {
+				frame_index_offset = 32 - frame_index_offset;
+				flipped = true;
 			}
-			if (!!(image->flags & 2) != facing || image->direction != direction) {
-				image->direction = direction;
-				if (facing) image->flags |= 2;
-				else image->flags &= 2;
+			if (image->frame_index_offset != frame_index_offset || ((image->flags & image_t::flag_horizontally_flipped) != 0) != flipped) {
+				image->frame_index_offset = frame_index_offset;
+				if (flipped) image->flags |= image_t::flag_horizontally_flipped;
+				else image->flags &= ~image_t::flag_horizontally_flipped;
 				set_image_palette_type(image, image->palette_type);
 				update_image_frame_index(image);
-				if (image->flags & 0x80) update_image_offset(image);
+			}
+		}
+	}
+
+	void set_image_frame_index_offset(image_t* image, size_t frame_index_offset) {
+		if (image->flags & image_t::flag_has_directional_frames) {
+			bool flipped = false;
+			if (frame_index_offset > 16) {
+				frame_index_offset = 32 - frame_index_offset;
+				flipped = true;
+			}
+			if (image->frame_index_offset != frame_index_offset || ((image->flags & image_t::flag_horizontally_flipped) != 0) != flipped) {
+				image->frame_index_offset = frame_index_offset;
+				if (flipped) image->flags |= image_t::flag_horizontally_flipped;
+				else image->flags &= ~image_t::flag_horizontally_flipped;
+				set_image_palette_type(image, image->palette_type);
+				update_image_frame_index(image);
+				if (image->flags & image_t::flag_uses_special_offset) update_image_special_offset(image);
 			}
 		}
 	}
@@ -2824,12 +3252,14 @@ struct state_functions {
 
 	xy get_image_lo_offset(const image_t* image, int lo_index, int offset_index) const {
 		int frame = image->frame_index;
-		auto&lo_offsets = global_st.image_lo_offsets.at(image->image_type->id);
+		auto& lo_offsets = global_st.image_lo_offsets.at(image->image_type->id);
 		if ((size_t)lo_index >= lo_offsets.size()) xcept("invalid lo index %d\n", lo_index);
-		auto&frame_offsets = *lo_offsets[lo_index];
-		if ((size_t)frame >= frame_offsets.size()) xcept("image %d lo_index %d does not offsets for frame %d", image->image_type->id, lo_index, frame);
+		auto& frame_offsets = *lo_offsets[lo_index];
+		if ((size_t)frame >= frame_offsets.size()) xcept("image %d lo_index %d does not have offsets for frame %d (frame_offsets.size() is %d)", image->image_type->id, lo_index, frame, frame_offsets.size());
 		if ((size_t)offset_index >= frame_offsets[frame].size()) xcept("image %d lo_index %d frame %d does not contain an offset at index %d", image->image_type->id, lo_index, frame, offset_index);
-		return frame_offsets[frame][offset_index];
+		auto r = frame_offsets[frame][offset_index];
+		if (image->flags & image_t::flag_horizontally_flipped) r.x = -r.x;
+		return r;
 	}
 
 	ufp8 get_modified_unit_speed(const unit_t* u, ufp8 base_speed) const {
@@ -2900,22 +3330,16 @@ struct state_functions {
 		}
 
 		auto play_frame = [&](int frame_index) {
-			if (image->frame_set == frame_index) return;
-			image->frame_set = frame_index;
+			if (image->frame_index_base == frame_index) return;
+			image->frame_index_base = frame_index;
 			update_image_frame_index(image);
 		};
 
 		auto add_image = [&](int image_id, xy offset, int order) {
 			log("add_image %d\n", image_id);
-			const image_type_t*image_type = get_image_type(image_id);
+			const image_type_t* image_type = get_image_type(image_id);
 			image_t* script_image = image;
-			image_t* image = std::get<1>(create_image(image_type, script_image->sprite, offset, 0, order, script_image));
-			// Possible behavior change:
-			// Broodwar only returns here if the image creation failed, we are returning
-			// if it failed or no longer exists (deleted by iscript).
-			// Despite that, I doubt there is actual behavior change here, since this stuff
-			// would just set fields on an image that no longer exists, and thus wouldn't
-			// actually be used for anything.
+			image_t* image = create_image(image_type, script_image->sprite, offset, order, script_image);
 			if (!image) return (image_t*)nullptr;
 			
 			if (image->palette_type == 0 && iscript_unit && u_hallucination(iscript_unit)) {
@@ -2925,8 +3349,8 @@ struct state_functions {
 				}
 			}
 			if (image->flags & image_t::flag_has_directional_frames) {
-				int dir = script_image->flags & image_t::flag_horizontally_flipped ? 32 - script_image->direction : script_image->direction;
-				set_image_direction(image, dir);
+				int dir = script_image->flags & image_t::flag_horizontally_flipped ? 32 - script_image->frame_index_offset : script_image->frame_index_offset;
+				set_image_frame_index_offset(image, dir);
 			}
 			update_image_frame_index(image);
 			if (iscript_unit && (u_grounded_building(iscript_unit) || u_completed(iscript_unit))) {
@@ -2990,7 +3414,7 @@ struct state_functions {
 				a = *p++;
 				b = *p++;
 				if (no_side_effects) break;
-				state.wait = a + (lcg_rand(3) % (b - a + 1)) - 1;
+				state.wait = a + ((lcg_rand(3) & 0xff) % (b - a + 1)) - 1;
 				state.program_counter = p - program_data;
 				return true;
 			case opc_goto:
@@ -3008,10 +3432,10 @@ struct state_functions {
 			case opc_switchul:
 				a = *p++;
 				if (no_side_effects) break;
-				if (image_t*new_image = add_image(a, xy(), opc == opc_imgolorig ? image_order_above : image_order_below)) {
-					if (~new_image->flags & 0x80) {
-						new_image->flags |= 0x80;
-						update_image_offset(image);
+				if (image_t* new_image = add_image(a, xy(), opc == opc_imgolorig ? image_order_above : image_order_below)) {
+					if (~new_image->flags & image_t::flag_uses_special_offset) {
+						new_image->flags |= image_t::flag_uses_special_offset;
+						update_image_special_offset(image);
 					}
 				}
 				break;
@@ -3047,30 +3471,42 @@ struct state_functions {
 			case opc_followmaingraphic:
 				if (no_side_effects) break;
 				if (image_t* main_image = image->sprite->main_image) {
-					if (main_image->frame_index == image->frame_index && ((main_image->flags & 2) == (image->flags & 2))) {
-						image->frame_set = main_image->frame_set;
-						image->direction = main_image->direction;
-						if (main_image->flags & 2) image->flags |= 2;
-						else image->flags &= ~2;
+					if (main_image->frame_index == image->frame_index && ((main_image->flags & image_t::flag_horizontally_flipped) == (image->flags & image_t::flag_horizontally_flipped))) {
+						image->frame_index_base = main_image->frame_index_base;
+						image->frame_index_offset = main_image->frame_index_offset;
+						if (main_image->flags & image_t::flag_horizontally_flipped) image->flags |= image_t::flag_horizontally_flipped;
+						else image->flags &= ~image_t::flag_horizontally_flipped;
 					}
 				}
 				break;
 			case opc_randcondjmp:
 				a = *p++;
 				b = *p++;
-				c = lcg_rand(7) & 0xff;
-				if (c < a) {
+				if ((lcg_rand(7) & 0xff) <= a) {
 					p = program_data + b;
 				}
 				break;
 
+			case opc_turnccwise:
+				a = *p++;
+				if (no_side_effects) break;
+				set_unit_heading(iscript_unit, iscript_unit->heading - direction_t::from_raw(8 * a));
+				break;
+			case opc_turncwise:
+				a = *p++;
+				if (no_side_effects) break;
+				set_unit_heading(iscript_unit, iscript_unit->heading + direction_t::from_raw(8 * a));
+				break;
+			case opc_turn1cwise:
+				if (no_side_effects) break;
+				if (!iscript_unit->order_target.unit) set_unit_heading(iscript_unit, iscript_unit->heading + direction_t::from_raw(8));
 			case opc_turnrand:
 				a = *p++;
 				if (no_side_effects) break;
 				if (lcg_rand(6) % 4 == 1) {
-					set_unit_direction(iscript_unit, iscript_unit->current_direction1 - 8 * a);
+					set_unit_heading(iscript_unit, iscript_unit->heading - direction_t::from_raw(8 * a));
 				} else {
-					set_unit_direction(iscript_unit, iscript_unit->current_direction1 + 8 * a);
+					set_unit_heading(iscript_unit, iscript_unit->heading + direction_t::from_raw(8 * a));
 				}
 				break;
 
@@ -3092,7 +3528,7 @@ struct state_functions {
 			case opc_setfldirect:
 				a = *p++;
 				if (no_side_effects) break;
-				xcept("opc_setfldirect");
+				set_unit_heading(iscript_unit, direction_t::from_raw(a * 8));
 				break;
 
 			case opc_setflspeed:
@@ -3144,7 +3580,7 @@ struct state_functions {
 
 	bool iscript_execute_sprite(sprite_t* sprite) {
 		for (auto i = sprite->images.begin(); i != sprite->images.end();) {
-			image_t*image = *i++;
+			image_t* image = &*i++;
 			iscript_execute(image, image->iscript_state);
 		}
 		if (!sprite->images.empty()) return true;
@@ -3155,6 +3591,13 @@ struct state_functions {
 		return false;
 	}
 
+	void sprite_run_anim(sprite_t* sprite, int anim) {
+		for (auto i = sprite->images.begin(); i != sprite->images.end();) {
+			image_t* image = &*i++;
+			iscript_run_anim(image, anim);
+		}
+	}
+
 	void initialize_image(image_t* image, const image_type_t* image_type, sprite_t* sprite, xy offset) {
 		image->image_type = image_type;
 		image->grp = global_st.image_grp[image_type->id];
@@ -3162,8 +3605,8 @@ struct state_functions {
 		if (image_type->has_directional_frames) flags |= image_t::flag_has_directional_frames;
 		if (image_type->is_clickable) flags |= 0x20;
 		image->flags = flags;
-		image->frame_set = 0;
-		image->direction = 0;
+		image->frame_index_base = 0;
+		image->frame_index_offset = 0;
 		image->frame_index = 0;
 		image->sprite = sprite;
 		image->offset = offset;
@@ -3183,21 +3626,25 @@ struct state_functions {
 		}
 	};
 
+	void destroy_image(image_t* image) {
+		xcept("destroy_image");
+	}
+
 	enum {
 		image_order_top,
 		image_order_bottom,
 		image_order_above,
 		image_order_below
 	};
-	std::pair<bool, image_t*> create_image(int image_id, sprite_t*sprite, xy offset, int direction, int order, image_t*relimg = nullptr) {
+	image_t* create_image(int image_id, sprite_t* sprite, xy offset, int order, image_t* relimg = nullptr) {
 		if ((size_t)image_id >= 999) xcept("attempt to create image with invalid id %d", image_id);
-		return create_image(get_image_type(image_id), sprite, offset, direction, order, relimg);
+		return create_image(get_image_type(image_id), sprite, offset, order, relimg);
 	}
-	std::pair<bool,image_t*> create_image(const image_type_t*image_type, sprite_t*sprite, xy offset, int direction, int order, image_t*relimg = nullptr) {
+	image_t* create_image(const image_type_t* image_type, sprite_t* sprite, xy offset, int order, image_t*relimg = nullptr) {
 		if (!image_type)  xcept("attempt to create image of null type");
 		log("create image %d\n", image_type->id);
 
-		if (st.free_images.empty()) return { false, nullptr };
+		if (st.free_images.empty()) return nullptr;
 		image_t* image = &st.free_images.front();
 		st.free_images.pop_front();
 
@@ -3219,17 +3666,9 @@ struct state_functions {
 		if (image->image_type->has_iscript_animations) image->flags |= image_t::flag_has_iscript_animations;
 		else image->flags &= image_t::flag_has_iscript_animations;
 		iscript_set_script(image, image->image_type->iscript_id);
-		// Broodwar does not have this check. The problem is that if init ends, then
-		// the image is strictly speaking no longer valid. Broodwar doesn't care
-		// and just keeps using the pointer, which is fine as long as the image
-		// is not re-used, and no such code path seems to exist.
-		// Nonetheless, I don't find it acceptable to return a pointer to an object that 
-		// no longer exists.
-		if (!iscript_run_anim(image, iscript_anims::Init)) xcept("iscript init deleted the image, remove me when this throws");
-		//if (!iscript_run_anim(image, iscript_anims::Init)) return { true, nullptr };
+		if (!iscript_run_anim(image, iscript_anims::Init)) xcept("iscript Init ended immediately (image is no longer valid, cannot continue)");
 		update_image_position(image);
-		set_image_direction(image, direction);
-		return { true, image };
+		return image;
 	}
 
 	sprite_t* create_sprite(const sprite_type_t*sprite_type, xy pos, int owner) {
@@ -3237,7 +3676,7 @@ struct state_functions {
 		log("create sprite %d\n", sprite_type->id);
 
 		if (st.free_sprites.empty()) return nullptr;
-		sprite_t*sprite = &st.free_sprites.front();
+		sprite_t* sprite = &st.free_sprites.front();
 		st.free_sprites.pop_front();
 
 		auto initialize_sprite = [&]() {
@@ -3249,12 +3688,12 @@ struct state_functions {
 			sprite->visibility_flags = ~0;
 			sprite->elevation_level = 4;
 			sprite->selection_timer = 0;
-			if (!sprite_type->flags) {
-				sprite->flags |= SpriteFlags::Hidden;
+			sprite->images.clear();
+			if (!sprite_type->visible) {
+				sprite->flags |= sprite_t::flag_hidden;
 				set_sprite_visibility(sprite, 0);
 			}
-			sprite->images.clear();
-			if (!create_image(sprite_type->image, sprite, { 0,0 }, 0, image_order_above).first) return false;
+			if (!create_image(sprite_type->image, sprite, { 0,0 }, image_order_above)) return false;
 			sprite->width = std::min(sprite->main_image->grp->width, 0xff);
 			sprite->height = std::min(sprite->main_image->grp->width, 0xff);
 			return true;
@@ -3269,7 +3708,7 @@ struct state_functions {
 		return sprite;
 	}
 
-	bool initialize_flingy(flingy_t* f, const flingy_type_t* flingy_type, xy pos, int owner, int direction) {
+	bool initialize_flingy(flingy_t* f, const flingy_type_t* flingy_type, xy pos, int owner, direction_t direction) {
 		f->flingy_type = flingy_type;
 		f->movement_flags = 0;
 		f->current_speed2 = 0;
@@ -3279,26 +3718,20 @@ struct state_functions {
 		f->flingy_movement_type = flingy_type->movement_type;
 
 		f->position = pos;
-		f->halt = { pos.x << 8, pos.y << 8 };
+		f->halt = { fp8::integer(pos.x), fp8::integer(pos.y) };
 
-		// f->move_target.pos will be uninitialized here if this is a new unit/flingy
-		if (f->move_target.pos != pos) {
-			f->move_target.pos = pos;
-			f->move_target.unit = nullptr;
-			f->next_movement_waypoint = pos;
-			f->movement_flags = 1;
-		}
+		set_flingy_move_target(f, pos);
 		if (f->next_target_waypoint != pos) {
 			f->next_target_waypoint = pos;
 		}
-		f->current_direction1 = direction;
-		f->velocity_direction1 = direction;
+		f->heading = direction;
+		f->velocity_direction = direction;
 
 		f->sprite = create_sprite(flingy_type->sprite, pos, owner);
 		if (!f->sprite) return false;
-		int dir = f->current_direction1;
-		for (image_t*i : f->sprite->images) {
-			set_image_direction(i, dir);
+		auto dir = f->heading;
+		for (image_t* i : ptr(f->sprite->images)) {
+			set_image_heading(i, dir);
 		}
 
 		return true;
@@ -3500,20 +3933,29 @@ struct state_functions {
 		unit_finder_insert(u, bb);
 	}
 
-//	state::unit_finder_entry* unit_finder_prev_entry(size_t index) {
-// 		while (index--) {
-// 			if (!st.unit_finder_groups[index].empty()) return &st.unit_finder_groups[index].back();
-// 		}
-// 		return nullptr;
-// 	};
-	state::unit_finder_entry* unit_finder_next_entry(size_t index) const {
-		++index;
-		while (index != st.unit_finder_groups.size()) {
-			if (!st.unit_finder_groups[index].empty()) return &st.unit_finder_groups[index].front();
-			++index;
+	state::unit_finder_entry* unit_finder_prev_entry(size_t index) const {
+		while (index--) {
+			if (!st.unit_finder_groups[index].empty()) return &st.unit_finder_groups[index].back();
 		}
 		return nullptr;
 	};
+	state::unit_finder_entry* unit_finder_next_entry(size_t index) const {
+		while (++index != st.unit_finder_groups.size()) {
+			if (!st.unit_finder_groups[index].empty()) return &st.unit_finder_groups[index].front();
+		}
+		return nullptr;
+	};
+
+	auto unit_finder_prev_entry_iterator(size_t index) const {
+		auto* e = unit_finder_prev_entry(index);
+		if (e) return st.unit_finder_list.iterator_to(*e);
+		else return st.unit_finder_list.begin();
+	}
+	auto unit_finder_next_entry_iterator(size_t index) const {
+		auto* e = unit_finder_next_entry(index);
+		if (e) return st.unit_finder_list.iterator_to(*e);
+		else return st.unit_finder_list.end();
+	}
 
 	void unit_finder_insert(unit_t* u, rect bb) {
 
@@ -3539,33 +3981,38 @@ struct state_functions {
 
 			size_t new_size = vec.size() + 1;
 			if (new_size <= vec.capacity()) {
-				if (vec.empty()) {
-					vec.push_back({ u, value, unit_finder_next_entry(index) });
+				if (vec.empty() || i_from == vec.end()) {
+					vec.push_back({ u, value });
+					auto next_i = unit_finder_next_entry_iterator(index);
+					st.unit_finder_list.insert(next_i, vec.back());
 				} else {
+					auto next_i = ++st.unit_finder_list.iterator_to(vec.back());
 					vec.push_back(vec.back());
-					vec[vec.size() - 2].next = &vec.back();
+					st.unit_finder_list.insert(next_i, vec.back());
 					auto i_from_next = i_from;
 					++i_from_next;
-					for (auto i = --vec.end(); i != i_from_next;) {
-						unit_t* u = i->u;
-						int value = i->value;
-						--i;
-						i->u = u;
-						i->value = value;
+					if (i_from_next != vec.end()) {
+						for (auto i = --vec.end(); i != i_from_next;) {
+							unit_t* u = i->u;
+							int value = i->value;
+							--i;
+							i->u = u;
+							i->value = value;
+						}
 					}
 					i_from->u = u;
 					i_from->value = value;
 				}
 			} else {
 				if (i_from == vec.end()) {
-					vec.push_back({ u, value, unit_finder_next_entry(index) });
+					vec.push_back({ u, value });
+					auto next_i = unit_finder_next_entry_iterator(index);
+					st.unit_finder_list.insert(next_i, vec.back());
 				} else {
-					vec.insert(i_from, { u, value, nullptr });
-				}
-				for (auto i = --vec.end(); i != vec.begin();) {
-					auto* next = &*i;
-					--i;
-					i->next = next;
+					auto next_i = ++st.unit_finder_list.iterator_to(vec.back());
+					for (auto& v : vec) st.unit_finder_list.remove(v);
+					vec.insert(i_from, { u, value });
+					for (auto& v : vec) st.unit_finder_list.insert(next_i, v);
 				}
 			}
 		};
@@ -3576,21 +4023,16 @@ struct state_functions {
 	}
 	struct unit_finder_search {
 		using value_type = unit_t*;
-		using size_type = size_t;
-		using difference_type = ptrdiff_t;
-		using reference = value_type&;
-		using pointer = value_type*;
 		
 		struct iterator {
 			using value_type = unit_t*;
-			using difference_type = ptrdiff_t;
-			using pointer = value_type*;
 			using iterator_category = std::forward_iterator_tag;
 		private:
-			state::unit_finder_entry* i;
+			state::unit_finder_list_iterator i;
+			state::unit_finder_list_iterator end_i;
 			unit_finder_search& search;
 			friend state_functions;
-			iterator(state::unit_finder_entry* i, unit_finder_search& search) : i(i), search(search) {}
+			iterator(state::unit_finder_list_iterator i, unit_finder_search& search) : i(i), search(search) {}
 			bool in_bounds() {
 				unit_t* u = i->u;
 				if (u->unit_finder_bounding_box.from.x > search.bb.to.x) return false;
@@ -3605,11 +4047,22 @@ struct state_functions {
 				return i->u;
 			}
 
+			unit_t* operator->() const {
+				return i->u;
+			}
+
 			iterator& operator++() {
 				do {
-					i = i->next;
-				} while (i && !in_bounds());
+					++i;
+				} while (i != search.i_end && (!in_bounds() || i->u->unit_finder_visited));
+				i->u->unit_finder_visited = true;
 				return *this;
+			}
+
+			iterator operator++(int) {
+				auto r = *this;
+				++*this;
+				return r;
 			}
 
 			bool operator==(const iterator& n) const {
@@ -3622,15 +4075,21 @@ struct state_functions {
 
 	private:
 		friend state_functions;
-		state::unit_finder_entry* i_begin;
-		state::unit_finder_entry* i_end;
+		const state_functions& funcs;
+		state::unit_finder_list_iterator i_begin;
+		state::unit_finder_list_iterator i_end;
 		rect bb;
+		unit_finder_search(const state_functions& funcs) : funcs(funcs) {
+			if (funcs.unit_finder_search_active) xcept("recursive unit_finder_search is not supported");
+			funcs.unit_finder_search_active = true;
+		}
 	public:
+		~unit_finder_search() {
+			funcs.unit_finder_search_active = false;
+		}
 
 		iterator begin() {
-			auto i = iterator(i_begin, *this);
-			if (!i.i) ++i;
-			return i;
+			return iterator(i_begin, *this);
 		}
 		iterator end() {
 			return iterator(i_end, *this);
@@ -3638,7 +4097,7 @@ struct state_functions {
 	};
 
 	unit_finder_search find_units(rect area) const {
-		unit_finder_search r;
+		unit_finder_search r(*this);
 
 		int index_from_x = area.from.x;
 		int index_to_x = area.to.x;
@@ -3663,21 +4122,24 @@ struct state_functions {
 
 		auto& vec_from = st.unit_finder_groups[index_from];
 		if (!vec_from.empty()) {
-			r.i_begin = &*std::lower_bound(vec_from.begin(), vec_from.end(), area.from.x, [](auto& a, int value) {
+			auto i = std::lower_bound(vec_from.begin(), vec_from.end(), area.from.x, [](auto& a, int value) {
 				return a.value < value;
 			});
-		} else r.i_begin = unit_finder_next_entry(index_from);
-		r.i_end = unit_finder_next_entry(index_to);
+			if (i == vec_from.end()) r.i_begin = unit_finder_next_entry_iterator(index_from);
+			else r.i_begin = st.unit_finder_list.iterator_to(*i);
+		} else r.i_begin = unit_finder_next_entry_iterator(index_from);
+		r.i_end = unit_finder_next_entry_iterator(index_to);
 
-// 		log("max_unit_width is %d, max_unit_height is %d\n", game_st.max_unit_width, game_st.max_unit_height);
-// 		log("find area is %d %d %d %d\n", area.from.x, area.from.y, area.to.x, area.to.y);
-// 		log("find %d %d\n", index_from, index_to);
+		for (auto i = r.i_begin; i != r.i_end; ++i) {
+			i->u->unit_finder_visited = false;
+		}
+		if (r.i_begin != r.i_end) r.i_begin->u->unit_finder_visited = true;
 
 		return r;
 	}
 
 	template<typename F>
-	unit_t* find_unit(rect area, const F& predicate) {
+	unit_t* find_unit(rect area, const F& predicate) const {
 		for (unit_t* u : find_units(area)) {
 			if (predicate(u)) return u;
 		}
@@ -3689,7 +4151,7 @@ struct state_functions {
 	bool initialize_unit_type(unit_t*u, const unit_type_t*unit_type, xy pos, int owner) {
 
 		iscript_unit_setter ius(this, u);
-		if (!initialize_flingy(u, unit_type->flingy, pos, owner, 0)) return false;
+		if (!initialize_flingy(u, unit_type->flingy, pos, owner, direction_t::zero())) return false;
 
 		u->owner = owner;
 		u->order_type = get_order_type(Orders::Fatal);
@@ -3710,8 +4172,8 @@ struct state_functions {
 			u->sprite = nullptr;
 		}
 		u->last_attacking_player = 8;
-		u->shield_points = u->unit_type->shield_points << 8;
-		if (u->unit_type->id == UnitTypes::Protoss_Shield_Battery) u->energy = 100 << 8;
+		u->shield_points = fp8::integer(u->unit_type->shield_points);
+		if (u->unit_type->id == UnitTypes::Protoss_Shield_Battery) u->energy = fp8::integer(100);
 		else u->energy = unit_max_energy(u) / 4;
 		// u->ai_action_flag = 0;
 		u->sprite->elevation_level = unit_type->elevation_level;
@@ -3742,20 +4204,20 @@ struct state_functions {
 
 		if (u->unit_type->build_time == 0) {
 			u->remaining_build_time = 1;
-			u->hp_construction_rate = 1;
+			u->hp_construction_rate = fp8::integer(1) / 256;
 		} else {
 			u->remaining_build_time = u->unit_type->build_time;
-			u->hp_construction_rate = (u->unit_type->hitpoints - u->unit_type->hitpoints / 10 + u->unit_type->build_time - 1) / u->unit_type->build_time;
-			if (u->hp_construction_rate == 0) u->hp_construction_rate = 1;
+			u->hp_construction_rate = (u->unit_type->hitpoints - u->unit_type->hitpoints / 10 + fp8::integer(u->unit_type->build_time) / 256 - fp8::integer(1) / 256) / u->unit_type->build_time;
+			if (u->hp_construction_rate == fp8::zero()) u->hp_construction_rate = fp8::integer(1) / 256;
 		}
 		if (u->unit_type->has_shield && u_grounded_building(u)) {
-			int max_shields = u->unit_type->shield_points << 8;
+			fp8 max_shields = fp8::integer(u->unit_type->shield_points);
 			u->shield_points = max_shields / 10;
 			if (u->unit_type->build_time == 0) {
-				u->shield_construction_rate = 1;
+				u->shield_construction_rate = fp8::integer(1);
 			} else {
 				u->shield_construction_rate = (max_shields - u->shield_points) / u->unit_type->build_time;
-				if (u->shield_construction_rate == 0) u->shield_construction_rate = 1;
+				if (u->shield_construction_rate == fp8::zero()) u->shield_construction_rate = fp8::integer(1);
 			}
 		}
 		update_unit_speed_upgrades(u);
@@ -3764,15 +4226,15 @@ struct state_functions {
 		return true;
 	}
 
-	void destroy_unit(unit_t*u) {
-		xcept("destroy %p\n", u);
+	void destroy_unit(unit_t* u) {
+		xcept("destroy_unit\n");
 	}
 
-	unit_t* create_unit(const unit_type_t*unit_type, xy pos, int owner) {
+	unit_t* create_unit(const unit_type_t* unit_type, xy pos, int owner) {
 		if (!unit_type) xcept("attempt to create unit of null type");
 
 		lcg_rand(14);
-		auto get_new = [&](const unit_type_t*unit_type) {
+		auto get_new = [&](const unit_type_t* unit_type) {
 			if (st.free_units.empty()) {
 				net_error_string(61); // Cannot create more units
 				return (unit_t*)nullptr;
@@ -3781,7 +4243,7 @@ struct state_functions {
 				net_error_string(0);
 				return (unit_t*)nullptr;
 			}
-			unit_t* u = st.free_units.front();
+			unit_t* u = &st.free_units.front();
 			auto initialize_unit = [&]() {
 
 				u->order_queue.clear();
@@ -3818,7 +4280,7 @@ struct state_functions {
 				u->maelstrom_timer = 0;
 				u->unused_0x125 = 0;
 				u->acid_spore_count = 0;
-				for (auto&v : u->acid_spore_time) v = 0;
+				for (auto& v : u->acid_spore_time) v = 0;
 				u->status_flags = 0;
 				u->user_action_flags = 0;
 				u->pathing_flags = 0;
@@ -3847,13 +4309,13 @@ struct state_functions {
 					else u->current_button_set = UnitTypes::Buildings;
 				}
 				u->wireframe_randomizer = lcg_rand(15);
-				if (ut_turret(u)) u->hp = 1;
+				if (ut_turret(u)) u->hp = fp8::integer(1) / 256;
 				else u->hp = u->unit_type->hitpoints / 10;
 				if (u_grounded_building(u)) u->order_type = get_order_type(Orders::Nothing);
 				else u->order_type = u->unit_type->human_ai_idle;
 				// secondary_order_id is uninitialized
-				if (u->secondary_order_id != Orders::Nothing) {
-					u->secondary_order_id = Orders::Nothing;
+				if (!u->secondary_order_type || u->secondary_order_type->id != Orders::Nothing) {
+					u->secondary_order_type = get_order_type(Orders::Nothing);
 					u->secondary_order_unk_a = 0;
 					u->secondary_order_unk_b = 0;
 					u->current_build_unit = nullptr;
@@ -3902,7 +4364,9 @@ struct state_functions {
 			}
 			u->subunit = su;
 			su->subunit = u;
-			set_image_offset(u->sprite->main_image, get_image_lo_offset(u->sprite->main_image, 0, 2));
+			set_image_offset(u->sprite->main_image, get_image_lo_offset(u->sprite->main_image, 2, 0));
+			if (ut_turret(u)) xcept("unit %d has a turret but is also flagged as a turret", u->unit_type->id);
+			if (!ut_turret(su)) xcept("unit %d was created as a turret but is not flagged as one", su->unit_type->id);
 		} else {
 			u->subunit = nullptr;
 		}
@@ -3915,12 +4379,22 @@ struct state_functions {
 		return create_unit(get_unit_type(unit_type_id), pos, owner);
 	}
 
-	void replace_sprite_image(sprite_t*sprite, int image_id, int direction) {
-		bool was_selected = !!(sprite->flags & sprite_t::flag_selected);
-		// if (was_selected) remove_selection_circle_and_hp_bar();
-		// else remove_selection_circle();
+	void replace_sprite_images(sprite_t* sprite, const image_type_t* new_image_type, direction_t heading) {
+		// selection stuff...
 
-		// other stuff...
+		for (auto i = sprite->images.begin(); i != sprite->images.end();) {
+			image_t* image = &*i++;
+			destroy_image(image);
+		}
+
+		create_image(new_image_type, sprite, {}, image_order_above);
+
+		// selection stuff...
+
+		for (image_t* img : ptr(sprite->images)) {
+			set_image_heading(img, heading);
+		}
+		
 	}
 
 	void apply_unit_effects(unit_t*u) {
@@ -3944,7 +4418,7 @@ struct state_functions {
 		}
 	}
 
-	void set_construction_graphic(unit_t*u, bool animated) {
+	void set_construction_graphic(unit_t* u, bool animated) {
 
 		bool requires_detector_or_cloaked = u_requires_detector(u) || u_cloaked(u);
 		int coloring_data = 0;
@@ -3952,9 +4426,9 @@ struct state_functions {
 			coloring_data = u->sprite->main_image->coloring_data;
 		}
 		iscript_unit_setter ius(this, u);
-		int construction_animation = u->unit_type->construction_animation;
-		if (!animated || construction_animation == 0) construction_animation = u->sprite->sprite_type->image->id;
-		replace_sprite_image(u->sprite, construction_animation, u->current_direction1);
+		const image_type_t* construction_image = u->unit_type->construction_animation;
+		if (!animated || !construction_image) construction_image = u->sprite->sprite_type->image;
+		replace_sprite_images(u->sprite, construction_image, u->heading);
 
 		if (requires_detector_or_cloaked) {
 			// some stuff...
@@ -3964,17 +4438,16 @@ struct state_functions {
 
 	}
 
-	void set_unit_direction(unit_t* u, int direction) {
-		
-		u->velocity_direction1 = direction;
-		u->current_direction1 = direction;
-		u->current_direction2 = direction;
-		u->current_speed = global_st.direction_table.at(direction) * u->current_speed1 / 256;
+	void set_unit_heading(unit_t* u, direction_t heading) {
+		u->velocity_direction = heading;
+		u->heading = heading;
+		u->current_velocity_direction = heading;
+		u->velocity = direction_xy(heading, u->speed);
 		if (u->next_target_waypoint != u->sprite->position) {
 			u->next_target_waypoint = u->sprite->position;
 		}
-		for (image_t*img : u->sprite->images) {
-			set_image_direction(img, direction);
+		for (image_t* img : ptr(u->sprite->images)) {
+			set_image_heading(img, heading);
 		}
 
 	}
@@ -3982,7 +4455,7 @@ struct state_functions {
 	void finish_building_unit(unit_t*u) {
 		if (u->remaining_build_time) {
 			u->hp = u->unit_type->hitpoints;
-			u->shield_points = u->unit_type->shield_points << 8;
+			u->shield_points = fp8::integer(u->unit_type->shield_points);
 			u->remaining_build_time = 0;
 		}
 		set_current_button_set(u, u->unit_type->id);
@@ -3994,10 +4467,10 @@ struct state_functions {
 			if (u_can_turn(u)) {
 				int dir = u->unit_type->unit_direction;
 				if (dir == 32) dir = lcg_rand(36) % 32;
-				set_unit_direction(u, dir * 8);
+				set_unit_heading(u, direction_t::from_raw(dir * 8));
 			}
 			if (u->unit_type->id >= UnitTypes::Special_Floor_Missile_Trap && u->unit_type->id <= UnitTypes::Special_Right_Wall_Flame_Trap) {
-				xcept("some trap doodad stuff");
+				show_unit(u);
 			}
 		}
 
@@ -4070,7 +4543,7 @@ struct state_functions {
 	void queue_order(unit_t* u, const order_type_t* order_type, order_t* insert_after, order_target target) {
 		auto get_new = [&](const order_type_t* order_type, order_target target) {
 			if (st.free_orders.empty()) return (order_t*)nullptr;
-			order_t* o = st.free_orders.front();
+			order_t* o = &st.free_orders.front();
 			st.free_orders.pop_front();
 			++st.allocated_order_count;
 			o->order_type = order_type;
@@ -4090,7 +4563,7 @@ struct state_functions {
 	void set_queued_order(unit_t* u, bool interrupt, const order_type_t* order_type, order_target target) {
 		if (u->order_type->id == Orders::Die) return;
 		while (!u->order_queue.empty()) {
-			order_t* o = u->order_queue.back();
+			order_t* o = &u->order_queue.back();
 			if (!o) break;
 			if ((!interrupt || !o->order_type->can_be_interrupted) && o->order_type != order_type) break;
 			remove_queued_order(u, o);
@@ -4132,9 +4605,7 @@ struct state_functions {
 			break;
 		}
 		if (anim != -1) {
-			for (image_t* img : u->sprite->images) {
-				iscript_run_anim(img, anim);
-			}
+			sprite_run_anim(u->sprite, anim);
 		}
 		u->movement_flags &= ~8;
 		iscript_order_unit = prev_iscript_order_unit;
@@ -4146,7 +4617,7 @@ struct state_functions {
 		if ((u_in_building(u) || u_burrowed(u)) && u->order_queue.front().order_type->id != Orders::Die) return;
 		const order_type_t* order_type = u->order_queue.front().order_type;
 		order_target target = u->order_queue.front().target;
-		remove_queued_order(u, u->order_queue.front());
+		remove_queued_order(u, &u->order_queue.front());
 
 		u->user_action_flags &= ~1;
 		u->status_flags &= ~(unit_t::status_flag_disabled | unit_t::status_flag_order_not_interruptible | unit_t::status_flag_holding_position);
@@ -4214,12 +4685,16 @@ struct state_functions {
 		}
 	}
 
+	void reset_unit_path(unit_t* u) {
+		if (u->path) xcept("reset_unit_path: fixme");
+	}
+
 	void show_unit(unit_t* u) {
 		if (!us_hidden(u)) return;
 		u->sprite->flags &= ~sprite_t::flag_hidden;
 		if (u->subunit && !ut_turret(u)) u->subunit->sprite->flags &= ~sprite_t::flag_hidden;
 		refresh_unit_vision(u);
-		UpdateUnitSpriteInfo(u);
+		update_unit_sprite(u);
 		unit_finder_insert(u);
 		if (u_grounded_building(u)) {
 			xcept("update tiles (mask in flag_occupied)");
@@ -4228,13 +4703,13 @@ struct state_functions {
 		if (u_flying(u)) {
 			xcept("set repulse angle");
 		}
-		log("toggle_unit_path(u)\n");
+		reset_unit_path(u);
 		
 		u->movement_state = 0;
 		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
 		else u->pathing_flags &= ~1;
 		if (u->subunit && !ut_turret(u)) {
-			log("toggle_unit_path(u->subunit)\n");
+			reset_unit_path(u->subunit);
 			u->subunit->movement_state = 0;
 			if (u->subunit->sprite->elevation_level < 12) u->subunit->pathing_flags |= 1;
 			else u->subunit->pathing_flags &= ~1;
@@ -4243,7 +4718,7 @@ struct state_functions {
 		bw_insert_list(st.visible_units, *u);
 	}
 
-	void update_unit_strength_and_apply_default_orders(unit_t* u) {
+	void complete_unit(unit_t* u) {
 
 		if (ut_flyer(u)) {
 			increment_unit_counts(u, -1);
@@ -4281,8 +4756,8 @@ struct state_functions {
 			else if (st.players[u->owner].controller == state::player_t::controller_computer_game) set_unit_order(u, u->unit_type->computer_ai_idle);
 			else set_unit_order(u, u->unit_type->human_ai_idle);
 		}
-		if (ut_worker(u)) {
-			xcept("fixme worker");
+		if (ut_flag(u, (unit_type_t::flags_t)0x800)) {
+			xcept("fixme unknown flag");
 		}
 		u->air_strength = get_unit_strength(u, false);
 		u->ground_strength = get_unit_strength(u, true);
@@ -4303,7 +4778,7 @@ struct state_functions {
 			xcept("place_initial_unit failed");
 		}
 
-		update_unit_strength_and_apply_default_orders(u);
+		complete_unit(u);
 
 		return u;
 	}
@@ -4355,7 +4830,7 @@ struct game_load_functions : state_functions {
 		game_st.upgrade_types = data_loading::load_upgrades_dat("arr\\upgrades.dat");
 		game_st.tech_types = data_loading::load_techdata_dat("arr\\techdata.dat");
 
-		auto fixup_unit_type = [&](unit_type_t*&ptr) {
+		auto fixup_unit_type = [&](unit_type_t*& ptr) {
 			size_t index = (size_t)ptr;
 			if (index == 228) ptr = nullptr;
 			else ptr = get_unit_type(index);
@@ -4365,25 +4840,30 @@ struct game_load_functions : state_functions {
 			if (index == 130) ptr = nullptr;
 			else ptr = get_weapon_type(index);
 		};
-		auto fixup_upgrade_type = [&](upgrade_type_t*&ptr) {
+		auto fixup_upgrade_type = [&](upgrade_type_t*& ptr) {
 			size_t index = (size_t)ptr;
 			if (index == 61) ptr = nullptr;
 			else ptr = get_upgrade_type(index);
 		};
-		auto fixup_flingy_type = [&](const flingy_type_t*&ptr) {
+		auto fixup_flingy_type = [&](const flingy_type_t*& ptr) {
 			size_t index = (size_t)ptr;
-			if (index == 61) ptr = nullptr;
-			else ptr = get_flingy_type(index);
+			ptr = get_flingy_type(index);
 		};
-		auto fixup_order_type = [&](const order_type_t*&ptr) {
+		auto fixup_order_type = [&](const order_type_t*& ptr) {
 			size_t index = (size_t)ptr;
 			ptr = get_order_type(index);
 		};
+		auto fixup_image_type = [&](const image_type_t*& ptr) {
+			size_t index = (size_t)ptr;
+			if (index == 999) ptr = nullptr;
+			else ptr = get_image_type(index);
+		};
 
-		for (auto&v : game_st.unit_types.vec) {
+		for (auto& v : game_st.unit_types.vec) {
 			fixup_flingy_type(v.flingy);
 			fixup_unit_type(v.turret_unit_type);
 			fixup_unit_type(v.subunit2);
+			fixup_image_type(v.construction_animation);
 			fixup_weapon_type(v.ground_weapon);
 			fixup_weapon_type(v.air_weapon);
 			fixup_upgrade_type(v.armor_upgrade);
@@ -4393,7 +4873,7 @@ struct game_load_functions : state_functions {
 			fixup_order_type(v.attack_unit);
 			fixup_order_type(v.attack_move);
 		}
-		for (auto&v : game_st.weapon_types.vec) {
+		for (auto& v : game_st.weapon_types.vec) {
 			fixup_flingy_type(v.flingy);
 			fixup_upgrade_type(v.damage_upgrade);
 		}
@@ -4432,11 +4912,11 @@ struct game_load_functions : state_functions {
 
 		auto set_acquisition_ranges = [&]() {
 			for (int i = 0; i < 228; ++i) {
-				unit_type_t*unit_type = get_unit_type(i);
-				const unit_type_t*shooting_type = unit_type->turret_unit_type ? unit_type->turret_unit_type : unit_type;
-				const weapon_type_t*ground_weapon = shooting_type->ground_weapon;
-				const weapon_type_t*air_weapon = shooting_type->air_weapon;
-				int acq_range = shooting_type->target_acquisition_range;
+				unit_type_t* unit_type = get_unit_type(i);
+				const unit_type_t* attacking_type = unit_type->turret_unit_type ? unit_type->turret_unit_type : unit_type;
+				const weapon_type_t* ground_weapon = attacking_type->ground_weapon;
+				const weapon_type_t* air_weapon = attacking_type->air_weapon;
+				int acq_range = attacking_type->target_acquisition_range;
 				if (ground_weapon) acq_range = std::max(acq_range, ground_weapon->max_range);
 				if (air_weapon) acq_range = std::max(acq_range, air_weapon->max_range);
 				unit_type->target_acquisition_range = acq_range;
@@ -4494,6 +4974,9 @@ struct game_load_functions : state_functions {
 
 		size_t unit_finder_groups_size = (game_st.map_width + state::unit_finder_group_size - 1) / state::unit_finder_group_size;
 		st.unit_finder_groups.resize(unit_finder_groups_size);
+		for (auto& v : st.unit_finder_groups) {
+			v.reserve(0x100);
+		}
 
 		int max_unit_width = 0;
 		int max_unit_height = 0;
@@ -5337,7 +5820,7 @@ struct game_load_functions : state_functions {
 		case UnitTypes::Protoss_Scarab:
 			return 0;
 		}
-		int hp = unit_type->hitpoints >> 8;
+		int hp = unit_type->hitpoints.integer_part();
 		if (unit_type->has_shield) hp += unit_type->shield_points;
 		if (hp == 0) return 0;
 		int fact = weapon_type->damage_factor;
@@ -5346,7 +5829,33 @@ struct game_load_functions : state_functions {
 		int range = weapon_type->max_range;
 		unsigned int a = (range / (unsigned)cd) * fact * dmg;
 		unsigned int b = (hp * ((int64_t)(fact*dmg << 11) / cd)) >> 8;
-		int score = (int)(sqrt(a + b)*7.58);
+		// This function calculates (int)(sqrt(x)*7.58)
+		auto sqrt_x_times_7_58 = [&](int x) {
+			if (x <= 0) return 0;
+			int value = 1;
+			while (true) {
+				int f_eval = value * value;
+				int f_derivative = 2 * value;
+				int delta = (f_eval - x + f_derivative - 1) / f_derivative;
+				if (delta == 0) break;
+				while (std::numeric_limits<int>::max() / (value - delta) < (value - delta)) {
+					delta /= 2;
+				}
+				value -= delta;
+			}
+			value = value * 758 / 100;
+			size_t n = 8;
+			while (n > 0) {
+				int nv = value + n / 2 + 1;
+				int r = (int)(((int64_t)nv * nv * 10000) / (758 * 758));
+				if (r < x) {
+					value = nv;
+					n -= n / 2 + 1;
+				} else n /= 2;
+			}
+			return value;
+		};
+		int score = sqrt_x_times_7_58(a + b);
 		switch (unit_type->id) {
 		case UnitTypes::Terran_SCV:
 		case UnitTypes::Zerg_Drone:
@@ -5370,20 +5879,20 @@ struct game_load_functions : state_functions {
 
 		for (int idx = 0; idx < 228; ++idx) {
 
-			const unit_type_t*unit_type = get_unit_type(idx);
-			const unit_type_t*shooting_type = unit_type;
+			const unit_type_t* unit_type = get_unit_type(idx);
+			const unit_type_t* attacking_type = unit_type;
 			int air_strength = 0;
 			int ground_strength = 0;
-			if (shooting_type->id != UnitTypes::Zerg_Larva && shooting_type->id != UnitTypes::Zerg_Egg && shooting_type->id != UnitTypes::Zerg_Cocoon && shooting_type->id != UnitTypes::Zerg_Lurker_Egg) {
-				if (shooting_type->id == UnitTypes::Protoss_Carrier || shooting_type->id == UnitTypes::Hero_Gantrithor) shooting_type = get_unit_type(UnitTypes::Protoss_Interceptor);
-				else if (shooting_type->id == UnitTypes::Protoss_Reaver || shooting_type->id == UnitTypes::Hero_Warbringer) shooting_type = get_unit_type(UnitTypes::Protoss_Scarab);
-				else if (shooting_type->turret_unit_type) shooting_type = shooting_type->turret_unit_type;
+			if (attacking_type->id != UnitTypes::Zerg_Larva && attacking_type->id != UnitTypes::Zerg_Egg && attacking_type->id != UnitTypes::Zerg_Cocoon && attacking_type->id != UnitTypes::Zerg_Lurker_Egg) {
+				if (attacking_type->id == UnitTypes::Protoss_Carrier || attacking_type->id == UnitTypes::Hero_Gantrithor) attacking_type = get_unit_type(UnitTypes::Protoss_Interceptor);
+				else if (attacking_type->id == UnitTypes::Protoss_Reaver || attacking_type->id == UnitTypes::Hero_Warbringer) attacking_type = get_unit_type(UnitTypes::Protoss_Scarab);
+				else if (attacking_type->turret_unit_type) attacking_type = attacking_type->turret_unit_type;
 
-				const weapon_type_t*air_weapon = shooting_type->air_weapon;
+				const weapon_type_t* air_weapon = attacking_type->air_weapon;
 				if (!air_weapon) air_strength = 1;
 				else air_strength = get_unit_strength(unit_type, air_weapon);
 
-				const weapon_type_t*ground_weapon = shooting_type->ground_weapon;
+				const weapon_type_t* ground_weapon = attacking_type->ground_weapon;
 				if (!ground_weapon) ground_strength = 1;
 				else ground_strength = get_unit_strength(unit_type, ground_weapon);
 			}
@@ -5819,7 +6328,7 @@ struct game_load_functions : state_functions {
 			for (int i = 0; i < 228; ++i) {
 				if (uses_default_settings[i]) continue;
 				unit_type_t* unit_type = get_unit_type(i);
-				unit_type->hitpoints = hp[i];
+				unit_type->hitpoints = fp8::from_raw(hp[i]);
 				unit_type->shield_points = shield_points[i];
 				unit_type->armor = armor[i];
 				unit_type->build_time = build_time[i];
@@ -6027,8 +6536,13 @@ struct game_load_functions : state_functions {
 
 				unit_t* u = create_initial_unit(unit_type, { x,y }, owner);
 
-				//xcept("created unit %p\n", u);
-				log("created unit %p with id %d\n", u, u - st.units.data());
+				if (valid_properties & 0x2) set_unit_hp(u, std::max(fp8::truncate(u->unit_type->hitpoints * hp_percent / 100), fp8::integer(1) / 256));
+				if (valid_properties & 0x4) set_unit_shield_points(u, fp8::integer(u->unit_type->shield_points * shield_percent / 100));
+				if (valid_properties & 0x8) set_unit_energy(u, fp8::truncate(unit_max_energy(u) * energy_percent / 100));
+				if (valid_properties & 0x10) set_unit_resources(u, resources);
+				// more stuff...
+				
+				log("created initial unit %p with id %d\n", u, u - st.units.data());
 
 			}
 		};
@@ -6402,7 +6916,7 @@ void global_init(global_state&st) {
 		auto load_offsets = [&](data_reader_le r) {
 			auto base_r = r;
 			lo_offsets.emplace_back();
-			auto&offs = lo_offsets.back();
+			auto& offs = lo_offsets.back();
 
 			size_t frame_count = r.get<uint32_t>();
 			size_t offset_count = r.get<uint32_t>();
@@ -6411,7 +6925,7 @@ void global_init(global_state&st) {
 				auto r2 = base_r;
 				r2.skip(file_offset);
 				offs.emplace_back();
-				auto&vec = offs.back();
+				auto& vec = offs.back();
 				vec.resize(offset_count);
 				for (size_t i = 0; i < offset_count; ++i) {
 					int x = r2.get<int8_t>();
@@ -6420,7 +6934,7 @@ void global_init(global_state&st) {
 				}
 			}
 			
-			return (size_t)0;
+			return lo_offsets.size() - 1;
 		};
 
 		a_unordered_map<size_t, size_t> loaded;
@@ -6448,6 +6962,7 @@ void global_init(global_state&st) {
 		std::array<a_vector<size_t>, 6> lo_indices;
 
 		grps.emplace_back(); // null/invalid entry
+		lo_offsets.emplace_back();
 
 		for (int i = 0; i < 999; ++i) {
 			const image_type_t*image_type = get_image_type(i);
@@ -6520,7 +7035,7 @@ void global_init(global_state&st) {
 
 	// The sin lookup table is hardcoded into Broodwar. We generate it here.
 	for (int i = 0; i <= 64; ++i) {
-		int v = int_sin(i);
+		auto v = fp8::from_raw(int_sin(i));
 		st.direction_table[i].x = v;
 		st.direction_table[64 - i].y = -v;
 		st.direction_table[64 + (64 - i)].x = v;
@@ -6530,15 +7045,6 @@ void global_init(global_state&st) {
 		st.direction_table[(192 + (64 - i)) % 256].x = -v;
 		st.direction_table[(192 + i) % 256].y = -v;
 	}
-
-	st.arctan_inv_table = {
-		7, 13, 19, 26, 32, 38, 45, 51, 58, 65, 71, 78, 85, 92,
-		99, 107, 114, 122, 129, 137, 146, 154, 163, 172, 181,
-		190, 200, 211, 221, 233, 244, 256, 269, 283, 297, 312,
-		329, 346, 364, 384, 405, 428, 452, 479, 509, 542, 578,
-		619, 664, 716, 775, 844, 926, 1023, 1141, 1287, 1476,
-		1726, 2076, 2600, 3471, 5211, 10429, std::numeric_limits<unsigned int>::max()
-	};
 
 }
 
@@ -6555,11 +7061,13 @@ void init() {
 	game_load_functions game_load_funcs(st);
 	game_load_funcs.load_map_file(R"(X:\Starcraft\StarCraft\maps\testone.scm)");
 
-	for (size_t i = 0; i < 140; ++i) {
+	for (size_t i = 0; i != 8034; ++i) {
 		advance(st);
 
 		log("%d: advance yey\n", i);
 	}
+
+	advance(st);
 
 }
 

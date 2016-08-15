@@ -17,7 +17,7 @@ struct link_base {
 
 struct default_link_f {
 	template<typename T>
-	auto*operator()(T*ptr) {
+	auto*  operator()(T*ptr) {
 		return (std::pair<T*, T*>*)&ptr->link;
 	}
 };
@@ -31,12 +31,9 @@ struct default_link_f {
 // replicate some minor "bugs".
 // For intrusive_list, only clear() or the destructor can be called after a memset.
 //
-// The reason for the pointer cast operators is that intrusive_list works with references, but I'd like
-// to get pointers when iterating.
-//
 
 struct iscript_state_t {
-	const iscript_t::script*current_script;
+	const iscript_t::script* current_script;
 	size_t program_counter;
 	size_t return_address;
 	int animation;
@@ -45,52 +42,46 @@ struct iscript_state_t {
 
 struct image_t: link_base {
 
-	operator image_t*() {
-		return this;
-	}
-	enum {
+	enum flags_t : uint_fast32_t {
 		flag_redraw = 1,
 		flag_horizontally_flipped = 2,
 		flag_y_frozen = 4,
 		flag_has_directional_frames = 8,
 		flag_has_iscript_animations = 0x10,
-		flag_hidden = 0x40
+		flag_hidden = 0x40,
+		flag_uses_special_offset = 0x80
 	};
 	enum {
 		palette_type_hallucination = 16
 	};
 
-	const image_type_t*image_type;
+	const image_type_t* image_type;
 	int palette_type;
-	int direction;
+	size_t frame_index_offset;
 	int flags;
 	xy offset;
 	iscript_state_t iscript_state;
-	int frame_set;
-	int frame_index;
+	size_t frame_index_base;
+	size_t frame_index;
 	xy map_position;
 	xy screen_position;
 	rect grp_bounds;
-	grp_t*grp;
+	grp_t* grp;
 	int coloring_data;
-	sprite_t*sprite;
+	sprite_t* sprite;
 
 };
 
 struct sprite_t: link_base {
 
-	operator sprite_t*() {
-		return this;
-	}
-
-	enum flags_t {
+	enum flags_t : uint_fast32_t {
 		flag_selected = 0x8,
 		flag_hidden = 0x20,
 
 		flag_iscript_nobrk = 0x80,
 	};
 
-	const sprite_type_t*sprite_type;
+	const sprite_type_t* sprite_type;
 	int owner;
 	int selection_index;
 	int visibility_flags;
@@ -101,38 +92,37 @@ struct sprite_t: link_base {
 	int width;
 	int height;
 	xy position;
-	image_t*main_image;
+	image_t* main_image;
 	intrusive_list<image_t, default_link_f> images;
 
 };
 
-struct flingy_t: link_base {
-
-	operator flingy_t*() {
-		return this;
-	}
-
-	int hp;
+struct thingy_t: link_base {
+	fp8 hp;
 	sprite_t* sprite;
+};
+
+struct flingy_t: thingy_t {
+
 	target_t move_target;
 	xy next_movement_waypoint;
 	xy next_target_waypoint;
 	int movement_flags;
-	int current_direction1;
+	direction_t heading;
 	ufp8 flingy_turn_rate;
-	int velocity_direction1;
+	direction_t velocity_direction;
 	const flingy_type_t* flingy_type;
 	int unknown_0x026;
 	int flingy_movement_type;
 	xy position;
-	xy halt;
+	xy_fp8 halt;
 	ufp8 flingy_top_speed;
-	int current_speed1;
+	fp8 speed;
 	int current_speed2;
-	xy current_speed;
+	xy_fp8 velocity;
 	ufp8 flingy_acceleration;
-	int current_direction2;
-	int velocity_direction2;
+	direction_t current_velocity_direction;
+	direction_t desired_velocity_direction;
 	int owner;
 	const order_type_t* order_type;
 	int order_state;
@@ -154,10 +144,6 @@ struct order_target {
 
 struct order_t : link_base {
 
-	operator order_t*() {
-		return this;
-	}
-
 	const order_type_t* order_type;
 	order_target target;
 };
@@ -169,11 +155,8 @@ struct unit_t: flingy_t {
 	// destructors and clear() has absolutely no preconditions (the object does
 	// not have to be in a valid state), so we don't need to do anything special.
 	unit_t() {}
-	operator unit_t*() {
-		return this;
-	}
 
-	enum status_flags_t : uint32_t {
+	enum status_flags_t : uint_fast32_t {
 		status_flag_completed = 1,
 		status_flag_grounded_building = 2,
 		status_flag_flying = 4,
@@ -206,7 +189,7 @@ struct unit_t: flingy_t {
 		status_flag_hallucination = 0x40000000,
 	};
 
-	int shield_points;
+	fp8 shield_points;
 	const unit_type_t* unit_type;
 
 	std::pair<unit_t*, unit_t*> player_units_link;
@@ -233,13 +216,14 @@ struct unit_t: flingy_t {
 	bool is_cloaked;
 	int movement_state;
 	std::array<unit_type_t*, 5> build_queue;
-	int energy;
+	fp8 energy;
 	int build_queue_slot;
 	int unit_id_generation;
-	int secondary_order_id;
+	//int secondary_order_id;
+	const order_type_t* secondary_order_type;
 	// int building_overlay_state; fixme
-	int hp_construction_rate;
-	int shield_construction_rate;
+	fp8 hp_construction_rate;
+	fp8 shield_construction_rate;
 	int remaining_build_time;
 	int previous_hp;
 	std::array<unit_id, 8> loaded_units;
@@ -254,7 +238,7 @@ struct unit_t: flingy_t {
 			bool in_hangar;
 		} fighter;
 		struct fighter_link {
-			auto*operator()(unit_t*ptr) {
+			auto* operator()(unit_t* ptr) {
 				return &ptr->fighter.fighter_link;
 			}
 		};
@@ -282,7 +266,7 @@ struct unit_t: flingy_t {
 		std::pair<unit_t*, unit_t*> gather_link;
 	} worker;
 	struct worker_gather_link {
-		auto*operator()(unit_t*ptr) {
+		auto* operator()(unit_t* ptr) {
 			return &ptr->worker.gather_link;
 		}
 	};
@@ -347,7 +331,7 @@ struct unit_t: flingy_t {
 		} pylon;
 	};
 
-	path_t*path;
+	path_t* path;
 	unsigned int pathing_collision_interval;
 	int pathing_flags;
 	int unused_0x106;
@@ -382,7 +366,7 @@ struct unit_t: flingy_t {
 	int repulse_angle;
 	xy drift_pos;
 
-
 	rect unit_finder_bounding_box;
+	bool unit_finder_visited;
 };
 

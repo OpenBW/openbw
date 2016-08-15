@@ -81,19 +81,39 @@ struct data_file_reader: data_reader<default_little_endian> {
 using data_file_reader_le = data_file_reader<true>;
 using data_file_reader_be = data_file_reader<false>;
 
-template<typename to_T, typename from_T, typename std::enable_if<std::is_same<to_T,bool>::value>::type* = nullptr>
-to_T data_type_cast(from_T v) {
-	static_assert(std::is_integral<from_T>::value, "from_T must be integral");
-	if (v != 0 && v != 1) xcept("value 0x%x is not a boolean", v);
-	return !!v;
-}
-template<typename to_T, typename from_T, typename std::enable_if<!std::is_same<to_T, bool>::value>::type* = nullptr>
-to_T data_type_cast(from_T v) {
-	static_assert(std::is_integral<from_T>::value, "from_T must be integral");
-	if ((from_T)(intmax_t)(to_T)v != v) xcept("value 0x%x of type %s does not fit in type %s", v, typeid(from_T).name(), typeid(to_T).name());
-	return (to_T)v;
-}
+template<typename to_T, typename from_T>
+struct data_type_cast_helper {
+	to_T operator()(from_T v) {
+		static_assert(std::is_integral<from_T>::value, "from_T must be integral");
+		if ((from_T)(intmax_t)(to_T)v != v) xcept("value 0x%x of type %s does not fit in type %s", v, typeid(from_T).name(), typeid(to_T).name());
+		return (to_T)v;
+	}
+};
+template<typename from_T>
+struct data_type_cast_helper<bool, from_T> {
+	bool operator()(from_T v) {
+		static_assert(std::is_integral<from_T>::value, "from_T must be integral");
+		if (v != 0 && v != 1) xcept("value 0x%x is not a boolean", v);
+		return !!v;
+	}
+};
+template<>
+struct data_type_cast_helper<fp8, int32_t> {
+	fp8 operator()(int32_t v) {
+		return fp8::from_raw(v);
+	}
+};
+template<>
+struct data_type_cast_helper<direction_t, int8_t> {
+	direction_t operator()(int8_t v) {
+		return direction_t::from_raw(v);
+	}
+};
 
+template<typename to_T, typename from_T>
+to_T data_type_cast(from_T v) {
+	return data_type_cast_helper<to_T, from_T>()(v);
+}
 
 template<typename load_T, typename field_T>
 struct read_data {
@@ -248,7 +268,7 @@ weapon_types_t load_weapons_dat(a_string fn) {
 	rawr(uint16_t, damage_bonus, count);
 	rawr(uint8_t, cooldown, count);
 	rawr(uint8_t, damage_factor, count);
-	rawr(uint8_t, attack_angle, count);
+	rawr(int8_t, attack_angle, count);
 	rawr(uint8_t, launch_spin, count);
 	rawr(int8_t, forward_offset, count);
 	rawr(int8_t, upward_offset, count);
@@ -373,7 +393,8 @@ sprite_types_t load_sprites_dat(a_string fn) {
 
 	rawr(uint16_t, image, count);
 	rawr(uint8_t, health_bar_size, selectable_count);
-	rawr(uint16_t, flags, count);
+	rawr(uint8_t, unk0, count);
+	rawr(uint8_t, visible, count);
 	rawr(uint8_t, selection_circle, selectable_count);
 	rawr(uint8_t, selection_circle_vpos, selectable_count);
 
