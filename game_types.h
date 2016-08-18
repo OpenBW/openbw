@@ -52,11 +52,12 @@ struct image_t: link_base {
 		flag_uses_special_offset = 0x80
 	};
 	enum {
-		palette_type_hallucination = 16
+		modifier_cloaked = 2,
+		modifier_hallucination = 16
 	};
 
 	const image_type_t* image_type;
-	int palette_type;
+	int modifier;
 	size_t frame_index_offset;
 	int flags;
 	xy offset;
@@ -67,7 +68,8 @@ struct image_t: link_base {
 	xy screen_position;
 	rect grp_bounds;
 	grp_t* grp;
-	int coloring_data;
+	int modifier_data1;
+	int modifier_data2;
 	sprite_t* sprite;
 
 };
@@ -77,7 +79,7 @@ struct sprite_t: link_base {
 	enum flags_t : uint_fast32_t {
 		flag_selected = 0x8,
 		flag_hidden = 0x20,
-
+		flag_burrowed = 0x40,
 		flag_iscript_nobrk = 0x80,
 	};
 
@@ -109,18 +111,18 @@ struct flingy_t: thingy_t {
 	xy next_target_waypoint;
 	int movement_flags;
 	direction_t heading;
-	ufp8 flingy_turn_rate;
-	direction_t velocity_direction;
+	fp8 flingy_turn_rate;
+	direction_t next_velocity_direction;
 	const flingy_type_t* flingy_type;
 	int unknown_0x026;
 	int flingy_movement_type;
 	xy position;
-	xy_fp8 halt;
-	ufp8 flingy_top_speed;
-	fp8 speed;
-	int current_speed2;
+	xy_fp8 exact_position;
+	fp8 flingy_top_speed;
+	fp8 current_speed;
+	fp8 next_speed;
 	xy_fp8 velocity;
-	ufp8 flingy_acceleration;
+	fp8 flingy_acceleration;
 	direction_t current_velocity_direction;
 	direction_t desired_velocity_direction;
 	int owner;
@@ -138,8 +140,8 @@ struct flingy_t: thingy_t {
 
 struct order_target {
 	xy position;
-	unit_t* unit;
-	unit_type_t* unit_type;
+	unit_t* unit = nullptr;
+	const unit_type_t* unit_type = nullptr;
 };
 
 struct order_t : link_base {
@@ -221,7 +223,7 @@ struct unit_t: flingy_t {
 	int unit_id_generation;
 	//int secondary_order_id;
 	const order_type_t* secondary_order_type;
-	// int building_overlay_state; fixme
+	int building_overlay_state;
 	fp8 hp_construction_rate;
 	fp8 shield_construction_rate;
 	int remaining_build_time;
@@ -315,7 +317,7 @@ struct unit_t: flingy_t {
 	int wireframe_randomizer;
 	int secondary_order_state;
 	int recent_order_timer;
-	int visibility_flags;
+	uint32_t detected_flags;
 	int secondary_order_unk_a;
 	int secondary_order_unk_b;
 	unit_t* current_build_unit;
@@ -339,8 +341,8 @@ struct unit_t: flingy_t {
 	rect contour_bounds;
 
 	int remove_timer;
-	int defense_matrix_damage;
-	int defense_matrix_timer;
+	int defensive_matrix_hp;
+	int defensive_matrix_timer;
 	int stim_timer;
 	int ensnare_timer;
 	int lockdown_timer;
@@ -362,11 +364,13 @@ struct unit_t: flingy_t {
 	void* ai;
 	int air_strength;
 	int ground_strength;
-	int repulse_unknown;
-	int repulse_angle;
-	xy drift_pos;
+	int repulse_flags;
+	direction_t repulse_direction;
+	size_t repulse_index;
 
 	rect unit_finder_bounding_box;
 	bool unit_finder_visited;
+	size_t unit_finder_index_from;
+	size_t unit_finder_index_to;
 };
 

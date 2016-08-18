@@ -5,7 +5,6 @@ struct xy_t {
 	utype y {};
 	xy_t() = default;
 	xy_t(utype x, utype y) : x(x), y(y) {}
-	explicit xy_t(std::array<utype, 2> arr) : x(arr[0]), y(arr[1]) {}
 	bool operator<(const xy_t& n) const {
 		if (y == n.y) return x < n.x;
 		return y < n.y;
@@ -38,7 +37,7 @@ struct xy_t {
 		return *this;
 	}
 	xy_t operator+(const xy_t& n) const {
-		xy r(*this);
+		xy_t r(*this);
 		return r += n;
 	}
 	xy_t& operator+=(const xy_t& n) {
@@ -47,7 +46,7 @@ struct xy_t {
 		return *this;
 	}
 	xy_t operator -() const {
-		return xy(-x, -y);
+		return xy_t(-x, -y);
 	}
 	xy_t operator/(const xy_t& n) const {
 		xy_t r(*this);
@@ -58,12 +57,14 @@ struct xy_t {
 		y /= n.y;
 		return *this;
 	}
-	xy_t operator/(utype d) const {
-		return xy_t(*this) /= d;
+	template<typename T>
+	xy_t operator/(T&& v) const {
+		return xy_t(*this) /= v;
 	}
-	xy_t&operator/=(utype d) {
-		x /= d;
-		y /= d;
+	template<typename T>
+	xy_t&operator/=(T&& v) {
+		x /= v;
+		y /= v;
 		return *this;
 	}
 	xy_t operator*(const xy_t& n) const {
@@ -75,12 +76,14 @@ struct xy_t {
 		y *= n.y;
 		return *this;
 	}
-	xy_t operator*(utype d) const {
-		return xy_t(*this) *= d;
+	template<typename T>
+	xy_t operator*(T&& v) const {
+		return xy_t(*this) *= v;
 	}
-	xy_t& operator*=(utype d) {
-		x *= d;
-		y *= d;
+	template<typename T>
+	xy_t& operator*=(T&& v) {
+		x *= v;
+		y *= v;
 		return *this;
 	}
 };
@@ -91,8 +94,14 @@ template<typename T>
 struct rect_t {
 	T from;
 	T to;
+	rect_t() = default;
+	rect_t(T from, T to) : from(from), to(to) {}
 	bool operator==(const rect_t& n) const {
 		return from == n.from && to == n.to;
+	}
+
+	rect_t operator+(const rect_t& n) const {
+		return { from + n.from, to + n.to };
 	}
 };
 

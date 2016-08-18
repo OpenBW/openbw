@@ -32,13 +32,14 @@ struct unit_type_t {
 		flag_regens_hp = 0x80,
 
 		flag_two_units_in_one_egg = 0x400,
+		flag_detector = 0x800,
 
 		flag_resource = 0x2000,
 
 		flag_creep = 0x20000,
 
 		flag_has_energy = 0x200000,
-
+		flag_initially_cloaked = 0x400000,
 		flag_can_move = 0x8000000,
 		flag_can_turn = 0x10000000,
 		flag_invincible = 0x20000000,
@@ -205,8 +206,8 @@ struct image_type_t {
 	bool has_directional_frames;
 	bool is_clickable;
 	bool has_iscript_animations;
-	bool draw_if_cloaked;
-	int palette_type;
+	bool hidden_until_unit_completed;
+	int modifier;
 	int color_shift;
 	int iscript_id;
 	int shield_filename_index;

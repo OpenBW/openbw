@@ -423,8 +423,8 @@ image_types_t load_images_dat(a_string fn) {
 	rawr(uint8_t, has_directional_frames, count);
 	rawr(uint8_t, is_clickable, count);
 	rawr(uint8_t, has_iscript_animations, count);
-	rawr(uint8_t, draw_if_cloaked, count);
-	rawr(uint8_t, palette_type, count);
+	rawr(uint8_t, hidden_until_unit_completed, count);
+	rawr(uint8_t, modifier, count);
 	rawr(uint8_t, color_shift, count);
 	rawr(uint32_t, iscript_id, count);
 	rawr(uint32_t, shield_filename_index, count);
