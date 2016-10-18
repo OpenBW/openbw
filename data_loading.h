@@ -18,7 +18,7 @@ struct data_reader {
 	T value_at(uint8_t* ptr) {
 		T r;
 		for (auto& v : r) {
-			v = value_at<std::remove_reference<decltype(v)>::type, little_endian>(ptr);
+			v = value_at<typename std::remove_reference<decltype(v)>::type, little_endian>(ptr);
 			ptr += sizeof(v);
 		}
 		return r;
@@ -74,19 +74,29 @@ struct data_file {
 
 template<bool default_little_endian = true>
 struct data_file_reader: data_reader<default_little_endian> {
-	data_file_reader(data_file&f) : data_reader(f.data.data(), f.data.data() + f.data.size()) {}
+	data_file_reader(data_file& f) : data_reader<default_little_endian>(f.data.data(), f.data.data() + f.data.size()) {}
 };
 
 
 using data_file_reader_le = data_file_reader<true>;
 using data_file_reader_be = data_file_reader<false>;
 
+template<typename to_T, typename from_T, typename std::enable_if<!std::is_pointer<to_T>::value>::type* = nullptr>
+to_T no_warnings_cast(from_T v) {
+	return static_cast<to_T>(v);
+}
+template<typename to_T, typename from_T, typename std::enable_if<std::is_pointer<to_T>::value>::type* = nullptr>
+to_T no_warnings_cast(from_T v) {
+	return reinterpret_cast<to_T>(v);
+}
+
 template<typename to_T, typename from_T>
 struct data_type_cast_helper {
 	to_T operator()(from_T v) {
 		static_assert(std::is_integral<from_T>::value, "from_T must be integral");
-		if ((from_T)(intmax_t)(to_T)v != v) xcept("value 0x%x of type %s does not fit in type %s", v, typeid(from_T).name(), typeid(to_T).name());
-		return (to_T)v;
+		to_T r = no_warnings_cast<to_T>(v);
+		if ((from_T)(intmax_t)r != v) xcept("value 0x%x of type %s does not fit in type %s", v, typeid(from_T).name(), typeid(to_T).name());
+		return r;
 	}
 };
 template<typename from_T>
@@ -94,7 +104,7 @@ struct data_type_cast_helper<bool, from_T> {
 	bool operator()(from_T v) {
 		static_assert(std::is_integral<from_T>::value, "from_T must be integral");
 		if (v != 0 && v != 1) xcept("value 0x%x is not a boolean", v);
-		return !!v;
+		return v != 0;
 	}
 };
 template<>
@@ -118,33 +128,33 @@ to_T data_type_cast(from_T v) {
 template<typename load_T, typename field_T>
 struct read_data {
 	template<typename reader_T>
-	static field_T read(reader_T&r) {
-		return data_type_cast<field_T>(r.get<load_T>());
+	static field_T read(reader_T& r) {
+		return data_type_cast<field_T>(r.template get<load_T>());
 	}
 };
 template<typename load_T>
 struct read_data<load_T, xy> {
 	template<typename reader_T>
-	static xy read(reader_T&r) {
-		int x = data_type_cast<int>(r.get<load_T>());
-		int y = data_type_cast<int>(r.get<load_T>());
+	static xy read(reader_T& r) {
+		int x = data_type_cast<int>(r.template get<load_T>());
+		int y = data_type_cast<int>(r.template get<load_T>());
 		return xy(x, y);
 	}
 };
 template<typename load_T>
 struct read_data<load_T, rect> {
 	template<typename reader_T>
-	static rect read(reader_T&r) {
-		int x0 = data_type_cast<int>(r.get<load_T>());
-		int y0 = data_type_cast<int>(r.get<load_T>());
-		int x1 = data_type_cast<int>(r.get<load_T>());
-		int y1 = data_type_cast<int>(r.get<load_T>());
+	static rect read(reader_T& r) {
+		int x0 = data_type_cast<int>(r.template get<load_T>());
+		int y0 = data_type_cast<int>(r.template get<load_T>());
+		int x1 = data_type_cast<int>(r.template get<load_T>());
+		int y1 = data_type_cast<int>(r.template get<load_T>());
 		return { {x0, y0}, {x1, y1} };
 	}
 };
 
 template<typename load_T, typename field_T, typename reader_T, typename arr_T>
-void read_array(reader_T&r, arr_T&arr, size_t num, size_t offset) {
+void read_array(reader_T& r, arr_T&arr, size_t num, size_t offset) {
 	static_assert(!std::is_reference<field_T>::value, "field_T can not be a reference");
 	if (offset&(alignof(field_T)-1)) xcept("offset of %d for %s is not aligned to %d bytes", typeid(field_T).name(), offset, alignof(field_T));
 	for (size_t i = 0; i < num; ++i) {

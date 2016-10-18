@@ -1,10 +1,206 @@
 
-
 struct image_t;
 struct sprite_t;
 struct order_t;
 struct path_t;
 struct unit_t;
+
+struct unit_id {
+	uint16_t raw_value = 0;
+	unit_id() = default;
+	explicit unit_id(uint16_t raw_value) : raw_value(raw_value) {}
+	explicit unit_id(size_t index, int generation) : raw_value((uint16_t)(index | generation << 11)) {}
+	size_t index() const {
+		return raw_value & 0x7ff;
+	}
+	int generation() const {
+		return raw_value >> 11;
+	}
+};
+
+struct sight_values_t {
+	struct maskdat_node_t;
+	typedef a_vector<maskdat_node_t> maskdat_t;
+	struct maskdat_node_t {
+		//
+		//  I would like to change this structure a bit, move vision_propagation to a temporary inside reveal_sight_at,
+		//  and change prev_count to a bool since it can only have two values, or remove it entirely.
+		//
+		// TODO: remove vision_propagation, since this struct is supposed to be static (stored in game_state)
+		//
+		maskdat_node_t* prev; // the tile from us directly towards the origin (diagonal is allowed and preferred)
+		// the other tile with equal diagonal distance to the origin as prev, if it exists.
+		// otherwise, it is prev
+		maskdat_node_t* prev2;
+		size_t map_index_offset;
+		// temporary variable used when spreading vision to make sure we don't go through obstacles
+		mutable uint32_t vision_propagation;
+		int8_t x;
+		int8_t y;
+		// prev_count will be 1 if prev and prev2 are equal, otherwise it is 2
+		int8_t prev_count;
+	};
+	static_assert(sizeof(maskdat_node_t) == 20, "maskdat_node_t: wrong size");
+
+	int max_width, max_height;
+	int min_width, min_height;
+	int min_mask_size;
+	int ext_masked_count;
+	maskdat_t maskdat;
+
+};
+
+struct cv5_entry {
+	uint16_t field_0;
+	uint16_t flags;
+	uint16_t left;
+	uint16_t top;
+	uint16_t right;
+	uint16_t bottom;
+	uint16_t field_C;
+	uint16_t field_E;
+	uint16_t field_10;
+	uint16_t field_12;
+	std::array<uint16_t, 16> megaTileRef;
+};
+static_assert(sizeof(cv5_entry) == 52, "cv5_entry: wrong size");
+struct vf4_entry {
+	std::array<uint16_t, 16> flags;
+};
+static_assert(sizeof(vf4_entry) == 32, "vf4_entry: wrong size");
+struct vx4_entry {
+	std::array<uint16_t, 16> images;
+};
+static_assert(sizeof(vx4_entry) == 32, "vx4_entry: wrong size");
+struct vr4_entry {
+	std::array<uint8_t, 64> bitmap;
+};
+static_assert(sizeof(vr4_entry) == 64, "vr4_entry: wrong size");
+
+struct tile_id {
+	uint16_t raw_value = 0;
+	tile_id() = default;
+	explicit tile_id(uint16_t raw_value) : raw_value(raw_value) {}
+	explicit tile_id(size_t group_index, size_t subtile_index) : raw_value((uint16_t)(group_index << 4 | subtile_index)) {}
+	bool has_creep() {
+		return ((raw_value >> 4) & 0x8000) != 0;
+	}
+	size_t group_index() {
+		return (raw_value >> 4) & 0x7ff;
+	}
+	size_t subtile_index() {
+		return raw_value & 0xf;
+	}
+	explicit operator bool() const {
+		return raw_value != 0;
+	}
+};
+
+struct tile_t {
+	enum {
+		flag_walkable = 1,
+		flag_unk0 = 2,
+		flag_unwalkable = 4,
+		flag_unk1 = 8,
+		flag_unk2 = 0x10,
+		flag_unk3 = 0x20,
+		flag_has_creep = 0x40,
+		flag_unbuildable = 0x80,
+		flag_very_high = 0x100,
+		flag_middle = 0x200,
+		flag_high = 0x400,
+		flag_occupied = 0x800,
+		flag_creep_receding = 0x1000,
+		flag_partially_walkable = 0x2000,
+		flag_temporary_creep = 0x4000,
+		flag_unk4 = 0x8000
+	};
+	union {
+		struct {
+			uint8_t visible;
+			uint8_t explored;
+			uint16_t flags;
+		};
+		uint32_t raw;
+	};
+	operator uint32_t() const {
+		return raw;
+	}
+	bool operator==(uint32_t val) const {
+		return raw == val;
+	}
+};
+
+struct regions_t {
+
+	struct region {
+		uint16_t flags = 0x1FFD;
+		size_t index = ~(size_t)0;
+		xy_t<size_t> tile_center;
+		rect_t<xy_t<size_t>> tile_area;
+		xy_t<fp8> center;
+		rect area;
+		size_t tile_count = 0;
+		size_t group_index = 0;
+		a_vector<region*> walkable_neighbors;
+		a_vector<region*> non_walkable_neighbors;
+		int priority = 0;
+
+		int pathfinder_flag = 0;
+
+		bool walkable() const {
+			return flags != 0x1ffd;
+		}
+	};
+
+	struct split_region {
+		uint16_t mask;
+		region* a;
+		region* b;
+	};
+
+	struct contour {
+		std::array<int, 3> v;
+		size_t dir;
+		uint8_t flags;
+	};
+
+	// tile_region_index values -
+	//  [0, 5000) index into regions
+	//  [5000, 0x2000) unmapped (0x1ffd unwalkable, otherwise walkable)
+	//  [0x2000, ...] index + 0x2000 into split_regions
+	a_vector<size_t> tile_region_index = a_vector<size_t>(256 * 256);
+
+	rect_t<xy_t<size_t>> tile_bounding_box;
+
+	a_vector<region> regions;
+
+	a_vector<split_region> split_regions;
+
+	std::array<a_vector<contour>, 4> contours;
+
+	region* get_new_region() {
+		if (regions.capacity() != 5000) regions.reserve(5000);
+		if (regions.size() >= 5000) xcept("too many regions");
+		regions.emplace_back();
+		region* r = &regions.back();
+		r->index = regions.size() - 1;
+		return r;
+	}
+
+	region* get_region_at(xy pos) {
+		size_t index = tile_region_index.at((size_t)pos.y / 32 * 256 + (size_t)pos.x / 32);
+		if (index >= 0x2000) {
+			size_t mask_index = ((size_t)pos.y / 8 & 3) * 4 + ((size_t)pos.x / 8 & 3);
+			auto* split = &split_regions[index - 0x2000];
+			if (split->mask & (1 << mask_index)) return split->a;
+			else return split->b;
+		} else return &regions[index];
+	}
+
+};
+
+
 
 struct target_t {
 	xy pos;
@@ -22,15 +218,6 @@ struct default_link_f {
 	}
 };
 
-//
-// These are based on BWAPIs CUnit. I've kept the order the same and names similar for convenience.
-// This also means the order is the same as in Broodwar, but the types (and thus sizes, offsets) are not.
-//
-//
-// These are all memset to 0 at game start, because Broodwar does so, and I believe it's necessary in order to
-// replicate some minor "bugs".
-// For intrusive_list, only clear() or the destructor can be called after a memset.
-//
 
 struct iscript_state_t {
 	const iscript_t::script* current_script;
@@ -150,25 +337,41 @@ struct order_t : link_base {
 	order_target target;
 };
 
+struct path_t {
+	a_list<path_t>::iterator iterator;
+
+	int delay;
+	int creation_frame;
+	int state_flags;
+
+	a_deque<regions_t::region*> long_path;
+	size_t full_long_path_size;
+	a_deque<xy> short_path;
+
+	size_t current_long_path_index = 0;
+	size_t current_short_path_index = 0;
+
+	xy source;
+	xy destination;
+	xy next;
+
+};
+
 struct unit_t: flingy_t {
 
-	// We must supply a constructor since there are intrusive_lists inside unions,
-	// and intrusive_lists have non-trivial constructors. However, they have no
-	// destructors and clear() has absolutely no preconditions (the object does
-	// not have to be in a valid state), so we don't need to do anything special.
 	unit_t() {}
 
 	enum status_flags_t : uint_fast32_t {
 		status_flag_completed = 1,
 		status_flag_grounded_building = 2,
 		status_flag_flying = 4,
-		status_flag_disabled = 8,
+		status_flag_8 = 8,
 		status_flag_burrowed = 0x10,
 		status_flag_in_building = 0x20,
 
 		status_flag_requires_detector = 0x100,
 		status_flag_cloaked = 0x200,
-		status_flag_frozen = 0x400,
+		status_flag_disabled = 0x400,
 
 		status_flag_order_not_interruptible = 0x1000,
 		status_flag_iscript_nobrk = 0x2000,
@@ -230,6 +433,11 @@ struct unit_t: flingy_t {
 	int previous_hp;
 	std::array<unit_id, 8> loaded_units;
 
+	struct fighter_link {
+		auto* operator()(unit_t* ptr) {
+			return &ptr->fighter.fighter_link;
+		}
+	};
 	union {
 		struct {
 			int spider_mine_count;
@@ -239,11 +447,6 @@ struct unit_t: flingy_t {
 			std::pair<unit_t*, unit_t*> fighter_link;
 			bool in_hangar;
 		} fighter;
-		struct fighter_link {
-			auto* operator()(unit_t* ptr) {
-				return &ptr->fighter.fighter_link;
-			}
-		};
 		struct {
 			intrusive_list<unit_t, fighter_link> inside_units;
 			intrusive_list<unit_t, fighter_link> outside_units;

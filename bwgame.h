@@ -1,249 +1,4 @@
 
-struct unit_id {
-	uint16_t raw_value = 0;
-	unit_id() = default;
-	explicit unit_id(uint16_t raw_value) : raw_value(raw_value) {}
-	explicit unit_id(size_t index, int generation) : raw_value((uint16_t)(index | generation << 11)) {}
-	size_t index() {
-		return raw_value & 0x7ff;
-	}
-	int generation() {
-		return raw_value >> 11;
-	}
-};
-
-template<size_t bits>
-using int_fastn_t = typename std::conditional<bits <= 8, std::int_fast8_t,
-	typename std::conditional<bits <= 16, int_fast16_t,
-	typename std::conditional<bits <= 32, int_fast32_t,
-	typename std::enable_if<bits <= 64, int_fast64_t>::type>::type>::type>::type;
-template<size_t bits>
-using uint_fastn_t = typename std::conditional<bits <= 8, std::uint_fast8_t,
-	typename std::conditional<bits <= 16, uint_fast16_t,
-	typename std::conditional<bits <= 32, uint_fast32_t,
-	typename std::enable_if<bits <= 64, uint_fast64_t>::type>::type>::type>::type;
-
-template<typename T, std::enable_if<std::is_integral<T>::value && std::numeric_limits<T>::radix == 2>* = nullptr>
-using int_bits = std::integral_constant<size_t, std::numeric_limits<T>::digits + std::is_signed<T>::value>;
-
-template<size_t integer_bits, size_t fractional_bits, bool is_signed, bool exact_integer_bits = false>
-struct fixed_point {
-	static const bool is_signed = is_signed;
-	static const bool exact_integer_bits = exact_integer_bits;
-	static const size_t integer_bits = integer_bits;
-	static const size_t fractional_bits = fractional_bits;
-	static const size_t total_bits = integer_bits + fractional_bits;
-	using raw_unsigned_type = uint_fastn_t<total_bits>;
-	using raw_signed_type = int_fastn_t<total_bits>;
-	using raw_type = typename std::conditional<is_signed, raw_signed_type, raw_unsigned_type>::type;
-	raw_type raw_value;
-
-	using double_size_fixed_point = fixed_point<total_bits * 2 - fractional_bits, fractional_bits, is_signed>;
-
-	void wrap() {
-		if (!exact_integer_bits) return;
-		raw_value <<= int_bits<raw_type>::value - total_bits;
-		raw_value >>= int_bits<raw_type>::value - total_bits;
-	}
-
-	static fixed_point from_raw(raw_type raw_value) {
-		fixed_point r;
-		r.raw_value = raw_value;
-		r.wrap();
-		return r;
-	}
-
-	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-	static fixed_point integer(T integer_value) {
-		return from_raw((raw_type)integer_value << fractional_bits);
-	}
-
-	static fixed_point zero() {
-		return integer(0);
-	}
-	static fixed_point one() {
-		return integer(1);
-	}
-
-	raw_type integer_part() const {
-		return raw_value >> fractional_bits;
-	}
-	raw_type fractional_part() const {
-		return raw_value & (((raw_type)1 << fractional_bits) - 1);
-	}
-
-	template<size_t n_integer_bits, size_t n_fractional_bits, bool n_exact_integer_bits, size_t result_integer_bits = integer_bits, size_t result_fractional_bits = fractional_bits, typename std::enable_if<((result_integer_bits < n_integer_bits || result_fractional_bits < n_fractional_bits) && result_fractional_bits <= n_fractional_bits)>::type* = nullptr>
-	static auto truncate(const fixed_point<n_integer_bits, n_fractional_bits, is_signed, n_exact_integer_bits>& n) {
-		using result_type = fixed_point<result_integer_bits, result_fractional_bits, is_signed, exact_integer_bits>;
-		result_type::raw_type raw_value = (result_type::raw_type)(n.raw_value >> (n_fractional_bits - result_fractional_bits));
-		return result_type::from_raw(raw_value);
-	}
-
-	template<size_t n_integer_bits, size_t n_fractional_bits, bool n_exact_integer_bits, size_t result_integer_bits = integer_bits, size_t result_fractional_bits = fractional_bits, typename std::enable_if<((result_integer_bits > n_integer_bits || result_fractional_bits > n_fractional_bits) && result_fractional_bits >= n_fractional_bits)>::type* = nullptr>
-	static auto extend(const fixed_point<n_integer_bits, n_fractional_bits, is_signed, n_exact_integer_bits>& n) {
-		using result_type = fixed_point<result_integer_bits, result_fractional_bits, is_signed, exact_integer_bits>;
-		result_type::raw_type raw_value = n.raw_value;
-		raw_value <<= result_fractional_bits - n_fractional_bits;
-		return result_type::from_raw(raw_value);
-	}
-
-	fixed_point floor() const {
-		return integer(integer_part());
-	}
-	fixed_point ceil() const {
-		return (*this + integer(1) - from_raw(1)).floor();
-	}
-	fixed_point abs() const {
-		if (*this >= zero()) return *this;
-		else return from_raw(-raw_value);
-	}
-
-	auto as_signed() const {
-		return fixed_point<integer_bits, fractional_bits, true, exact_integer_bits>::from_raw(raw_value);
-	}
-	auto as_unsigned() const {
-		return fixed_point<integer_bits, fractional_bits, false, exact_integer_bits>::from_raw(raw_value);
-	}
-
-	bool operator==(const fixed_point& n) const {
-		return raw_value == n.raw_value;
-	}
-	bool operator!=(const fixed_point& n) const {
-		return raw_value != n.raw_value;
-	}
-	bool operator<(const fixed_point& n) const {
-		return raw_value < n.raw_value;
-	}
-	bool operator<=(const fixed_point& n) const {
-		return raw_value <= n.raw_value;
-	}
-	bool operator>(const fixed_point& n) const {
-		return raw_value > n.raw_value;
-	}
-	bool operator>=(const fixed_point& n) const {
-		return raw_value >= n.raw_value;
-	}
-
-	fixed_point operator-() const {
-		static_assert(is_signed, "fixed_point: cannot negate an unsigned number");
-		return from_raw(-raw_value);
-	}
-
-	fixed_point& operator+=(const fixed_point& n) {
-		raw_value += n.raw_value;
-		wrap();
-		return *this;
-	}
-	fixed_point operator+(const fixed_point& n) const {
-		return from_raw(raw_value + n.raw_value);
-	}
-	fixed_point& operator-=(const fixed_point& n) {
-		raw_value -= n.raw_value;
-		wrap();
-		return *this;
-	}
-	fixed_point operator-(const fixed_point& n) const {
-		return from_raw(raw_value - n.raw_value);
-	}
-	
-// 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-// 	fixed_point& operator+=(T integer_value) {
-// 		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in addition");
-// 		*this += integer(integer_value);
-// 		wrap();
-// 		return *this;
-// 	}
-// 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-// 	fixed_point operator+(T integer_value) const {
-// 		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in addition");
-// 		return *this + integer(integer_value);
-// 	}
-// 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-// 	fixed_point& operator-=(T integer_value) {
-// 		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in subtraction");
-// 		*this -= integer(integer_value);
-// 		wrap();
-// 		return *this;
-// 	}
-// 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-// 	fixed_point operator-(T integer_value) const {
-// 		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in subtraction");
-// 		return *this - integer(integer_value);
-// 	}
-
-	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-	fixed_point& operator/=(T integer_value) {
-		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in division");
-		raw_value /= integer_value;
-		wrap();
-		return *this;
-	}
-	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-	fixed_point operator/(T integer_value) const {
-		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in division");
-		return from_raw(raw_value / integer_value);
-	}
-	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-	fixed_point& operator*=(T integer_value) {
-		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in multiplication");
-		raw_value *= integer_value;
-		wrap();
-		return *this;
-	}
-	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-	auto operator*(T integer_value) const {
-		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in multiplication");
-		return from_raw(raw_value * integer_value);
-	}
-
-	template<size_t n_integer_bits>
-	fixed_point& operator*=(const fixed_point<n_integer_bits, fractional_bits, is_signed, exact_integer_bits>& n) {
-		return *this = *this * n;
-	}
-
-	template<size_t n_integer_bits>
-	fixed_point& operator/=(const fixed_point<n_integer_bits, fractional_bits, is_signed, exact_integer_bits>& n) {
-		return *this = *this / n;
-	}
-
-	template<size_t n_integer_bits, size_t n_fractional_bits>
-	auto operator*(const fixed_point<n_integer_bits, n_fractional_bits, is_signed, exact_integer_bits>& n) {
-		using result_type = fixed_point<(integer_bits > n_integer_bits ? integer_bits : n_integer_bits), (fractional_bits > n_fractional_bits ? fractional_bits : n_fractional_bits), is_signed, exact_integer_bits>;
-		using tmp_t = fixed_point<result_type::integer_bits, fractional_bits + n_fractional_bits, is_signed>::raw_type;
-		tmp_t tmp = (tmp_t)raw_value * (tmp_t)n.raw_value >> n_fractional_bits;
-		return result_type::from_raw((result_type::raw_type)tmp);
-	}
-
-	template<size_t n_integer_bits, size_t n_fractional_bits>
-	auto operator/(const fixed_point<n_integer_bits, n_fractional_bits, is_signed, exact_integer_bits>& n) const {
-		using result_type = fixed_point<(integer_bits > n_integer_bits ? integer_bits : n_integer_bits), (fractional_bits > n_fractional_bits ? fractional_bits : n_fractional_bits), is_signed, exact_integer_bits>;
-		using tmp_t = fixed_point<result_type::integer_bits, fractional_bits + n_fractional_bits, is_signed>::raw_type;
-		tmp_t tmp = ((tmp_t)raw_value << n_fractional_bits) / (tmp_t)n.raw_value;
-		return result_type::from_raw((result_type::raw_type)tmp);
-	}
-
-	// returns a * b / c
-	static fixed_point multiply_divide(fixed_point a, fixed_point b, fixed_point c) {
-		constexpr raw_type max_value_no_overflow = std::numeric_limits<raw_type>::max() >> (int_bits<raw_type>::value / 2);
-		if (a.raw_value <= max_value_no_overflow && b.raw_value <= max_value_no_overflow) {
-			return from_raw(a.raw_value * b.raw_value / c.raw_value);
-		} else {
-			using tmp_t = fixed_point<integer_bits, fractional_bits + fractional_bits, is_signed>::raw_type;
-			return from_raw((tmp_t)a.raw_value * b.raw_value / c.raw_value);
-		}
-	}
-
-	// returns a / b * c
-	static fixed_point divide_multiply(fixed_point a, fixed_point b, fixed_point c) {
-		return from_raw(a.raw_value / b.raw_value * c.raw_value);
-	}
-
-};
-
-using fp8 = fixed_point<24, 8, true>;
-using ufp8 = fixed_point<24, 8, false>;
-
-using direction_t = fixed_point<0, 8, true, true>;
 
 #include "bwenums.h"
 
@@ -252,6 +7,10 @@ namespace bwgame {
 
 #include "util.h"
 
+using fp8 = fixed_point<24, 8, true>;
+using ufp8 = fixed_point<24, 8, false>;
+using direction_t = fixed_point<0, 8, true, true>;
+
 using xy_fp8 = xy_t<fp8>;
 
 #include "data_types.h"
@@ -259,7 +18,7 @@ using xy_fp8 = xy_t<fp8>;
 
 #include "data_loading.h"
 
-static const std::array<unsigned int, 64> arctan_inv_table = {
+static const std::array<unsigned int, 64> tan_table = {
 	7, 13, 19, 26, 32, 38, 45, 51, 58, 65, 71, 78, 85, 92,
 	99, 107, 114, 122, 129, 137, 146, 154, 163, 172, 181,
 	190, 200, 211, 221, 233, 244, 256, 269, 283, 297, 312,
@@ -269,7 +28,7 @@ static const std::array<unsigned int, 64> arctan_inv_table = {
 };
 
 static const std::array<int, 16 * 2> repulse_adjust_table = {
-	-5, -5, 5, 5, -5, 5, 5, 5, -5, 5, 5, -5, -5, -5, 5, -5, 5, 5, -5, -5, -5, 5, 5, -5, 5, 5, -5, 5, 5, -5, -5
+	-5, -5, -5, 5, 5, -5, 5, 5, 5, -5, 5, 5, -5, -5, -5, 5, -5, 5, 5, -5, -5, -5, 5, 5, -5, 5, 5, -5, 5, 5, -5, -5
 };
 
 // Broodwar linked lists insert new elements between the first and second entry.
@@ -278,186 +37,6 @@ void bw_insert_list(cont_T&cont, T&v) {
 	if (cont.empty()) cont.push_front(v);
 	else cont.insert(++cont.begin(), v);
 }
-
-struct sight_values_t {
-	struct maskdat_node_t;
-	typedef a_vector<maskdat_node_t> maskdat_t;
-	struct maskdat_node_t {
-		// 
-		//  I would like to change this structure a bit, move vision_propagation to a temporary inside reveal_sight_at,
-		//  and change prev_count to a bool since it can only have two values, or remove it entirely.
-		//
-		// TODO: remove vision_propagation, since this struct is supposed to be static (stored in game_state)
-		//
-		maskdat_node_t*prev; // the tile from us directly towards the origin (diagonal is allowed and preferred)
-		// the other tile with equal diagonal distance to the origin as prev, if it exists.
-		// otherwise, it is prev
-		maskdat_node_t*prev2;
-		size_t map_index_offset;
-		// temporary variable used when spreading vision to make sure we don't go through obstacles
-		mutable uint32_t vision_propagation;
-		int8_t x;
-		int8_t y;
-		// prev_count will be 1 if prev and prev2 are equal, otherwise it is 2
-		int8_t prev_count;
-	};
-	static_assert(sizeof(maskdat_node_t) == 20, "maskdat_node_t: wrong size");
-
-	int max_width, max_height;
-	int min_width, min_height;
-	int min_mask_size;
-	int ext_masked_count;
-	maskdat_t maskdat;
-
-};
-
-struct cv5_entry {
-	uint16_t field_0;
-	uint16_t flags;
-	uint16_t left;
-	uint16_t top;
-	uint16_t right;
-	uint16_t bottom;
-	uint16_t field_C;
-	uint16_t field_E;
-	uint16_t field_10;
-	uint16_t field_12;
-	std::array<uint16_t, 16> megaTileRef;
-};
-static_assert(sizeof(cv5_entry) == 52, "cv5_entry: wrong size");
-struct vf4_entry {
-	std::array<uint16_t, 16> flags;
-};
-static_assert(sizeof(vf4_entry) == 32, "vf4_entry: wrong size");
-struct vx4_entry {
-	std::array<uint16_t, 16> images;
-};
-static_assert(sizeof(vx4_entry) == 32, "vx4_entry: wrong size");
-struct vr4_entry {
-	std::array<uint8_t, 64> bitmap;
-};
-static_assert(sizeof(vr4_entry) == 64, "vr4_entry: wrong size");
-
-struct tile_id {
-	uint16_t raw_value = 0;
-	tile_id() = default;
-	explicit tile_id(uint16_t raw_value) : raw_value(raw_value) {}
-	explicit tile_id(size_t group_index, size_t subtile_index) : raw_value((uint16_t)(group_index << 4 | subtile_index)) {}
-	bool has_creep() {
-		return ((raw_value >> 4) & 0x8000) != 0;
-	}
-	size_t group_index() {
-		return (raw_value >> 4) & 0x7ff;
-	}
-	size_t subtile_index() {
-		return raw_value & 0xf;
-	}
-	explicit operator bool() const {
-		return raw_value != 0;
-	}
-};
-
-struct tile_t {
-	enum {
-		flag_walkable = 1,
-		flag_unk0 = 2,
-		flag_unwalkable = 4,
-		flag_unk1 = 8,
-		flag_unk2 = 0x10,
-		flag_unk3 = 0x20,
-		flag_has_creep = 0x40,
-		flag_unbuildable = 0x80,
-		flag_very_high = 0x100,
-		flag_middle = 0x200,
-		flag_high = 0x400,
-		flag_occupied = 0x800,
-		flag_creep_receding = 0x1000,
-		flag_partially_walkable = 0x2000,
-		flag_temporary_creep = 0x4000,
-		flag_unk4 = 0x8000
-	};
-	union {
-		struct {
-			uint8_t visible;
-			uint8_t explored;
-			uint16_t flags;
-		};
-		uint32_t raw;
-	};
-	operator uint32_t() const {
-		return raw;
-	}
-	bool operator==(uint32_t val) const {
-		return raw == val;
-	}
-};
-
-struct paths_t {
-
-	struct region {
-		uint16_t flags = 0x1FFD;
-		size_t index = ~(size_t)0;
-		xy_t<size_t> tile_center;
-		rect_t<xy_t<size_t>> tile_area;
-		xy_t<fp8> center;
-		rect area;
-		size_t tile_count = 0;
-		size_t group_index = 0;
-		a_vector<region*> walkable_neighbors;
-		a_vector<region*> non_walkable_neighbors;
-		int priority = 0;
-
-		bool walkable() const {
-			return flags != 0x1ffd;
-		}
-	};
-
-	struct split_region {
-		uint16_t mask;
-		region* a;
-		region* b;
-	};
-
-	struct contour {
-		std::array<int, 3> v;
-		size_t dir;
-		uint8_t flags;
-	};
-
-	// tile_region_index values -
-	//  [0, 5000) index into regions
-	//  [5000, 0x2000) unmapped (0x1ffd unwalkable, otherwise walkable)
-	//  [0x2000, ...] index + 0x2000 into split_regions
-	a_vector<size_t> tile_region_index = a_vector<size_t>(256 * 256);
-
-	rect_t<xy_t<size_t>> tile_bounding_box;
-
-	a_vector<region> regions;
-
-	a_vector<split_region> split_regions;
-
-	std::array<a_vector<contour>, 4> contours;
-
-	region* get_new_region() {
-		if (regions.capacity() != 5000) regions.reserve(5000);
-		if (regions.size() >= 5000) xcept("too many regions");
-		regions.emplace_back();
-		region* r = &regions.back();
-		r->index = regions.size() - 1;
-		return r;
-	}
-
-	region* get_region_at(xy pos) {
-		size_t index = tile_region_index.at((size_t)pos.y / 32 * 256 + (size_t)pos.x / 32);
-		if (index >= 0x2000) {
-			size_t mask_index = ((size_t)pos.y / 8 & 3) * 4 + ((size_t)pos.x / 8 & 3);
-			auto* split = &split_regions[index - 0x2000];
-			if (split->mask & (1 << mask_index)) return split->a;
-			else return split->b;
-		} else return &regions[index];
-	}
-
-};
 
 struct global_state {
 
@@ -561,6 +140,7 @@ struct state_base_copyable {
 
 	int order_timer_counter;
 	int secondary_order_timer_counter;
+	int current_frame;
 
 	struct player_t {
 		enum {
@@ -640,7 +220,7 @@ struct state_base_non_copyable {
 	intrusive_list<unit_t, default_link_f> visible_units;
 	intrusive_list<unit_t, default_link_f> hidden_units;
 	intrusive_list<unit_t, default_link_f> scanner_sweep_units;
-	intrusive_list<unit_t, default_link_f> sight_related_units;
+	intrusive_list<unit_t, default_link_f> destroyed_units;
 	intrusive_list<unit_t, default_link_f> free_units;
 
 	a_vector<unit_t> units = a_vector<unit_t>(1700);
@@ -657,6 +237,8 @@ struct state_base_non_copyable {
 	intrusive_list<order_t, default_link_f> free_orders;
 	a_vector<order_t> orders = a_vector<order_t>(2000);
 
+	a_list<path_t> paths;
+
 	static const size_t unit_finder_group_size = 32;
 	struct unit_finder_entry {
 		unit_t* u;
@@ -667,7 +249,7 @@ struct state_base_non_copyable {
 	intrusive_list<unit_finder_entry, default_link_f> unit_finder_list;
 	using unit_finder_list_iterator = decltype(unit_finder_list)::iterator;
 
-	paths_t paths;
+	regions_t regions;
 };
 
 struct state : state_base_copyable, state_base_non_copyable {
@@ -706,15 +288,15 @@ struct state_functions {
 
 	void u_set_status_flag(unit_t* u, unit_t::status_flags_t flag) {
 		u->status_flags |= flag;
-	};
+	}
 	void u_unset_status_flag(unit_t* u, unit_t::status_flags_t flag) {
 		u->status_flags &= ~flag;
-	};
+	}
 
 	void u_set_status_flag(unit_t* u, unit_t::status_flags_t flag, bool value) {
 		if (value) u->status_flags |= flag;
 		else u->status_flags &= ~flag;
-	};
+	}
 	
 	void u_set_movement_flag(flingy_t* u, int flag) {
 		u->movement_flags |= flag;
@@ -723,12 +305,23 @@ struct state_functions {
 		u->movement_flags &= ~flag;
 	}
 
+	void i_set_flag(image_t* i, image_t::flags_t flag) {
+		i->flags |= flag;
+	}
+	void i_unset_flag(image_t* i, image_t::flags_t flag) {
+		i->flags &= ~flag;
+	}
+	void i_set_flag(image_t* i, image_t::flags_t flag, bool value) {
+		if (value) i_set_flag(i, flag);
+		else i_unset_flag(i, flag);
+	}
+
 	bool ut_flag(const unit_t* u, unit_type_t::flags_t flag) const {
 		return (u->unit_type->flags & flag) != 0;
-	};
+	}
 	bool u_status_flag(const unit_t* u, unit_t::status_flags_t flag) const {
 		return (u->status_flags & flag) != 0;
-	};
+	}
 	bool us_flag(const unit_t* u, sprite_t::flags_t flag) const {
 		return (u->sprite->flags & flag) != 0;
 	}
@@ -738,22 +331,25 @@ struct state_functions {
 	bool u_movement_flag(const flingy_t* u, int flag) const {
 		return (u->movement_flags & flag) != 0;
 	}
+	bool i_flag(const image_t* i, image_t::flags_t flag) const {
+		return (i->flags & flag) != 0;
+	}
 
 	bool u_completed(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_completed);
-	};
+	}
 	bool u_in_building(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_in_building);
-	};
+	}
 	bool u_immovable(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_immovable);
-	};
+	}
 	bool u_disabled(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_disabled);
-	};
+	}
 	bool u_burrowed(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_burrowed);
-	};
+	}
 	bool u_can_turn(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_can_turn);
 	}
@@ -762,19 +358,19 @@ struct state_functions {
 	}
 	bool u_grounded_building(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_grounded_building);
-	};
+	}
 	bool u_hallucination(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_hallucination);
-	};
+	}
 	bool u_flying(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_flying);
-	};
+	}
 	bool u_speed_upgrade(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_speed_upgrade);
-	};
+	}
 	bool u_cooldown_upgrade(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_cooldown_upgrade);
-	};
+	}
 	bool u_gathering(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_gathering);
 	}
@@ -783,9 +379,6 @@ struct state_functions {
 	}
 	bool u_cloaked(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_cloaked);
-	}
-	bool u_frozen(const unit_t* u) const {
-		return u_status_flag(u, unit_t::status_flag_frozen);
 	}
 	bool u_cannot_attack(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_cannot_attack);
@@ -811,31 +404,31 @@ struct state_functions {
 
 	bool ut_turret(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_turret);
-	};
+	}
 	bool ut_worker(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_worker);
-	};
+	}
 	bool ut_hero(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_hero);
-	};
+	}
 	bool ut_building(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_building);
-	};
+	}
 	bool ut_flyer(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_flyer);
-	};
+	}
 	bool ut_can_turn(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_can_turn);
-	};
+	}
 	bool ut_can_move(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_can_move);
-	};
+	}
 	bool ut_invincible(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_invincible);
-	};
+	}
 	bool ut_two_units_in_one_egg(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_two_units_in_one_egg);
-	};
+	}
 	bool ut_regens_hp(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_regens_hp);
 	}
@@ -876,10 +469,10 @@ struct state_functions {
 		if (!idx) return nullptr;
 		size_t actual_index = idx - 1;
 		if (actual_index >= st.units.size()) xcept("attempt to dereference invalid unit id %d (actual index %d)", idx, actual_index);
-		unit_t*u = &st.units[actual_index];
+		unit_t* u = &st.units[actual_index];
 		if (u->unit_id_generation != id.generation()) return nullptr;
 		return u;
-	};
+	}
 
 	bool is_in_map_bounds(const unit_type_t* unit_type, xy pos) const {
 		if (pos.x - unit_type->dimensions.from.x < 0) return false;
@@ -887,24 +480,34 @@ struct state_functions {
 		if ((size_t)(pos.x + unit_type->dimensions.to.x) >= game_st.map_width) return false;
 		if ((size_t)(pos.y + unit_type->dimensions.to.y) >= game_st.map_height) return false;
 		return true;
-	};
+	}
 	bool is_in_map_bounds(rect bounds) const {
 		if (bounds.from.x < 0) return false;
-		if ((size_t)bounds.to.x >= game_st.map_width) return false;
+		if ((size_t)bounds.to.x > game_st.map_width) return false;
 		if (bounds.from.y < 0) return false;
-		if ((size_t)bounds.to.y >= game_st.map_height) return false;
+		if ((size_t)bounds.to.y > game_st.map_height) return false;
 		return true;
 	}
+	bool is_in_map_bounds(xy pos) const {
+		return (size_t)pos.x < game_st.map_width && (size_t)pos.y < game_st.map_height;
+	}
 
-	rect unit_type_bounding_box(const unit_type_t* unit_type, xy origin = xy()) const {
-		return{ origin - unit_type->dimensions.from, origin + unit_type->dimensions.to };
+	rect translate_rect(rect src, xy translation) {
+		return {src.from + translation, src.to + translation};
+	}
+
+	rect unit_type_bounding_box(const unit_type_t* unit_type) const {
+		return {-unit_type->dimensions.from, unit_type->dimensions.to + xy(1, 1)};
+	}
+	rect unit_type_bounding_box(const unit_type_t* unit_type, xy origin) const {
+		return {origin - unit_type->dimensions.from, origin + unit_type->dimensions.to + xy(1, 1)};
 	}
 	rect unit_bounding_box(const unit_t* u, xy origin) const {
 		return unit_type_bounding_box(u->unit_type, origin);
 	}
 
 	rect unit_sprite_bounding_box(const unit_t* u) const {
-		return{ u->sprite->position - u->unit_type->dimensions.from, u->sprite->position + u->unit_type->dimensions.to };
+		return {u->sprite->position - u->unit_type->dimensions.from, u->sprite->position + u->unit_type->dimensions.to + xy(1, 1)};
 	}
 
 	rect map_bounds() const {
@@ -914,9 +517,9 @@ struct state_functions {
 	xy restrict_unit_pos_to_bounds(xy pos, const unit_type_t* ut, rect bounds) const {
 		rect bb = unit_type_bounding_box(ut, pos);
 		if (bb.from.x < bounds.from.x) pos.x -= bb.from.x - bounds.from.x;
-		else if (bb.to.x >= bounds.to.x) pos.x -= bb.to.x - bounds.to.x + 1;
+		else if (bb.to.x >= bounds.to.x) pos.x -= bb.to.x - bounds.to.x;
 		if (bb.from.y < bounds.from.y) pos.y -= bb.from.y - bounds.from.y;
-		else if (bb.to.y >= bounds.to.y) pos.y -= bb.to.y - bounds.to.y + 1;
+		else if (bb.to.y >= bounds.to.y) pos.y -= bb.to.y - bounds.to.y;
 		return pos;
 	}
 
@@ -968,25 +571,25 @@ struct state_functions {
 		for (image_t* img : ptr(sprite->images)) {
 			if (img->modifier == 11) img->flags |= image_t::flag_redraw;
 		}
-	};
+	}
 
 	int visible_hp_plus_shields(const unit_t* u) const {
 		int r = 0;
 		if (u->unit_type->has_shield) r += u->shield_points.integer_part();
 		r += u->hp.ceil().integer_part();
 		return r;
-	};
+	}
 	int max_visible_hp(const unit_t* u) const {
 		int hp = u->unit_type->hitpoints.integer_part();
 		if (hp == 0) hp = u->hp.ceil().integer_part();
 		if (hp == 0) hp = 1;
 		return hp;
-	};
+	}
 	int max_visible_hp_plus_shields(const unit_t* u) const {
 		int shields = 0;
 		if (u->unit_type->has_shield) shields += u->unit_type->shield_points;
 		return max_visible_hp(u) + shields;
-	};
+	}
 
 	size_t unit_space_occupied(const unit_t* u) const {
 		size_t r = 0;
@@ -1015,7 +618,7 @@ struct state_functions {
 			r += u->energy.integer_part() / 2;
 		}
 		return r * vis_hp_shields / max_vis_hp_shields;
-	};
+	}
 
 	void set_unit_hp(unit_t* u, fp8 hitpoints) {
 		u->hp = std::min(hitpoints, u->unit_type->hitpoints);
@@ -1028,7 +631,7 @@ struct state_functions {
 			u->air_strength = get_unit_strength(u, false);
 			u->ground_strength = get_unit_strength(u, true);
 		}
-	};
+	}
 
 	void set_unit_shield_points(unit_t* u, fp8 shield_points) {
 		u->shield_points = std::min(shield_points, fp8::integer(u->unit_type->shield_points));
@@ -1053,59 +656,57 @@ struct state_functions {
 		}
 	}
 
-	bool is_frozen(const unit_t* u) const {
-		if (u_frozen(u)) return true;
+	bool is_disabled(const unit_t* u) const {
+		if (u_disabled(u)) return true;
 		if (u->lockdown_timer) return true;
 		if (u->stasis_timer) return true;
 		if (u->maelstrom_timer) return true;
 		return false;
-	};
+	}
 
 	void set_current_button_set(unit_t* u, int type) {
 		if (type != UnitTypes::None && !ut_building(u)) {
-			if (is_frozen(u)) return;
+			if (is_disabled(u)) return;
 		}
 		u->current_button_set = type;
-	};
+	}
 
 	image_t* find_image(sprite_t* sprite, int first_id, int last_id) const {
 		for (image_t* i : ptr(sprite->images)) {
 			if (i->image_type->id >= first_id && i->image_type->id <= last_id) return i;
 		}
 		return nullptr;
-	};
+	}
 
-	void freeze_effect_end(unit_t* u, int first, int last) {
-		bool still_frozen = is_frozen(u);
-		if (u->subunit && !still_frozen) {
-			u->status_flags &= ~StatusFlags::DoodadStatesThing;
-			xcept("freeze_effect_end: orderComputer_cl");
-			// orderComputer_cl(u->subunit, units_dat.ReturntoIdle[u->subunit->unit_type]);
+	void disable_effect_end(unit_t* u, int first, int last) {
+		bool still_disabled = is_disabled(u);
+		if (u->subunit && !still_disabled) {
+			u_unset_status_flag(u, unit_t::status_flag_disabled);
+			set_unit_order(u, u->unit_type->return_to_idle);
 		}
-		image_t*image = find_image(u->sprite, first, last);
+		image_t* image = find_image(u->sprite, first, last);
 		if (!image && u->subunit) image = find_image(u->subunit->sprite, first, last);
 		if (image) iscript_run_anim(image, iscript_anims::Death);
-		if (u->unit_type->flags & UnitPrototypeFlags::Worker && !still_frozen) {
-			// sub_468DB0
+		if (ut_worker(u) && !still_disabled) {
 			unit_t*target = u->worker.harvest_target;
-			if (target && target->unit_type->flags & UnitPrototypeFlags::FlyingBuilding) {
+			if (target && ut_resource(target)) {
 				if (u->worker.is_carrying_something) {
 					if (target->building.resource.gather_queue_count) {
-						//if (u->order_id )
-						xcept("weird logic, fix me when this throws");
+						xcept("disable_effect_end fixme");
 					}
 				}
 			}
 		}
 		u->order_queue_timer = 15;
-	};
+	}
 
 	void remove_stasis(unit_t* u) {
+		xcept("remove_stasis fixme");
 		u->stasis_timer = 0;
 		set_current_button_set(u, u->unit_type->id);
 		u_set_status_flag(u, unit_t::status_flag_invincible, ut_invincible(u));
-		freeze_effect_end(u, idenums::IMAGEID_Stasis_Field_Small, idenums::IMAGEID_Stasis_Field_Large);
-	};
+		disable_effect_end(u, idenums::IMAGEID_Stasis_Field_Small, idenums::IMAGEID_Stasis_Field_Large);
+	}
 
 	void update_unit_status_timers(unit_t* u) {
 		if (u->stasis_timer) {
@@ -1167,15 +768,15 @@ struct state_functions {
 			xcept("RemoveOverlays(u, IMAGEID_Acid_Spores_1_Overlay_Small, IMAGEID_Acid_Spores_6_9_Overlay_Large);");
 		}
 
-	};
+	}
 
 	bool create_selection_circle(sprite_t* sprite, int color, int imageid) {
 		return false;
-	};
+	}
 
 	void remove_selection_circle(sprite_t* sprite) {
 
-	};
+	}
 
 	void update_selection_sprite(sprite_t* sprite, int color) {
 		if (!sprite->selection_timer) return;
@@ -1188,7 +789,7 @@ struct state_functions {
 				}
 			}
 		} else remove_selection_circle(sprite);
-	};
+	}
 
 	fp8 unit_cloak_energy_cost(const unit_t* u) const {
 		switch (u->unit_type->id) {
@@ -1363,7 +964,7 @@ struct state_functions {
 	}
 
 	bool is_reachable(xy from, xy to) const {
-		return st.paths.get_region_at(from)->group_index == st.paths.get_region_at(to)->group_index;
+		return st.regions.get_region_at(from)->group_index == st.regions.get_region_at(to)->group_index;
 	}
 
 	bool cc_can_be_infested(const unit_t* u) const {
@@ -1374,7 +975,7 @@ struct state_functions {
 
 	bool unit_can_attack_target(const unit_t* u, const unit_t* target) const {
 		if (!target) return false;
-		if (is_frozen(u)) return false;
+		if (is_disabled(u)) return false;
 		if (u_invincible(target)) return false;
 		if (us_hidden(target)) return false;
 		if (unit_target_is_undetected(u, target)) return false;
@@ -1436,7 +1037,6 @@ struct state_functions {
 	int units_distance(const unit_t* a, const unit_t* b) const {
 		auto a_rect = unit_sprite_bounding_box(a);
 		auto b_rect = unit_sprite_bounding_box(b);
-		b_rect.to += {1, 1};
 		return xy_length(rect_difference(a_rect, b_rect));
 	}
 
@@ -1444,10 +1044,9 @@ struct state_functions {
 	direction_t atan(fixed_point<integer_bits, 8, true> x) const {
 		bool negative = x < decltype(x)::zero();
 		if (negative) x = -x;
-		int r;
-		if ((decltype(x)::raw_unsigned_type)x.raw_value > std::numeric_limits<unsigned int>::max()) r = 64;
-		else r = std::lower_bound(arctan_inv_table.begin(), arctan_inv_table.end(), (unsigned int)x.raw_value) - arctan_inv_table.begin();
-		return negative ? -direction_t::from_raw(r) : direction_t::from_raw(r);
+		typename decltype(x)::raw_unsigned_type uv = x.raw_value;
+		size_t r = std::lower_bound(tan_table.begin(), tan_table.end(), uv) - tan_table.begin();
+		return negative ? -direction_t::from_raw((direction_t::raw_type)r) : direction_t::from_raw((direction_t::raw_type)r);
 	};
 
 	direction_t xy_direction(xy_fp8 pos) const {
@@ -1468,6 +1067,10 @@ struct state_functions {
 
 	xy_fp8 direction_xy(direction_t dir, fp8 length) {
 		return global_st.direction_table[direction_index(dir)] * length;
+	}
+
+	xy_fp8 direction_xy(direction_t dir) {
+		return global_st.direction_table[direction_index(dir)];
 	}
 
 	size_t direction_index(direction_t dir) {
@@ -1780,9 +1383,9 @@ struct state_functions {
 			return true;
 		}
 
-		if (is_frozen(u) || (!u_can_move(u) && u_cannot_attack(u))) {
+		if (is_disabled(u) || (!u_can_move(u) && u_cannot_attack(u))) {
 			if (u->main_order_timer == 0) u->main_order_timer = 15;
-			if (is_frozen(u)) return true;
+			if (is_disabled(u)) return true;
 		}
 
 		switch (u->order_type->id) {
@@ -2294,7 +1897,7 @@ struct state_functions {
 			}
 			return;
 		}
-		if (is_frozen(u)) return;
+		if (is_disabled(u)) return;
 		switch (u->secondary_order_type->id) {
 		case Orders::Train:
 			xcept("Train");
@@ -2368,30 +1971,30 @@ struct state_functions {
 
 	bool contour_is_space_available(const contour_search& s, xy pos) const {
 
-		auto cmp_u = [&](int v, paths_t::contour& c) {
+		auto cmp_u = [&](int v, regions_t::contour& c) {
 			return v < c.v[0];
 		};
-		auto cmp_l = [&](paths_t::contour& c, int v) {
+		auto cmp_l = [&](regions_t::contour& c, int v) {
 			return c.v[0] < v;
 		};
 
-		auto& c0 = st.paths.contours[0];
+		auto& c0 = st.regions.contours[0];
 		for (auto i = std::upper_bound(c0.begin(), c0.end(), pos.y, cmp_u); i != c0.begin();) {
 			--i;
 			if (s.inner[0] + i->v[0] < pos.y) break;
 			if (s.inner[1] + i->v[1] <= pos.x && s.inner[3] + i->v[2] >= pos.x) return false;
 		}
-		auto& c1 = st.paths.contours[1];
+		auto& c1 = st.regions.contours[1];
 		for (auto i = std::lower_bound(c1.begin(), c1.end(), pos.x, cmp_l); i != c1.end(); ++i) {
 			if (s.inner[1] + i->v[0] > pos.x) break;
 			if (s.inner[2] + i->v[1] <= pos.y && s.inner[0] + i->v[2] >= pos.y) return false;
 		}
-		auto& c2 = st.paths.contours[2];
+		auto& c2 = st.regions.contours[2];
 		for (auto i = std::lower_bound(c2.begin(), c2.end(), pos.y, cmp_l); i != c2.end(); ++i) {
 			if (s.inner[2] + i->v[0] > pos.y) break;
 			if (s.inner[1] + i->v[1] <= pos.x && s.inner[3] + i->v[2] >= pos.x) return false;
 		}
-		auto& c3 = st.paths.contours[3];
+		auto& c3 = st.regions.contours[3];
 		for (auto i = std::upper_bound(c3.begin(), c3.end(), pos.x, cmp_u); i != c3.begin();) {
 			--i;
 			if (s.inner[3] + i->v[0] < pos.x) break;
@@ -2437,7 +2040,7 @@ struct state_functions {
 		for (unit_t* nu : find_units(bounds)) {
 			if (nu != u && nu->pathing_flags & 1 && !u_no_collide(nu) && unit_finder_unit_in_bounds(nu, bounds)) {
 				rect n_bb = unit_type_bounding_box(nu->unit_type);
-				int p = ((n_bb.to.x - n_bb.from.x) + 1) * ((n_bb.to.y - n_bb.from.y) + 1);
+				int p = (n_bb.to.x - n_bb.from.x) * (n_bb.to.y - n_bb.from.y);
 				if (p > largest_unit_area) {
 					largest_unit_area = p;
 					largest_unit = nu;
@@ -2454,13 +2057,13 @@ struct state_functions {
 		return std::make_pair(false, largest_unit);
 	}
 
-	void set_flingy_move_target(flingy_t* f, xy move_target) {
-		if (f->move_target.pos == move_target) return;
-		f->move_target.pos = move_target;
-		f->move_target.unit = nullptr;
-		f->next_movement_waypoint = move_target;
-		u_unset_movement_flag(f, 4);
-		u_set_movement_flag(f, 1);
+	void set_flingy_move_target(flingy_t* u, xy move_target) {
+		if (u->move_target.pos == move_target) return;
+		u->move_target.pos = move_target;
+		u->move_target.unit = nullptr;
+		u->next_movement_waypoint = move_target;
+		u_unset_movement_flag(u, 4);
+		u_set_movement_flag(u, 1);
 	}
 
 	xy restrict_move_target_to_valid_bounds(const unit_t* u, xy move_target) {
@@ -2676,7 +2279,7 @@ struct state_functions {
 
 	void update_repulse_direction(unit_t* u) {
 		direction_t repulse_dir = u->repulse_direction;
-		if (u->position != u->move_target.pos) {
+		if (!unit_is_at_move_target(u)) {
 			direction_t target_dir = xy_direction(u->move_target.pos - u->position);
 			repulse_dir = target_dir + global_st.repulse_direction_table[direction_index(repulse_dir - target_dir)];
 		}
@@ -2684,14 +2287,14 @@ struct state_functions {
 		if (bb.from.x < 32) {
 			if (repulse_dir < direction_t::zero()) repulse_dir = -repulse_dir;
 			u->repulse_flags &= 0xf;
-		} else if ((size_t)bb.to.x > game_st.map_width - 1 - 32) {
+		} else if ((size_t)bb.to.x > game_st.map_width - 32) {
 			if (repulse_dir >= direction_t::zero()) repulse_dir = -repulse_dir;
 			u->repulse_flags &= 0xf;
 		}
 		if (bb.from.y < 32) {
 			if (repulse_dir + direction_t::from_raw(64) >= direction_t::zero()) repulse_dir = -repulse_dir;
 			u->repulse_flags &= 0xf;
-		} else if ((size_t)bb.to.y > game_st.map_height - 1 - 32) {
+		} else if ((size_t)bb.to.y > game_st.map_height - 32) {
 			if (repulse_dir + direction_t::from_raw(64) < direction_t::zero()) repulse_dir = -repulse_dir;
 			u->repulse_flags &= 0xf;
 		}
@@ -2702,6 +2305,8 @@ struct state_functions {
 		if (!u_can_move(u)) return false;
 		if (ut_building(u)) return false;
 		if (u->unit_type->id == UnitTypes::Protoss_Interceptor) return false;
+		if (u_order_not_interruptible(u)) return false;
+		if (u_iscript_nobrk(u)) return false;
 		int strength = st.repulse_field[u->repulse_index];
 		if (strength <= 1) {
 			u->repulse_flags &= ~7;
@@ -2713,7 +2318,7 @@ struct state_functions {
 			u->repulse_flags |= 7;
 			update_repulse_direction(u);
 		}
-		xy_fp8 repulse = direction_xy(u->repulse_direction, fp8::integer(1) / 2);
+		xy_fp8 repulse = direction_xy(u->repulse_direction) / 2;
 		if (unit_is_at_move_target(u)) {
 			repulse *= strength / 4 + 1;
 			repulse /= 2;
@@ -2726,7 +2331,7 @@ struct state_functions {
 		else if (repulse.x < fp8::zero()) repulse.x -= adjust.x;
 		if (repulse.y > adjust.y * 4) repulse.y -= adjust.y;
 		else if (repulse.y > fp8::zero()) repulse.y += adjust.y;
-		else if (repulse.y < -adjust.y * 4) repulse.x += adjust.y;
+		else if (repulse.y < -adjust.y * 4) repulse.y += adjust.y;
 		else if (repulse.y < fp8::zero()) repulse.y -= adjust.y;
 		ems.exact_position += repulse;
 		ems.position = to_xy(ems.exact_position);
@@ -2756,6 +2361,1178 @@ struct state_functions {
 		if (!finish_flingy_movement(u, ems)) return false;
 		if (tile_index(prev_pos) != tile_index(u->position)) ems.refresh_vision = true;
 		unit_finder_reinsert(u);
+		return true;
+	}
+
+	bool maybe_is_going_to(const unit_t* u, xy position) {
+		if (!u->path) return false;
+		xcept("maybe_is_going_to fixme");
+		return false;
+	}
+
+	void create_single_segment_path(unit_t* u, xy to) {
+		xcept("create_single_step_path fixme");
+	}
+
+	struct pathfinder {
+		unit_t* u = nullptr;
+		unit_t* target_unit = nullptr;
+		xy source;
+		regions_t::region* source_region = nullptr;
+		regions_t::region* destination_region = nullptr;
+		rect unit_bb;
+		rect target_unit_bb;
+		xy destination;
+
+		a_deque<regions_t::region*> long_path;
+		size_t full_long_path_size;
+		a_deque<xy> short_path;
+
+		size_t current_long_path_index = 0;
+		size_t current_short_path_index = 0;
+
+		size_t highest_open_size = 0;
+		size_t all_nodes_size = 0;
+
+		int field_1c = 0;
+		int field_1d = 0;
+		int field_1e = 0;
+		int field_1f = 0;
+		int field_164 = 0;
+		int field_168 = 0;
+	};
+
+	void pathfinder_find_long_path(pathfinder& pf) {
+		log("find long path from region %d to %d\n", pf.source_region->index, pf.destination_region->index);
+		xcept("pathfinder_find_long_path");
+	}
+	void pathfinder_find_short_path(pathfinder& pf, xy target, regions_t::region* target_region) {
+
+		bool target_is_destination = target == pf.destination;
+		bool target_region_walkable = target_region && target_region->walkable();
+
+		regions_t::region* source_region = pf.source_region;
+		regions_t::region* destination_region = st.regions.get_region_at(pf.destination);
+
+		regions_t::region* move_to_region = target_region ? target_region : destination_region;
+
+		for (auto* nr : move_to_region->walkable_neighbors) {
+			if (nr == source_region) continue;
+			nr->pathfinder_flag = 1;
+		}
+
+		struct pf_search {
+			unit_t* u = nullptr;
+			unit_t* target_unit = nullptr;
+			std::array<int, 4> inner;
+			std::array<int, 4> outer;
+			rect target_unit_bb;
+			xy target;
+
+			bool has_found_goal;
+			xy cur_pos;
+			xy cur_pos_max;
+			xy cur_pos_min;
+
+			std::array<a_vector<regions_t::contour>, 4> x_boxes;
+
+			std::array<regions_t::contour*, 4> box_neighbors;
+
+			struct neighbor_t {
+				xy pos;
+				int flags;
+				bool is_goal;
+			};
+			static_vector<neighbor_t, 32> neighbors;
+
+			a_vector<rect> visited_areas;
+		};
+
+		pf_search w;
+
+		w.u = pf.u;
+		w.target_unit = pf.target_unit;
+		w.target = target;
+		w.inner[0] = pf.u->unit_type->dimensions.from.y;
+		w.outer[0] = pf.u->unit_type->dimensions.from.y + 1;
+		w.inner[1] = -pf.u->unit_type->dimensions.to.x;
+		w.outer[1] = -pf.u->unit_type->dimensions.to.x - 1;
+		w.inner[2] = -pf.u->unit_type->dimensions.to.y;
+		w.outer[2] = -pf.u->unit_type->dimensions.to.y - 1;
+		w.inner[3] = pf.u->unit_type->dimensions.from.x;
+		w.outer[3] = pf.u->unit_type->dimensions.from.x + 1;
+		w.target_unit_bb = pf.target_unit_bb;
+
+		struct node_t {
+			node_t* prev = nullptr;
+			xy pos;
+			fp8 total_cost{};
+			fp8 estimated_remaining_cost{};
+			fp8 estimated_final_cost{};
+			bool is_goal = false;
+			int depth = 0;
+			int directional_flags = 0;
+			regions_t::region* region = nullptr;
+			bool is_target_region = false;
+			bool is_neighbor_region = false;
+			bool visited = false;
+		};
+		struct cmp_node {
+			bool operator()(const node_t* a, const node_t* b) const {
+				return a->estimated_final_cost < b->estimated_final_cost;
+			}
+		};
+		a_vector<node_t*> open;
+
+		a_list<node_t> all_nodes;
+		all_nodes.emplace_back();
+		node_t* start_node = &all_nodes.back();
+		start_node->pos = pf.source;
+		start_node->estimated_remaining_cost = fp8::integer(128 * 128);
+		start_node->estimated_final_cost = start_node->estimated_remaining_cost;
+		start_node->directional_flags = 0xff;
+		start_node->region = source_region;
+
+		open.push_back(start_node);
+		std::push_heap(open.begin(), open.end(), cmp_node());
+
+		struct visited {
+			int x;
+			a_vector<std::pair<int, int>> y;
+		};
+
+		a_vector<visited> pf_area_visited;
+		pf_area_visited.push_back({0, {}});
+		pf_area_visited.push_back({(int)game_st.map_width, {}});
+
+		auto pf_remove_visited_flags = [&](xy pos, int flags) {
+			auto cur = std::upper_bound(pf_area_visited.begin(), pf_area_visited.end(), pos.x, [&](int a, auto& b) {
+				return a < b.x;
+			});
+			--cur;
+			if (cur->y.empty()) return flags;
+
+			auto i = cur->y.begin();
+			for (;i != cur->y.end(); ++i) {
+				if (pos.y <= i->first) break;
+			}
+			if (i == cur->y.end()) return flags;
+			int mask = 0;
+			if (pos.y <= i->first) mask |= 0x19;
+			if (pos.y >= i->second) mask |= 0x46;
+			if (cur->x == pos.x) {
+				xcept("pf_remove_visited_flags fixme");
+			}
+
+			log("mask %#x\n", mask);
+			return flags & mask;
+		};
+
+		auto pf_box_terrain = [&]() {
+
+			auto cmp_u = [&](int v, regions_t::contour& c) {
+				return v < c.v[0];
+			};
+			auto cmp_l = [&](regions_t::contour& c, int v) {
+				return c.v[0] < v;
+			};
+
+			auto& c0 = st.regions.contours[0];
+			for (auto i = std::upper_bound(c0.begin(), c0.end(), w.cur_pos_min.y - w.inner[0] - 1, cmp_u); i != c0.end(); ++i) {
+				if (i->v[0] > w.cur_pos.y - w.inner[0] - 1) break;
+				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.x) {
+					if (i->v[2] + w.inner[(i->flags >> 2) & 3] >= w.cur_pos_min.x) {
+						xcept("fixme pf_crash");
+					}
+				}
+			}
+			auto& c1 = st.regions.contours[1];
+			for (auto i = std::lower_bound(c1.begin(), c1.end(), w.cur_pos.x - w.inner[1], cmp_l); i != c1.end(); ++i) {
+				if (i->v[0] > w.cur_pos_max.x - w.inner[1] + 1) break;
+				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.y) {
+					if (i->v[2] + w.inner[(i->flags >> 2) & 3] >= w.cur_pos_min.y) {
+						xcept("fixme pf_crash");
+					}
+				}
+			}
+			auto& c2 = st.regions.contours[2];
+			for (auto i = std::lower_bound(c2.begin(), c2.end(), w.cur_pos.y - w.inner[2], cmp_l); i != c2.end(); ++i) {
+				if (i->v[0] > w.cur_pos_max.y - w.inner[2] + 1) break;
+				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.x) {
+					if (i->v[2] + w.inner[(i->flags >> 2) & 3] >= w.cur_pos_min.x) {
+						xcept("fixme pf_crash");
+					}
+				}
+			}
+			auto& c3 = st.regions.contours[3];
+			for (auto i = std::upper_bound(c3.begin(), c3.end(), w.cur_pos_min.x - w.inner[3] - 1, cmp_u); i != c3.begin(); ++i) {
+				if (i->v[0] > w.cur_pos.x - w.inner[3] - 1) break;
+				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.y) {
+					if (i->v[2] + w.inner[(i->flags >> 2) & 3] >= w.cur_pos_min.y) {
+						xcept("fixme pf_crash");
+					}
+				}
+			}
+
+		};
+
+		auto pf_box_units = [&]() {
+			// FIXME: this function needs to be implemented for pathfinding around units
+		};
+
+		auto pf_box_find = [&](int dir, int v, int v0, int v1, int v2) {
+			return (regions_t::contour*)nullptr;
+		};
+
+		auto pf_add_neighbor = [&](xy pos, int flags) {
+			if (pos == w.cur_pos) return;
+			log("pf add neighbor %d %d flags %#x\n", pos.x, pos.y, flags);
+			bool is_goal = false;
+			if (w.target_unit) {
+				if (pos.x == w.target_unit_bb.from.x || pos.x == w.target_unit_bb.to.x) {
+					if (pos.y >= w.target_unit_bb.from.y && pos.y <= w.target_unit_bb.to.y) {
+						is_goal = true;
+					}
+				}
+				if (pos.y == w.target_unit_bb.from.y || pos.y == w.target_unit_bb.to.y) {
+					if (pos.x >= w.target_unit_bb.from.x && pos.x <= w.target_unit_bb.to.x) {
+						is_goal = true;
+					}
+				}
+				if (is_goal) {
+					flags = 0xff;
+					w.has_found_goal = true;
+				}
+			}
+			if (w.neighbors.size() < 32) {
+				if (is_goal || w.neighbors.empty()) {
+					w.neighbors.push_back({pos, flags, is_goal});
+				} else {
+					auto i = std::find_if(w.neighbors.begin(), w.neighbors.end(), [&](auto& v) {
+						return v.pos == pos;
+					});
+					if (i != w.neighbors.end()) i->flags &= flags;
+					else w.neighbors.push_back({pos, flags, is_goal});
+				}
+			}
+		};
+
+		auto pf_generate_neighbors  = [&](xy pos, int a) {
+			w.has_found_goal = false;
+			w.neighbors.clear();
+			w.visited_areas.clear();
+
+			w.cur_pos = pos;
+			w.cur_pos_max = pos + xy(64, 64);
+			w.cur_pos_min = pos - xy(64, 64);
+			if (pos.x < 64) w.cur_pos_min.x = 0;
+			if (pos.y < 64) w.cur_pos_min.y = 0;
+			if ((size_t)pos.x + 64 >= game_st.map_width) w.cur_pos_max.x = game_st.map_width - 1;
+			if ((size_t)pos.y + 64 >= game_st.map_height) w.cur_pos_max.y = game_st.map_height - 1;
+			if ((a & (0x10 | (8|1))) == 0) w.cur_pos_min.y = pos.y;
+			if ((a & (0x20 | (1|2))) == 0) w.cur_pos_max.x = pos.x;
+			if ((a & (0x40 | (2|4))) == 0) w.cur_pos_max.y = pos.y;
+			if ((a & (0x80 | (4|8))) == 0) w.cur_pos_min.x = pos.x;
+
+			pf_box_terrain();
+			pf_box_units();
+
+			w.box_neighbors[0] = pf_box_find(0, pos.y, pos.x, pos.x, w.cur_pos_min.y - 1);
+			if (w.box_neighbors[0]) w.cur_pos_min.y = w.box_neighbors[0]->v[0] + w.inner[0] + 1;
+			w.box_neighbors[1] = pf_box_find(1, pos.x, pos.y, pos.y, w.cur_pos_max.x + 1);
+			if (w.box_neighbors[1]) w.cur_pos_max.x = w.box_neighbors[1]->v[0] + w.inner[1] - 1;
+			w.box_neighbors[2] = pf_box_find(2, pos.y, pos.x, pos.x, w.cur_pos_max.y + 1);
+			if (w.box_neighbors[2]) w.cur_pos_max.y = w.box_neighbors[2]->v[0] + w.inner[2] - 1;
+			w.box_neighbors[3] = pf_box_find(3, pos.x, pos.y, pos.y, w.cur_pos_min.x - 1);
+			if (w.box_neighbors[3]) w.cur_pos_min.x = w.box_neighbors[3]->v[0] + w.inner[3] + 1;
+
+			if (w.cur_pos_min.y == pos.y && w.cur_pos_max.x == pos.x) a &= ~1;
+			if (w.cur_pos_max.y == pos.y) {
+				if (w.cur_pos_max.x == pos.x) a &= ~2;
+				if (w.cur_pos_min.x == pos.x) a &= ~4;
+			}
+			if (w.cur_pos_min.y == pos.y) {
+				if (w.cur_pos_min.x == pos.x) a &= ~8;
+				if (w.cur_pos_min.y == pos.y) a &= ~0x10;
+			}
+			if (w.cur_pos_max.x == pos.x) a &= ~0x20;
+			if (w.cur_pos_max.y == pos.y) a &= ~0x40;
+			if (w.cur_pos_min.x == pos.x) a &= ~0x80;
+
+			if (a & 0x10) {
+				a |= (8|1);
+				pf_add_neighbor({pos.x, w.cur_pos_min.y}, w.box_neighbors[0] ? ~(0x40|0x10|8|1) : ~0x40);
+			}
+			if (a & 0x20) {
+				a |= (1|2);
+				pf_add_neighbor({w.cur_pos_max.x, pos.y}, w.box_neighbors[1] ? ~(0x80|0x20|2|1) : ~0x80);
+			}
+			if (a & 0x40) {
+				a |= (2|4);
+				pf_add_neighbor({pos.x, w.cur_pos_max.y}, w.box_neighbors[2] ? ~(0x40|0x10|4|2) : ~0x10);
+			}
+			if (a & 0x80) {
+				a |= (4|8);
+				pf_add_neighbor({w.cur_pos_min.x, pos.y}, w.box_neighbors[3] ? ~(0x80|0x20|8|4) : ~0x20);
+			}
+
+
+			for (int dir = 0; dir != 4; ++dir) {
+				if (a & (1 << dir)) {
+					if (add_neighbors(dir)) break;
+				}
+			}
+
+			for (auto& v : w.visited_areas) {
+				pf_mark_visited(v);
+			}
+
+		};
+
+		auto visit_area = [&](int from_x, int from_y, int to_x, int to_y) {
+			if (to_x < from_x) std::swap(from_x, to_x);
+			if (to_y < to_y) std::swap(from_y, to_y);
+			if (w.target.x >= from_x && w.target.x <= to_x) {
+				if (w.target.y >= from_y && w.target.y <= to_y) {
+					w.neighbors.push_back({w.target, 0xff, true});
+					w.has_found_goal = true;
+					log("goal found\n");
+					return true;
+				}
+			}
+			w.visited_areas.push_back({xy{from_x, from_y}, xy{to_x, to_y}});
+			return false;
+		};
+
+		auto add_neighbors = [&](int n) {
+			if (true) {
+				regions_t::contour c{};
+				xy pos = w.cur_pos;
+				xy pos_max = w.cur_pos_max;
+				xy pos_min = w.cur_pos_min;
+				if (n == 0) {
+					if (pos.x < pos_max.x) {
+						int xval = pos_max.x;
+						int yval = pos_min.y;
+						int box_y = pos_min.y;
+						if (w.box_neighbors[1]) {
+							auto* i = w.box_neighbors[1];
+							box_y = i->v[1] + w.inner[i->flags & 3] - 1;
+							if (box_y > yval) yval = box_y;
+						}
+						int flags = 0x3b;
+						auto* i = pf_box_find(0, pos.y - 1, pos.x, xval, yval - 1);
+						if (i) {
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							yval = c.v[0];
+							if (xval == c.v[2]) {
+								if (c.flags & 0x20) flags = 0x33;
+								else flags = 0;
+							} else if (xval < c.v[2]) {
+								flags = 0x22;
+							}
+						}
+						if (w.box_neighbors[1]) {
+							flags &= 0xfd;
+							if (box_y < yval) flags &= 0xde;
+						}
+						if (yval >= pos.y) {
+							flags |= 0x44;
+						} else {
+							pf_add_neighbor({xval, pos.y}, 0xe7);
+						}
+						pf_add_neighbor({xval, yval}, flags);
+						if (yval == pos_min.y) pf_add_neighbor({pos.x, yval}, 0xdd);
+						if (i) {
+							if (xval > c.v[2]) pf_add_neighbor({c.v[2], c.v[0]}, 0x11);
+							while (true) {
+								if (c.v[1] < pos.x) {
+									pos_max.x = pos.x;
+									break;
+								}
+								pos_max.x = c.v[1];
+								pf_add_neighbor({c.v[1], c.v[0]}, 0x18);
+								if (i == &w.x_boxes[0].front()) break;
+								--i;
+								c = *i;
+								c.v[0] += w.outer[c.dir];
+								c.v[1] += w.outer[c.flags & 3];
+								c.v[2] += w.outer[(c.flags >> 2) & 3];
+								if (c.v[0] != yval) break;
+								if (c.v[2] < pos.x) break;
+								if (c.v[2] <= xval) pf_add_neighbor({c.v[2], c.v[0]}, 0x11);
+							}
+						}
+						if (visit_area(pos.x, pos.y, xval, yval)) return true;
+						pos.y = yval;
+					}
+					if (pos.y > pos_min.y) {
+						int xval = pos_max.x;
+						int yval = pos_min.y;
+						int box_x = pos_min.y;
+						if (w.box_neighbors[0]) {
+							auto* i = w.box_neighbors[0];
+							box_x = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
+							if (box_x < xval) xval = box_x;
+						}
+						int flags = 0x3b;
+						auto* i = pf_box_find(1, pos.x + 1, yval, pos.y, xval + 1);
+						if (i) {
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							xval = c.v[0];
+							if (yval == c.v[1]) {
+								if (c.flags & 0x10) flags = 0x39;
+								else flags = 0;
+							} else if (yval > c.v[1]) {
+									flags = 0x18;
+							}
+						}
+						if (w.box_neighbors[0]) {
+							flags &= 0xf7;
+							if (box_x > xval) flags &= 0xde;
+						}
+						if (xval <= pos.x) {
+							flags |= 0x84;
+						} else {
+							pf_add_neighbor({pos.x, yval}, 0xdd);
+						}
+						pf_add_neighbor({xval, yval}, flags);
+						if (xval < pos_max.y) pf_add_neighbor({xval, pos.y}, 1);
+						if (i) {
+							if (yval < c.v[1]) pf_add_neighbor({c.v[2], c.v[0]}, 0x33);
+							while (c.v[2] <= pos.y) {
+								pf_add_neighbor({c.v[0], c.v[2]}, 0x34);
+								if (i == &w.x_boxes[1].back()) break;
+								++i;
+								c = *i;
+								c.v[0] += w.outer[c.dir];
+								c.v[1] += w.outer[c.flags & 3];
+								c.v[2] += w.outer[(c.flags >> 2) & 3];
+								if (c.v[0] != xval || c.v[1] > pos.y) {
+									pf_add_neighbor({xval, pos.y}, 0x33);
+								}
+								if (c.v[1] >= yval) pf_add_neighbor({c.v[0], c.v[1]}, 0x33);
+							}
+						}
+						if (visit_area(pos.x, pos.y, xval, yval)) return true;
+					}
+					return false;
+				} else if (n == 1) {
+					if (pos.x < pos_max.x) {
+						int xval = pos_max.x;
+						int yval = pos_max.y;
+						int box_y = pos_max.y;
+						if (w.box_neighbors[1]) {
+							auto* i = w.box_neighbors[1];
+							box_y = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
+							if (box_y < yval) yval = box_y;
+						}
+						int flags = 0x67;
+						auto* i = pf_box_find(2, pos.y + 1, pos.x, xval, yval + 1);
+						if (i) {
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							if (pos.x < c.v[2]) pf_add_neighbor({c.v[1], c.v[0]}, 0x44);
+							yval = c.v[0];
+							pos_max.x = c.v[1];
+							while (c.v[2] <= xval) {
+								pf_add_neighbor({c.v[2], c.v[0]}, 0x42);
+								if (i == &w.x_boxes[2].back()) break;
+								++i;
+								c = *i;
+								c.v[0] += w.outer[c.dir];
+								c.v[1] += w.outer[c.flags & 3];
+								c.v[2] += w.outer[(c.flags >> 2) & 3];
+								if (c.v[0] - 1 != yval) break;
+								if (c.v[1] - 1 >= xval) break;
+								if (c.v[1] <= xval) pf_add_neighbor({c.v[1], c.v[0]}, 0x44);
+							}
+							if (xval == c.v[2]) {
+								if (c.flags & 0x20) flags = 0x63;
+								else flags = 0;
+							} else if (xval < c.v[2]) {
+								flags = 0x21;
+							}
+						}
+						if (w.box_neighbors[1]) {
+							flags &= 0xfe;
+							if (box_y > yval) flags &= 0xdd;
+						}
+						if (yval <= pos.y) {
+							flags |= 0x18;
+						} else {
+							pf_add_neighbor({xval, pos.y}, 0xbb);
+						}
+						pf_add_neighbor({xval, yval}, flags);
+						if (yval == pos_max.y) pf_add_neighbor({pos.x, yval}, 0xde);
+						if (visit_area(pos.x, pos.y, xval, yval)) return true;
+						pos.y = yval;
+					}
+					if (pos.y < pos_max.y) {
+						int xval = pos_max.x;
+						int yval = pos_max.y;
+						int box_x = pos_max.x;
+						if (w.box_neighbors[2]) {
+							auto* i = w.box_neighbors[2];
+							box_x = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
+							if (box_x < xval) xval = box_x;
+						}
+						int flags = 0x67;
+						auto* i = pf_box_find(1, pos.x + 1, pos.y, yval, xval + 1);
+						if (i) {
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							if (c.v[0] < pos_max.x) pf_add_neighbor({c.v[0], pos.y}, 2);
+							if (c.v[1] > pos.y) pf_add_neighbor({c.v[0], c.v[1]}, 0x21);
+							xval = c.v[0];
+							while (c.v[2] < yval) {
+								pf_add_neighbor({c.v[0], c.v[2]}, 0x22);
+								if (i == &w.x_boxes[1].back()) break;
+								++i;
+								c = *i;
+								c.v[0] += w.outer[c.dir];
+								c.v[1] += w.outer[c.flags & 3];
+								c.v[2] += w.outer[(c.flags >> 2) & 3];
+								if (c.v[0] - 1 != xval) break;
+								if (c.v[1] - 1 >= yval) break;
+								if (c.v[1] <= pos.y && c.v[1] <= pos_max.y) pf_add_neighbor({c.v[0], c.v[1]}, 0x21);
+							}
+							if (c.v[2] == yval) {
+								if (c.flags & 0x20) flags = 0x66;
+								else flags = 0;
+							} else if (c.v[2] > yval) {
+								flags = 0x44;
+							}
+						}
+						if (w.box_neighbors[2]) {
+							flags &= 0xfb;
+							if (box_x > xval) flags &= 0xbd;
+						}
+						if (xval <= pos.x) {
+							flags |= 0x88;
+						} else {
+							pf_add_neighbor({pos.x, yval}, 0xde);
+						}
+						pf_add_neighbor({xval, yval}, flags);
+						if (visit_area(pos.x, pos.y, xval, yval)) return true;
+					}
+					return false;
+				} else if (n == 2) {
+					if (pos.x > pos_min.x) {
+						int xval = pos_min.x;
+						int yval = pos_max.y;
+						int box_y = pos_max.y;
+						if (w.box_neighbors[3]) {
+							auto* i = w.box_neighbors[3];
+							box_y = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
+							if (box_y < yval) yval = box_y;
+						}
+						int flags = 0xce;
+						auto* i = pf_box_find(2, pos.y + 1, xval, pos.x, yval + 1);
+						if (i) {
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							yval = c.v[0];
+							if (xval == c.v[1]) {
+								if (c.flags & 0x10) flags = 0xcc;
+								else flags = 0;
+							} else if (xval > c.v[1]) {
+								flags = 0x88;
+							}
+						}
+						if (w.box_neighbors[3]) {
+							flags &= 0xf7;
+							if (box_y < yval) flags &= 0x7b;
+						}
+						if (yval <= pos.y) {
+							flags |= 0x11;
+						} else {
+							pf_add_neighbor({xval, pos.y}, 0xbd);
+						}
+						pf_add_neighbor({xval, yval}, flags);
+						if (yval == pos_max.y) pf_add_neighbor({pos.x, yval}, 0x77);
+						if (i) {
+							if (xval < c.v[1]) pf_add_neighbor({c.v[1], c.v[0]}, 0x44);
+							while (true) {
+								if (c.v[2] > pos.x) {
+									pf_add_neighbor({pos.x, c.v[0]}, 0x21);
+									pos_min.x = pos.x;
+									break;
+								}
+								pos_min.x = c.v[2];
+								pf_add_neighbor({c.v[2], c.v[0]}, 0x42);
+								if (i == &w.x_boxes[2].back()) break;
+								++i;
+								c = *i;
+								c.v[0] += w.outer[c.dir];
+								c.v[1] += w.outer[c.flags & 3];
+								c.v[2] += w.outer[(c.flags >> 2) & 3];
+								if (c.v[0] != yval) break;
+								if (c.v[1] > pos.x) break;
+								pf_add_neighbor({c.v[1], c.v[0]}, 0x44);
+							}
+						}
+						if (visit_area(pos.x, pos.y, xval, yval)) return true;
+						pos.y = yval;
+					}
+					if (pos.y < pos_max.y) {
+						int xval = pos_max.x;
+						int yval = pos_min.y;
+						int box_x = pos_min.y;
+						if (w.box_neighbors[2]) {
+							auto* i = w.box_neighbors[2];
+							box_x = i->v[1] + w.inner[i->flags & 3] - 1;
+							if (box_x > xval) xval = box_x;
+						}
+						int flags = 0xce;
+						auto* i = pf_box_find(3, pos.x - 1, pos.y, yval, xval - 1);
+						if (i) {
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							xval = c.v[0];
+							if (yval == c.v[1]) {
+								if (c.flags & 0x20) flags = 0xc6;
+								else flags = 0;
+							} else if (yval > c.v[1]) {
+								flags = 0x42;
+							}
+						}
+						if (w.box_neighbors[2]) {
+							flags &= 0xfd;
+							if (box_x > xval) flags &= 0xbb;
+						}
+						if (xval >= pos.x) {
+							flags |= 0x22;
+						} else {
+							pf_add_neighbor({pos.x, yval}, 0x77);
+						}
+						pf_add_neighbor({xval, yval}, flags);
+						if (xval > pos_min.y) pf_add_neighbor({xval, pos.y}, 4);
+						if (i) {
+							if (yval > c.v[2]) pf_add_neighbor({c.v[0], c.v[2]}, 0x84);
+							while (c.v[1] >= pos.y) {
+								pf_add_neighbor({c.v[0], c.v[2]}, 0x88);
+								if (i == &w.x_boxes[3].front()) break;
+								--i;
+								c = *i;
+								c.v[0] += w.outer[c.dir];
+								c.v[1] += w.outer[c.flags & 3];
+								c.v[2] += w.outer[(c.flags >> 2) & 3];
+								if (c.v[0] != xval || c.v[2] < pos.y) {
+									pf_add_neighbor({xval, pos.y}, 0x84);
+								}
+								if (c.v[2] <= yval) pf_add_neighbor({c.v[0], c.v[2]}, 0x84);
+							}
+						}
+						if (visit_area(pos.x, pos.y, xval, yval)) return true;
+					}
+					return false;
+				}
+			}
+			xcept("add_neighbors %d\n", n);
+			return false;
+		};
+
+		auto pf_mark_visited = [&](rect area) {
+			auto next = std::upper_bound(pf_area_visited.begin(), pf_area_visited.end(), area.from.x, [&](int a, auto& b) {
+				return a < b.x;
+			});
+			auto cur = next;
+			--cur;
+			if (area.from.x < cur->x) {
+				if (pf_area_visited.size() == 128) return;
+				next = pf_area_visited.insert(next, {area.from.x, cur->y});
+			}
+			if (area.from.x > area.to.x) return;
+			do {
+				if (next->x > area.to.x + 1) {
+					if (pf_area_visited.size() == 128) return;
+					next = pf_area_visited.insert(next, {area.to.x + 1, cur->y});
+				}
+				auto i = cur->y.begin();
+				for (;i != cur->y.end(); ++i) {
+					if (area.from.y <= i->first + 1) break;
+				}
+				if (i == cur->y.end()) {
+					if (cur->y.size() == 10) return;
+					cur->y.insert(i, {area.from.y, area.to.y});
+				} else {
+					if (area.to.y < i->first - 1 || area.from.y > i->second + 1)  {
+						if (cur->y.size() == 10) return;
+						cur->y.insert(i, {area.from.y, area.to.y});
+					} else {
+						if (i->first > area.from.y) i->first = area.from.y;
+						if (i->second < area.to.y) i->second = area.to.y;
+						if (cur->y.size() >= 2) {
+							for (auto t = cur->y.begin();;) {
+								auto n = t;
+								++n;
+								if (n == cur->y.end()) break;
+								if (n->first - 1 > t->second) {
+									if (t->second < n->second) t->second = n->second;
+									t = cur->y.erase(n);
+								} else t = n;
+							}
+						}
+					}
+				}
+				++cur;
+				++next;
+			} while (cur->x <= area.to.x);
+		};
+
+		bool has_found_goal = false;
+		bool is_tired = false;
+		int n_open_nodes_in_neighbor_region = 0;
+		int n_open_nodes_in_target_region = 0;
+
+		node_t* goal_node = nullptr;
+		while (!open.empty()) {
+			node_t* cur = open.front();
+			std::pop_heap(open.begin(), open.end());
+			open.pop_back();
+			if (cur->is_goal) {
+				goal_node = cur;
+				break;
+			}
+
+			if (cur->directional_flags != 0) {
+				cur->directional_flags = pf_remove_visited_flags(cur->pos, cur->directional_flags);
+			}
+
+			bool is_exhausted;
+			if (n_open_nodes_in_target_region <= 0 || has_found_goal || (target_is_destination && all_nodes.size() < 150)) {
+				is_exhausted = is_tired;
+			} else {
+				is_exhausted = true;
+				is_tired = true;
+			}
+			if (n_open_nodes_in_neighbor_region && !has_found_goal) {
+				if (all_nodes.size() >= 200) {
+					is_exhausted = true;
+					is_tired = true;
+				}
+			}
+			if (cur->is_target_region && is_exhausted) {
+				goal_node = cur;
+				break;
+			}
+			cur->visited = true;
+			if (cur->is_target_region) --n_open_nodes_in_target_region;
+			if (cur->is_neighbor_region) {
+				--n_open_nodes_in_neighbor_region;
+				if (is_exhausted) break;
+			}
+			if (has_found_goal || is_exhausted || cur->directional_flags == 0) {
+				continue;
+			}
+			pf_generate_neighbors(cur->pos, cur->directional_flags);
+
+			log("there are %d neighbors\n", w.neighbors.size());
+			bool found_goal = false;
+			for (auto& v : w.neighbors) {
+				if (v.is_goal) {
+					found_goal = true;
+				} else {
+					if (v.flags) {
+						v.flags = pf_remove_visited_flags(v.pos, v.flags);
+						if (!v.flags) continue;
+					}
+				}
+				auto* n_region = st.regions.get_region_at(v.pos);
+				fp8 cost = xy_length(to_xy_fp8(v.pos) - to_xy_fp8(cur->pos));
+				if (target_region_walkable && n_region != target_region) {
+					cost *= 2;
+				}
+				fp8 total_cost = cur->total_cost + cost;
+				node_t* n = nullptr;
+				for (auto i = ++all_nodes.begin(); i != all_nodes.end(); ++i) {
+					if (i->pos == v.pos) {
+						n = &*i;
+						break;
+					}
+				}
+				if (!n) {
+					all_nodes.emplace_back();
+					n = &all_nodes.back();
+					n->prev = cur;
+					n->pos = v.pos;
+					n->region = n_region;
+					n->depth = cur->depth + 1;
+					n->directional_flags = v.flags;
+					n->total_cost = total_cost;
+					n->estimated_remaining_cost = xy_length(to_xy_fp8(target) - to_xy_fp8(n->pos));
+					n->estimated_final_cost = n->total_cost + n->estimated_remaining_cost;
+					n->visited = n->directional_flags == 0 && !n->is_goal;
+					n->is_target_region = n->region == target_region;
+					n->is_neighbor_region = n->region->pathfinder_flag != 0;
+					n->is_goal = v.is_goal;
+					if (!n->visited) {
+						open.push_back(n);
+						std::push_heap(open.begin(), open.end(), cmp_node());
+						if (n->is_target_region) ++n_open_nodes_in_target_region;
+						if (n->is_neighbor_region) ++n_open_nodes_in_neighbor_region;
+					}
+					if (open.size() == 150) break;
+					if (all_nodes.size() == 250) break;
+				} else if (cur->prev != n) {
+					if (total_cost < n->total_cost) {
+						n->prev = cur;
+						n->depth = cur->depth + 1;
+						n->total_cost = total_cost;
+						fp8 estimated_final_cost = n->total_cost + n->estimated_remaining_cost;
+						if (n->visited) {
+							n->directional_flags = v.flags;
+							n->estimated_final_cost = estimated_final_cost;
+							n->visited = false;
+							n->is_goal = v.is_goal;
+							open.push_back(n);
+							std::push_heap(open.begin(), open.end(), cmp_node());
+							if (n->is_target_region) ++n_open_nodes_in_target_region;
+							if (n->is_neighbor_region) ++n_open_nodes_in_neighbor_region;
+						} else {
+							if (n->estimated_final_cost != estimated_final_cost) {
+								n->estimated_final_cost = estimated_final_cost;
+								// fixme: C++ heaps provide no way to adjust the priority of a random element.
+								//        To get better performance here we could write our own heap code.
+								std::make_heap(open.begin(), open.end());
+							}
+						}
+						if (open.size() == 150) break;
+					} else if (!n->visited) n->directional_flags &= v.flags;
+				}
+			}
+
+			if (open.size() > pf.highest_open_size) {
+				pf.highest_open_size = open.size();
+			}
+
+			has_found_goal = true;
+			if (open.size() == 150 || all_nodes.size() == 250) {
+				if (!found_goal && !n_open_nodes_in_target_region) break;
+			}
+		}
+		log("goal_node is %p\n", goal_node);
+
+		pf.field_1d = 1;
+
+		int n_unvisited_nodes = 0;
+		int n_unvisited_destination_region_nodes = 0;
+
+		for (auto i = ++all_nodes.begin(); i != all_nodes.end(); ++i) {
+			if (i->region->pathfinder_flag) ++i->region->pathfinder_flag;
+			if (!i->visited) {
+				if (i->directional_flags) i->directional_flags = pf_remove_visited_flags(i->pos, i->directional_flags);
+				if (i->directional_flags) {
+					++n_unvisited_nodes;
+					if (i->region == destination_region) ++n_unvisited_destination_region_nodes;
+				} else {
+					i->visited = true;
+					if (i->is_target_region) --n_open_nodes_in_target_region;
+				}
+			}
+		}
+
+		if (target_is_destination) {
+			n_unvisited_nodes = n_unvisited_destination_region_nodes;
+			for (auto* nr : move_to_region->walkable_neighbors) {
+				if (nr == source_region) continue;
+				if (nr->pathfinder_flag < 2) {
+					++n_unvisited_nodes;
+					break;
+				} else {
+					n_unvisited_nodes -= nr->pathfinder_flag / 2;
+					if (n_unvisited_nodes < 0) n_unvisited_nodes = 0;
+				}
+			}
+		}
+		log("n_unvisited_nodes is %d\n", n_unvisited_nodes);
+		log("n_open_nodes_in_target_region is %d\n", n_open_nodes_in_target_region);
+		goal_node = start_node;
+		start_node->estimated_remaining_cost = xy_length(to_xy_fp8(target - start_node->pos));
+		if (n_unvisited_nodes == 0 || n_open_nodes_in_target_region == 0) {
+			fp8 best_cost = fp8::integer(128 * 128);
+			if (n_open_nodes_in_target_region == 0) best_cost = start_node->estimated_remaining_cost;
+			node_t* best_node = start_node;
+			for (auto i = ++all_nodes.begin(); i != all_nodes.end(); ++i) {
+				if (i->estimated_remaining_cost < best_cost) {
+					if (target_is_destination || i->region == source_region || (n_open_nodes_in_target_region && i->region == destination_region)) {
+						best_cost = i->estimated_remaining_cost;
+						best_node = &*i;
+					}
+				}
+			}
+			goal_node = best_node;
+			pf.field_1e = 1;
+			pf.field_1f = 1;
+		} else {
+			fp8 best_cost = fp8::integer(128 * 128);
+			node_t* best_node = start_node;
+			for (auto i = ++all_nodes.begin(); i != all_nodes.end(); ++i) {
+				fp8 cost = i->estimated_remaining_cost;
+				if (i->region == destination_region || i->region == target_region) {
+					cost += i->total_cost / 2;
+				} else {
+					if (i->region->pathfinder_flag) {
+						cost = cost * 3 / 2;
+					} else {
+						if (i->region == source_region) cost *= 2;
+						else cost *= 4;
+					}
+				}
+				if (i->visited) cost *= 32;
+				if (cost < best_cost) {
+					best_cost = cost;
+					best_node = &*i;
+				}
+			}
+			goal_node = best_node;
+		}
+
+		pf.all_nodes_size = all_nodes.size();
+
+		if (goal_node) {
+			pf.short_path.clear();
+			pf.current_short_path_index = 0;
+			for (auto* n = goal_node; n != start_node && pf.short_path.size() < 128; n = n->prev) {
+				pf.short_path.push_front(n->pos);
+			}
+			if (pf.short_path.size() > 50) {
+				pf.short_path[49] = pf.short_path.back();
+				pf.short_path.resize(50);
+			}
+		}
+		for (auto* nr : move_to_region->walkable_neighbors) {
+			if (nr == source_region) continue;
+			nr->pathfinder_flag = 0;
+		}
+	}
+
+	bool pathfinder_adjust_target_pos(const pathfinder& pf, xy& target) {
+		static const std::array<xy, 4> direction_xy = {xy{1, 0}, xy{0, 1}, xy{-1, 0}, xy{0, -1}};
+		auto unit_bb = pf.unit_bb;
+		for (size_t n = 1; n < 10; n += 2) {
+			for (size_t dir = 0; dir != 4; ++dir) {
+				for (size_t n3 = 0; n3 < n; ++n3) {
+					auto bb = translate_rect(unit_bb, target);
+					if (!is_in_map_bounds(bb)) continue;
+					bool entirely_walkable = true;
+					for (size_t y = (size_t)bb.from.y; entirely_walkable && y < (size_t)bb.to.y; y += 32) {
+						for (size_t x = (size_t)bb.from.x; x < (size_t)bb.to.x; x += 32) {
+							size_t index = st.regions.tile_region_index.at(y / 32 * 256 + x / 32);
+							if (index < 0x2000) {
+								auto* region = &st.regions.regions[index];
+								if (!region->walkable()) {
+									entirely_walkable = false;
+									break;
+								}
+							}
+						}
+					}
+					if (entirely_walkable) return true;
+					target += direction_xy[dir] * 8;
+				}
+				target -= direction_xy[dir] * 8;
+			}
+			target -= xy(8, 8);
+		}
+		return false;
+	}
+
+	bool pathfinder_find_next_short_path(pathfinder& pf) {
+		++pf.current_long_path_index;
+		if (pf.current_long_path_index >= pf.long_path.size()) return false;
+		regions_t::region* source_region = pf.long_path[pf.current_long_path_index];
+		while (source_region != pf.source_region) {
+			if (pf.current_long_path_index >= pf.long_path.size()) return false;
+			++pf.current_long_path_index;
+			source_region = pf.long_path[pf.current_long_path_index];
+		}
+		xy target = pf.destination;
+		bool adjust_target = true;
+		if (pf.long_path.size() - pf.current_long_path_index > 3) {
+			target = to_xy(pf.long_path[pf.current_long_path_index + 2]->center);
+			adjust_target = false;
+		}
+		regions_t::region* target_region = nullptr;
+		if (pf.current_long_path_index != pf.long_path.size() - 1) {
+			target_region = pf.long_path[pf.current_long_path_index + 1];
+		} else {
+			if (source_region != pf.destination_region) {
+				xcept("pathfinder_find_short_path fixme GetClosestReachable");
+				adjust_target = true;
+				target_region = nullptr;
+			}
+		}
+		if (adjust_target) {
+			pf.target_unit = pf.u->move_target.unit;
+			if (!pf.target_unit) {
+				auto unit_bb = unit_bounding_box(pf.u, pf.destination);
+				for (unit_t* u : find_units({pf.destination, pf.destination})) {
+					if (is_intersecting(unit_bb, unit_sprite_bounding_box(u))) {
+						xcept("pathfinder_find_short_path fixme units_can_collide");
+//						if (units_can_collide(pf.u, u)) {
+//							pf.target_unit = u;
+//							break;
+//						}
+					}
+				}
+			}
+			if (pf.target_unit) {
+				int tid = pf.target_unit->unit_type->id;
+				if (tid >= UnitTypes::Special_Zerg_Beacon && tid <= UnitTypes::Special_Protoss_Flag_Beacon) {
+					pf.target_unit = nullptr;
+				}
+			}
+			if (pf.target_unit) {
+				xcept("pathfinder_find_short_path fixme target_unit");
+			} else {
+				pf.target_unit_bb = {{-32000, -32000}, {-32000, -32000}};
+				xy adjusted_target = target;
+				if (pathfinder_adjust_target_pos(pf, adjusted_target)) {
+					target = adjusted_target;
+					pf.destination = target;
+				}
+			}
+
+		}
+		log("source_region %p target_region %p\n", source_region, target_region);
+		log("pathfinder_find_short_path source_region %d target %d %d target_region %d\n", source_region->index, target.x, target.y, target_region ? target_region->index : -1);
+		pathfinder_find_short_path(pf, target, target_region);
+		if (pf.short_path.empty()) {
+			xy last_path_pos = pf.short_path.back();
+			if (pf.field_1e) {
+				if (adjust_target || last_path_pos != target) pf.destination = last_path_pos;
+				else pf.field_1e = 0;
+			} else {
+				if (!target_region) {
+					pf.destination = last_path_pos;
+					pf.field_1f = 1;
+					pf.field_1e = 1;
+				}
+			}
+			return true;
+		} else return false;
+	}
+
+	bool pathfinder_find(pathfinder& pf) {
+		pf.source_region = st.regions.get_region_at(pf.source);
+		pf.destination_region = st.regions.get_region_at(pf.destination);
+		pf.unit_bb = unit_type_bounding_box(pf.u->unit_type);
+		pf.highest_open_size = 0;
+		pf.all_nodes_size = 0;
+		pf.field_1c = 0;
+		pf.field_1d = 0;
+		pf.field_1e = 0;
+		pf.field_1f = 0;
+		pf.field_164 = 0;
+		pf.field_168 = 0;
+		if (pf.source_region == pf.destination_region) {
+			pf.long_path = { pf.source_region };
+			pf.full_long_path_size = 1;
+			pf.current_long_path_index = (size_t)0 - 1;
+			return pathfinder_find_next_short_path(pf);
+		} else {
+			pathfinder_find_long_path(pf);
+			xcept("pathfinder_find fixme");
+			return false;
+		}
+	}
+
+	bool path_progress(unit_t* u, xy to) {
+		u_unset_movement_flag(u, 0x40);
+		u_set_movement_flag(u, 0x10);
+		pathfinder pf;
+		if (u->path) {
+			xcept("path_progress: fixme");
+		} else {
+			pf.u = u;
+			pf.source = u->sprite->position;
+			pf.destination = to;
+			pathfinder_find(pf);
+		}
+		auto update_move_target = [&]() {
+			xy move_target = to;
+			auto* move_target_unit = u->move_target.unit;
+			if (move_target_unit && u_movement_flag(move_target_unit, 2)) {
+				fp8 halt_distance = unit_halt_distance(move_target_unit);
+				xy pos = to_xy(direction_xy(move_target_unit->next_velocity_direction, halt_distance * 3));
+				if (is_in_map_bounds(pos)) move_target = pos;
+			}
+			set_flingy_move_target(u, move_target);
+			u->move_target.unit = move_target_unit;
+		};
+		path_t* path = nullptr;
+		if (!path) {
+			if (pf.field_1e) {
+				if (to != pf.destination) {
+					to = pf.destination;
+					update_move_target();
+					if (!pf.field_1f) u_set_status_flag(u, unit_t::status_flag_immovable, !u_status_flag(u, unit_t::status_flag_immovable));
+				}
+			}
+
+			if ((pf.long_path.size() + pf.short_path.size() * 2 + 2 - 1) / 2 * 2 > 48) {
+				if (pf.short_path.size() >= 24) {
+					pf.short_path.resize(23);
+					pf.long_path.resize(1);
+				} else {
+					pf.long_path.resize((24 - pf.short_path.size()) * 2);
+				}
+			}
+			if (st.paths.size() < 1024) {
+				auto i = st.paths.emplace(st.paths.end());
+				path = &*i;
+				path->iterator = i;
+
+				path->delay = 0;
+				path->creation_frame = st.current_frame;
+				path->state_flags = 0;
+				path->long_path = pf.long_path;
+				path->current_long_path_index = pf.current_long_path_index;
+				path->short_path = pf.short_path;
+				path->current_short_path_index = 0;
+
+				path->source = u->sprite->position;
+				path->destination = to;
+
+				u->path = path;
+			} else return false;
+		}
+		path->next = path->short_path.at(path->current_short_path_index);
+		if (path->next == u->move_target.pos) u_unset_movement_flag(u, 0x10);
+		else if (xy_length(path->destination - path->next) < 16) u_set_movement_flag(u, 0x40);
+		return true;
+	}
+
+	bool unit_path_to(unit_t* u, xy to) {
+		if (maybe_is_going_to(u, to)) return true;
+		if (!u_ground_unit(u)) {
+			set_unit_move_target(u, to);
+			create_single_segment_path(u, to);
+			return true;
+		}
+		if (path_progress(u, to)) to = u->path->next;
+		if (!u->path) return false;
+		if (u->next_target_waypoint != to) u->next_target_waypoint = to;
+		if (u->next_movement_waypoint != to) {
+			u->next_movement_waypoint = to;
+			u_set_movement_flag(u, 1);
+		}
 		return true;
 	}
 
@@ -2791,7 +3568,7 @@ struct state_functions {
 		}
 		u->movement_state = next_state;
 		return true;
-	};
+	}
 
 	bool movement_UM_AtRest(unit_t* u, execute_movement_struct& ems) {
 		if (!unit_is_at_move_target(u)) {
@@ -2941,6 +3718,17 @@ struct state_functions {
 		return false;
 	}
 
+	bool movement_UM_AnotherPath(unit_t* u, execute_movement_struct& ems) {
+		if (unit_path_to(u, u->move_target.pos)) {
+			u->movement_state = movement_states::UM_FollowPath;
+		} else u->movement_state = movement_states::UM_FailedPath;
+		return true;
+	}
+
+	bool movement_UM_FollowPath(unit_t* u, execute_movement_struct& ems) {
+		xcept("UM_FollowPath");
+	}
+
 	bool execute_movement(unit_t* u) {
 
 		execute_movement_struct ems;
@@ -2952,20 +3740,32 @@ struct state_functions {
 			case movement_states::UM_Init:
 				cont = movement_UM_Init(u, ems);
 				break;
+
+			case movement_states::UM_Turret:
+				cont = movement_UM_Turret(u, ems);
+				break;
+
+			case movement_states::UM_Flyer:
+				cont = movement_UM_Flyer(u, ems);
+				break;
+
 			case movement_states::UM_AtRest:
 				cont = movement_UM_AtRest(u, ems);
-				break;
-			case movement_states::UM_CheckIllegal:
-				cont = movement_UM_CheckIllegal(u, ems);
 				break;
 			case movement_states::UM_Dormant:
 				cont = movement_UM_Dormant(u, ems);
 				break;
-			case movement_states::UM_Turret:
-				cont = movement_UM_Turret(u, ems);
+
+			case movement_states::UM_CheckIllegal:
+				cont = movement_UM_CheckIllegal(u, ems);
 				break;
-			case movement_states::UM_Flyer:
-				cont = movement_UM_Flyer(u, ems);
+
+			case movement_states::UM_FollowPath:
+				cont = movement_UM_FollowPath(u, ems);
+				break;
+
+			case movement_states::UM_AnotherPath:
+				cont = movement_UM_AnotherPath(u, ems);
 				break;
 			default:
 				xcept("fixme: movement state %d\n", u->movement_state);
@@ -3361,7 +4161,7 @@ struct state_functions {
 	bool unit_can_detect(const unit_t* u) const {
 		if (!ut_detector(u)) return false;
 		if (!u_completed(u)) return false;
-		if (is_frozen(u)) return false;
+		if (is_disabled(u)) return false;
 		if (u->is_blind) return false;
 		return true;
 	}
@@ -3515,13 +4315,14 @@ struct state_functions {
 		// some_units_loaded_and_disruption_web end
 
 
-		for (unit_t* u : ptr(st.sight_related_units)) {
-			xcept("fixme first_sight_related_unit stuff in update_units");
+		for (unit_t* u : ptr(st.destroyed_units)) {
+			xcept("fixme destroyed_units stuff");
 		}
 
 		for (unit_t* u : ptr(st.visible_units)) {
 			iscript_order_unit = u;
 			iscript_unit = u;
+			log("move unit %d --\n", u - &st.units.front());
 			update_unit_movement(u);
 		}
 
@@ -3680,6 +4481,13 @@ struct state_functions {
 			image->flags |= image_t::flag_redraw;
 		}
 	}
+
+	void set_image_frame_index_offset(image_t* image, size_t frame_index_offset, bool flipped) {
+		image->frame_index_offset = frame_index_offset;
+		i_set_flag(image, image_t::flag_horizontally_flipped, flipped);
+		set_image_modifier(image, image->modifier);
+		update_image_frame_index(image);
+	}
 	
 	void set_image_heading(image_t* image, direction_t heading) {
 		if (image->flags & image_t::flag_uses_special_offset) update_image_special_offset(image);
@@ -3690,34 +4498,27 @@ struct state_functions {
 				frame_index_offset = 32 - frame_index_offset;
 				flipped = true;
 			}
-			if (image->frame_index_offset != frame_index_offset || ((image->flags & image_t::flag_horizontally_flipped) != 0) != flipped) {
-				image->frame_index_offset = frame_index_offset;
-				if (flipped) image->flags |= image_t::flag_horizontally_flipped;
-				else image->flags &= ~image_t::flag_horizontally_flipped;
-				set_image_modifier(image, image->modifier);
-				update_image_frame_index(image);
+			if (image->frame_index_offset != frame_index_offset || i_flag(image, image_t::flag_horizontally_flipped) != flipped) {
+				set_image_frame_index_offset(image, frame_index_offset, flipped);
 			}
 		}
 	}
 
-	void set_image_frame_index_offset(image_t* image, size_t frame_index_offset) {
+	void set_image_heading_by_index(image_t* image, size_t frame_index_offset) {
 		if (image->flags & image_t::flag_has_directional_frames) {
 			bool flipped = false;
 			if (frame_index_offset > 16) {
 				frame_index_offset = 32 - frame_index_offset;
 				flipped = true;
 			}
-			if (image->frame_index_offset != frame_index_offset || ((image->flags & image_t::flag_horizontally_flipped) != 0) != flipped) {
-				image->frame_index_offset = frame_index_offset;
-				if (flipped) image->flags |= image_t::flag_horizontally_flipped;
-				else image->flags &= ~image_t::flag_horizontally_flipped;
-				set_image_modifier(image, image->modifier);
-				update_image_frame_index(image);
+			if (image->frame_index_offset != frame_index_offset || i_flag(image, image_t::flag_horizontally_flipped) != flipped) {
+				set_image_frame_index_offset(image, frame_index_offset, flipped);
 				if (image->flags & image_t::flag_uses_special_offset) update_image_special_offset(image);
 			}
 		}
 	}
 
+	// this function doesn't even belong here, does it?
 	void update_image_position(image_t* image) {
 
 		xy map_pos = image->sprite->position + image->offset;
@@ -3755,7 +4556,7 @@ struct state_functions {
 		auto& frame_offsets = *lo_offsets[lo_index];
 		if ((size_t)frame >= frame_offsets.size()) xcept("image %d lo_index %d does not have offsets for frame %d (frame_offsets.size() is %d)", image->image_type->id, lo_index, frame, frame_offsets.size());
 		if ((size_t)offset_index >= frame_offsets[frame].size()) xcept("image %d lo_index %d frame %d does not contain an offset at index %d", image->image_type->id, lo_index, frame, offset_index);
-		auto r = frame_offsets[frame][offset_index];
+		xy r = frame_offsets[frame][offset_index];
 		if (image->flags & image_t::flag_horizontally_flipped) r.x = -r.x;
 		return r;
 	}
@@ -3809,8 +4610,6 @@ struct state_functions {
 			return fp8::from_raw(u->flingy_type->halt_distance);
 		} else {
 			return (ufp8::multiply_divide(speed, speed, u->flingy_acceleration.as_unsigned()) / 2u).as_signed();
-			//if (speed.raw_value < 65536) return fp8::from_raw(speed.raw_value * speed.raw_value / 2 / u->flingy_acceleration.raw_value);
-			//return fp8::truncate((ufp24_16::extend(speed) * speed / 2u / u->flingy_acceleration.as_unsigned()).as_signed());
 		}
 	}
 
@@ -3851,7 +4650,7 @@ struct state_functions {
 			}
 			if (image->flags & image_t::flag_has_directional_frames) {
 				int dir = script_image->flags & image_t::flag_horizontally_flipped ? 32 - script_image->frame_index_offset : script_image->frame_index_offset;
-				set_image_frame_index_offset(image, dir);
+				set_image_heading_by_index(image, dir);
 			}
 			update_image_frame_index(image);
 			if (iscript_unit && (u_grounded_building(iscript_unit) || u_completed(iscript_unit))) {
@@ -3967,6 +4766,12 @@ struct state_functions {
 				xcept("opc_spruluselo");
 				break;
 
+			case opc_end:
+				if (no_side_effects) break;
+				state.program_counter = 0;
+				destroy_image(image);
+				return false;
+
 			case opc_playsnd:
 				a = *p++;
 				if (no_side_effects) break;
@@ -4028,6 +4833,19 @@ struct state_functions {
 				}
 				if (no_side_effects) break;
 				xcept("opc_move");
+				break;
+
+			case opc_engframe:
+				a = *p++;
+				if (no_side_effects) break;
+				image->frame_index_base = a;
+				set_image_frame_index_offset(image, image->sprite->main_image->frame_index_offset, i_flag(image->sprite->main_image, image_t::flag_horizontally_flipped));
+				break;
+			case opc_engset:
+				a = *p++;
+				if (no_side_effects) break;
+				image->frame_index_base = image->sprite->main_image->frame_index_base + (image->sprite->main_image->grp->frames.size() & 0x7fff) * a;
+				set_image_frame_index_offset(image, image->sprite->main_image->frame_index_offset, i_flag(image->sprite->main_image, image_t::flag_horizontally_flipped));
 				break;
 
 			case opc_nobrkcodestart:
@@ -4192,7 +5010,9 @@ struct state_functions {
 	};
 
 	void destroy_image(image_t* image) {
-		xcept("destroy_image");
+		image->grp = nullptr;
+		image->sprite->images.remove(*image);
+		bw_insert_list(st.free_images, *image);
 	}
 
 	enum {
@@ -4444,7 +5264,7 @@ struct state_functions {
 	// 
 	// Now, as far as I can tell, the search area is supposed to be inclusive, so if you search from [32,32] to [64,64]
 	// and some unit's bounding box is from [0,0] to [32,32] then that unit should be returned (unit bounding boxes
-	// seem to be inclusive in all directions).
+	// seem to be inclusive in all directions (edit: maybe not)).
 	// This seems to make sense since searches are initiated for instance by the unit bounding box to find collisions.
 	// The right index and bottom index is found by lower bound lookup, which would give an exclusive search,
 	// but the additional bounds check for small searches is inclusive.
@@ -4630,8 +5450,8 @@ struct state_functions {
 		st.unit_finder_list.remove(vec.back());
 		vec.pop_back();
 
-		log("post remove\n");
-		unit_finder_dump();
+		//log("post remove\n");
+		//unit_finder_dump();
 	}
 
 	void unit_finder_insert(size_t index, unit_t* u, int value) {
@@ -4675,8 +5495,8 @@ struct state_functions {
 			}
 		}
 
-		log("post insert\n");
-		unit_finder_dump();
+		//log("post insert\n");
+		//unit_finder_dump();
 	}
 
 	size_t unit_finder_group_index(int x) const {
@@ -4989,7 +5809,7 @@ struct state_functions {
 
 				u->build_queue.fill(nullptr);
 				u->unit_id_generation = (u->unit_id_generation + 1) % (1 << 5);
-				if (!is_frozen(u) || u_completed(u)) {
+				if (!is_disabled(u) || u_completed(u)) {
 					if (unit_is_factory(u)) u->current_button_set = UnitTypes::Factories;
 					else u->current_button_set = UnitTypes::Buildings;
 				}
@@ -5309,7 +6129,7 @@ struct state_functions {
 		remove_queued_order(u, &u->order_queue.front());
 
 		u->user_action_flags &= ~1;
-		u->status_flags &= ~(unit_t::status_flag_disabled | unit_t::status_flag_order_not_interruptible | unit_t::status_flag_holding_position);
+		u->status_flags &= ~(unit_t::status_flag_8 | unit_t::status_flag_order_not_interruptible | unit_t::status_flag_holding_position);
 		if (!order_type->can_be_interrupted) u->status_flags |= unit_t::status_flag_order_not_interruptible;
 		u->order_queue_timer = 0;
 		u->recent_order_timer = 0;
@@ -5372,20 +6192,20 @@ struct state_functions {
 		activate_next_order(u);
 	}
 
-	bool unit_finder_units_intersecting(unit_t* a, unit_t* b) const {
-		if (a->unit_finder_bounding_box.to.x < b->unit_finder_bounding_box.from.x) return false;
-		if (a->unit_finder_bounding_box.to.y < b->unit_finder_bounding_box.from.y) return false;
-		if (a->unit_finder_bounding_box.from.x > b->unit_finder_bounding_box.to.x) return false;
-		if (a->unit_finder_bounding_box.from.y > b->unit_finder_bounding_box.to.y) return false;
+	bool is_intersecting(rect a, rect b) const {
+		if (b.from.x > a.to.x) return false;
+		if (b.from.y > a.to.y) return false;
+		if (a.from.x > b.to.x) return false;
+		if (a.from.y > b.to.y) return false;
 		return true;
 	}
 
+	bool unit_finder_units_intersecting(unit_t* a, unit_t* b) const {
+		return is_intersecting(a->unit_finder_bounding_box, b->unit_finder_bounding_box);
+	}
+
 	bool unit_finder_unit_in_bounds(unit_t* u, rect bounds) const {
-		if (u->unit_finder_bounding_box.to.x < bounds.from.x) return false;
-		if (u->unit_finder_bounding_box.to.y < bounds.from.y) return false;
-		if (u->unit_finder_bounding_box.from.x > bounds.to.x) return false;
-		if (u->unit_finder_bounding_box.from.y > bounds.to.y) return false;
-		return true;
+		return is_intersecting(u->unit_finder_bounding_box, bounds);
 	}
 
 	void check_unit_collision(unit_t* u) {
@@ -5696,10 +6516,10 @@ struct game_load_functions : state_functions {
 			fixup_upgrade_type(v.damage_upgrade);
 		}
 
-		for (auto&v : game_st.unit_type_allowed) v.fill(true);
-		for (auto&v : game_st.tech_available) v.fill(true);
+		for (auto& v : game_st.unit_type_allowed) v.fill(true);
+		for (auto& v : game_st.tech_available) v.fill(true);
 		st.tech_researched.fill({});
-		for (auto&v : game_st.max_upgrade_levels) {
+		for (auto& v : game_st.max_upgrade_levels) {
 			for (size_t i = 0; i < game_st.max_upgrade_levels.size(); ++i) {
 				v[i] = get_upgrade_type(i)->max_level;
 			}
@@ -5708,8 +6528,8 @@ struct game_load_functions : state_functions {
 		// upgrade progress?
 		// UPRP stuff?
 
-		for (auto&v : st.unit_counts) v.fill(0);
-		for (auto&v : st.completed_unit_counts) v.fill(0);
+		for (auto& v : st.unit_counts) v.fill(0);
+		for (auto& v : st.completed_unit_counts) v.fill(0);
 
 		st.factory_counts.fill(0);
 		st.building_counts.fill(0);
@@ -5725,8 +6545,8 @@ struct game_load_functions : state_functions {
 		st.unit_score.fill(0);
 		st.building_score.fill(0);
 
-		for (auto&v : st.supply_used) v.fill(0);
-		for (auto&v : st.supply_available) v.fill(0);
+		for (auto& v : st.supply_used) v.fill(0);
+		for (auto& v : st.supply_available) v.fill(0);
 
 		auto set_acquisition_ranges = [&]() {
 			for (int i = 0; i < 228; ++i) {
@@ -5750,7 +6570,7 @@ struct game_load_functions : state_functions {
 
 		st.tiles.clear();
 		st.tiles.resize(game_st.map_tile_width*game_st.map_tile_height);
-		for (auto&v : st.tiles) {
+		for (auto& v : st.tiles) {
 			v.visible = 0xff;
 			v.explored = 0xff;
 		}
@@ -5764,12 +6584,13 @@ struct game_load_functions : state_functions {
 
 		st.order_timer_counter = 10;
 		st.secondary_order_timer_counter = 150;
+		st.current_frame = 0;
 
 		st.visible_units.clear();
 		st.hidden_units.clear();
 		st.scanner_sweep_units.clear();
-		st.sight_related_units.clear();
-		for (auto&v : st.player_units) v.clear();
+		st.destroyed_units.clear();
+		for (auto& v : st.player_units) v.clear();
 
 		auto clear_and_make_free = [&](auto& list, auto& free_list) {
 			free_list.clear();
@@ -5909,8 +6730,8 @@ struct game_load_functions : state_functions {
 		};
 
 		auto create_region = [&](rect_t<xy_t<size_t>> area) {
-			auto* r = st.paths.get_new_region();
-			uint16_t flags = (uint16_t)st.paths.tile_region_index[area.from.y * 256 + area.from.x];
+			auto* r = st.regions.get_new_region();
+			uint16_t flags = (uint16_t)st.regions.tile_region_index[area.from.y * 256 + area.from.x];
 			if (flags < 5000) xcept("attempt to create region inside another region");
 			r->flags = flags;
 			r->tile_area = area;
@@ -5920,8 +6741,8 @@ struct game_load_functions : state_functions {
 			size_t index = r->index;
 			for (size_t y = area.from.y; y != area.to.y; ++y) {
 				for (size_t x = area.from.x; x != area.to.x; ++x) {
-					if (st.paths.tile_region_index[y * 256 + x] < 5000) xcept("attempt to create overlapping region");
-					st.paths.tile_region_index[y * 256 + x] = (uint16_t)index;
+					if (st.regions.tile_region_index[y * 256 + x] < 5000) xcept("attempt to create overlapping region");
+					st.regions.tile_region_index[y * 256 + x] = (uint16_t)index;
 					++tile_count;
 				}
 			}
@@ -5947,7 +6768,7 @@ struct game_load_functions : state_functions {
 			size_t region_x = 0;
 			size_t region_y = 0;
 
-			auto bb = st.paths.tile_bounding_box;
+			auto bb = st.regions.tile_bounding_box;
 
 			auto find_empty_region = [&](size_t x, size_t y) {
 				if (x >= bb.to.x) {
@@ -5957,7 +6778,7 @@ struct game_load_functions : state_functions {
 				int start_x = x;
 				int start_y = y;
 				while (true) {
-					size_t index = st.paths.tile_region_index[y * 256 + x];
+					size_t index = st.regions.tile_region_index[y * 256 + x];
 					if (index >= 5000) {
 						//log("found region at %d %d index %x\n", x, y, index);
 						region_tile_index = index;
@@ -5979,7 +6800,7 @@ struct game_load_functions : state_functions {
 			size_t next_y = bb.from.y;
 
 			bool has_expanded_all = false;
-			size_t initial_regions_size = st.paths.regions.size();
+			size_t initial_regions_size = st.regions.regions.size();
 
 			int prev_size = 7 * 8;
 
@@ -6005,7 +6826,7 @@ struct game_load_functions : state_functions {
 						while ((x_is_good || y_is_good) && (end_x != max_end_x && end_y != max_end_y)) {
 							if (x_is_good) {
 								for (size_t y = begin_y; y != end_y; ++y) {
-									if (st.paths.tile_region_index[y * 256 + end_x] != index) {
+									if (st.regions.tile_region_index[y * 256 + end_x] != index) {
 										x_is_good = false;
 										break;
 									}
@@ -6013,14 +6834,14 @@ struct game_load_functions : state_functions {
 							}
 							if (y_is_good) {
 								for (size_t x = begin_x; x != end_x; ++x) {
-									if (st.paths.tile_region_index[end_y * 256 + x] != index) {
+									if (st.regions.tile_region_index[end_y * 256 + x] != index) {
 										y_is_good = false;
 										break;
 									}
 								}
 							}
 
-							if (st.paths.tile_region_index[end_y * 256 + end_x] != index) {
+							if (st.regions.tile_region_index[end_y * 256 + end_x] != index) {
 								its_all_good = false;
 							}
 							if (its_all_good) {
@@ -6069,11 +6890,11 @@ struct game_load_functions : state_functions {
 					next_x = area.to.x;
 					next_y = area.from.y;
 
-					if (st.paths.regions.size() >= 5000) xcept("too many regions (nooks and crannies)");
+					if (st.regions.regions.size() >= 5000) xcept("too many regions (nooks and crannies)");
 
 					auto* r = create_region(area);
 
-					auto expand = [this](paths_t::region* r) {
+					auto expand = [this](regions_t ::region* r) {
 
 						size_t& begin_x = r->tile_area.from.x;
 						if (begin_x > 0) --begin_x;
@@ -6088,18 +6909,18 @@ struct game_load_functions : state_functions {
 						size_t index = r->index;
 
 						auto is_neighbor = [&](size_t x, size_t y) {
-							if (x != 0 && st.paths.tile_region_index[y * 256 + x - 1] == index) return true;
-							if (x != game_st.map_tile_width - 1 && st.paths.tile_region_index[y * 256 + x + 1] == index) return true;
-							if (y != 0 && st.paths.tile_region_index[(y - 1) * 256 + x] == index) return true;
-							if (y != game_st.map_tile_height - 1 && st.paths.tile_region_index[(y + 1) * 256 + x] == index) return true;
+							if (x != 0 && st.regions.tile_region_index[y * 256 + x - 1] == index) return true;
+							if (x != game_st.map_tile_width - 1 && st.regions.tile_region_index[y * 256 + x + 1] == index) return true;
+							if (y != 0 && st.regions.tile_region_index[(y - 1) * 256 + x] == index) return true;
+							if (y != game_st.map_tile_height - 1 && st.regions.tile_region_index[(y + 1) * 256 + x] == index) return true;
 							return false;
 						};
 
 						for (int i = 0; i < 2; ++i) {
 							for (size_t y = begin_y; y != end_y; ++y) {
 								for (size_t x = begin_x; x != end_x; ++x) {
-									if (st.paths.tile_region_index[y * 256 + x] == flags && is_neighbor(x, y)) {
-										st.paths.tile_region_index[y * 256 + x] = index;
+									if (st.regions.tile_region_index[y * 256 + x] == flags && is_neighbor(x, y)) {
+										st.regions.tile_region_index[y * 256 + x] = index;
 									}
 								}
 							}
@@ -6111,14 +6932,14 @@ struct game_load_functions : state_functions {
 
 					if (size <= 6 && !has_expanded_all) {
 						has_expanded_all = true;
-						for (size_t i = initial_regions_size; i != st.paths.regions.size(); ++i) {
-							expand(&st.paths.regions[i]);
+						for (size_t i = initial_regions_size; i != st.regions.regions.size(); ++i) {
+							expand(&st.regions.regions[i]);
 						}
 					}
 
 				} else {
-					if (st.paths.regions.size() >= 5000) xcept("too many regions (nooks and crannies)");
-					log("created %d regions\n", st.paths.regions.size());
+					if (st.regions.regions.size() >= 5000) xcept("too many regions (nooks and crannies)");
+					log("created %d regions\n", st.regions.regions.size());
 					break;
 				}
 			}
@@ -6128,7 +6949,7 @@ struct game_load_functions : state_functions {
 				size_t n = 0;
 				auto test = [&](bool cond, size_t x, size_t y) {
 					if (!cond) r[n++] = 0x1fff;
-					else r[n++] = st.paths.tile_region_index[y * 256 + x];
+					else r[n++] = st.regions.tile_region_index[y * 256 + x];
 				};
 				test(tile_y > 0, tile_x, tile_y - 1);
 				test(tile_x > 0, tile_x - 1, tile_y);
@@ -6143,7 +6964,7 @@ struct game_load_functions : state_functions {
 
 			auto refresh_regions = [&]() {
 
-				for (auto* r : ptr(st.paths.regions)) {
+				for (auto* r : ptr(st.regions.regions)) {
 					int max = std::numeric_limits<int>::max();
 					int min = std::numeric_limits<int>::min();
 					r->area = { { max, max }, { min, min } };
@@ -6151,9 +6972,9 @@ struct game_load_functions : state_functions {
 				}
 				for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 					for (size_t x = 0; x != game_st.map_tile_width; ++x) {
-						size_t index = st.paths.tile_region_index[y * 256 + x];
+						size_t index = st.regions.tile_region_index[y * 256 + x];
 						if (index < 5000) {
-							auto* r = &st.paths.regions[index];
+							auto* r = &st.regions.regions[index];
 							++r->tile_count;
 							if (r->area.from.x >(int)x * 32) r->area.from.x = x * 32;
 							if (r->area.from.y > (int)y * 32) r->area.from.y = y * 32;
@@ -6163,11 +6984,11 @@ struct game_load_functions : state_functions {
 					}
 				}
 
-				for (auto* r : ptr(st.paths.regions)) {
+				for (auto* r : ptr(st.regions.regions)) {
 					if (r->tile_count == 0) r->flags = 0x1fff;
 				}
 
-				for (auto* r : ptr(st.paths.regions)) {
+				for (auto* r : ptr(st.regions.regions)) {
 					if (r->tile_count == 0) continue;
 
 					r->walkable_neighbors.clear();
@@ -6175,12 +6996,12 @@ struct game_load_functions : state_functions {
 
 					for (int y = r->area.from.y / 32; y != r->area.to.y / 32; ++y) {
 						for (int x = r->area.from.x / 32; x != r->area.to.x / 32; ++x) {
-							if (st.paths.tile_region_index[y * 256 + x] != r->index) continue;
+							if (st.regions.tile_region_index[y * 256 + x] != r->index) continue;
 							auto neighbors = get_neighbors(x, y);
 							for (size_t i = 0; i < 8; ++i) {
 								size_t nindex = neighbors[i];
 								if (nindex == 0x1fff || nindex == r->index) continue;
-								auto* nr = &st.paths.regions[nindex];
+								auto* nr = &st.regions.regions[nindex];
 								bool add = false;
 								if (i < 4 || !r->walkable() || !nr->walkable()) {
 									add = true;
@@ -6235,23 +7056,23 @@ struct game_load_functions : state_functions {
 
 					if (!r->non_walkable_neighbors.empty()) {
 						for (auto& v : r->non_walkable_neighbors) {
-							if (v == &st.paths.regions.front() && &v != &r->non_walkable_neighbors.back()) std::swap(v, r->non_walkable_neighbors.back());
+							if (v == &st.regions.regions.front() && &v != &r->non_walkable_neighbors.back()) std::swap(v, r->non_walkable_neighbors.back());
 						}
 					}
 
 				}
 
-				for (auto* r : ptr(st.paths.regions)) {
+				for (auto* r : ptr(st.regions.regions)) {
 					r->center.x = ((fp8::integer(r->area.from.x) + fp8::integer(r->area.to.x)) / 2);
 					r->center.y = ((fp8::integer(r->area.from.y) + fp8::integer(r->area.to.y)) / 2);
 				}
 
-				for (auto* r : ptr(st.paths.regions)) {
+				for (auto* r : ptr(st.regions.regions)) {
 					if (r->group_index < 0x4000) r->group_index = 0;
 				}
-				a_vector<paths_t::region*> stack;
+				a_vector<regions_t::region*> stack;
 				size_t next_group_index = 1;
-				for (auto* r : ptr(st.paths.regions)) {
+				for (auto* r : ptr(st.regions.regions)) {
 					if (r->group_index == 0 && r->tile_count) {
 						size_t group_index = next_group_index++;
 						r->group_index = group_index;
@@ -6275,9 +7096,9 @@ struct game_load_functions : state_functions {
 
 			for (size_t n = 6;; n += 2) {
 
-				for (auto* r : reverse(ptr(st.paths.regions))) {
+				for (auto* r : reverse(ptr(st.regions.regions))) {
 					if (r->tile_count == 0 || r->tile_count >= n || r->group_index >= 0x4000) continue;
-					paths_t::region* smallest_neighbor = nullptr;
+					regions_t::region* smallest_neighbor = nullptr;
 					auto eval = [&](auto* nr) {
 						if (nr->tile_count == 0 || nr->group_index >= 0x4000 || nr->flags != r->flags) return;
 						if (!smallest_neighbor || nr->tile_count < smallest_neighbor->tile_count) {
@@ -6290,7 +7111,7 @@ struct game_load_functions : state_functions {
 						auto* merge_into = smallest_neighbor;
 						for (size_t y = r->area.from.y / 32; y != r->area.to.y / 32; ++y) {
 							for (size_t x = r->area.from.x / 32; x != r->area.to.x / 32; ++x) {
-								size_t& index = st.paths.tile_region_index[y * 256 + x];
+								size_t& index = st.regions.tile_region_index[y * 256 + x];
 								if (index == r->index) index = merge_into->index;
 							}
 						}
@@ -6305,7 +7126,7 @@ struct game_load_functions : state_functions {
 				}
 
 				size_t n_non_empty_regions = 0;
-				for (auto* r : ptr(st.paths.regions)) {
+				for (auto* r : ptr(st.regions.regions)) {
 					if (r->tile_count) ++n_non_empty_regions;
 				}
 				log("n_non_empty_regions is %d\n", n_non_empty_regions);
@@ -6314,23 +7135,23 @@ struct game_load_functions : state_functions {
 
  			a_vector<size_t> reindex(5000);
  			size_t new_region_count = 0;
-			for (size_t i = 0; i != st.paths.regions.size(); ++i) {
-				auto* r = &st.paths.regions[i];
+			for (size_t i = 0; i != st.regions.regions.size(); ++i) {
+				auto* r = &st.regions.regions[i];
 				r->walkable_neighbors.clear();
 				r->non_walkable_neighbors.clear();
 				if (r->tile_count == 0) continue;
 				size_t new_index = new_region_count++;
 				reindex[i] = new_index;
 				r->index = new_index;
-				st.paths.regions[new_index] = std::move(*r);
+				st.regions.regions[new_index] = std::move(*r);
 			}
 			for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 				for (size_t x = 0; x != game_st.map_tile_height; ++x) {
-					size_t& index = st.paths.tile_region_index[y * 256 + x];
+					size_t& index = st.regions.tile_region_index[y * 256 + x];
 					index = reindex[index];
 				}
 			}
-			st.paths.regions.resize(new_region_count);
+			st.regions.regions.resize(new_region_count);
 
 			log("new_region_count is %d\n", new_region_count);
 
@@ -6341,7 +7162,7 @@ struct game_load_functions : state_functions {
 					auto tile = st.tiles[y * game_st.map_tile_width + x];
 					if (~tile.flags & tile_t::flag_partially_walkable) continue;
 					auto neighbors = get_neighbors(x, y);
-					auto* r = &st.paths.regions[st.paths.tile_region_index[y * 256 + x]];
+					auto* r = &st.regions.regions[st.regions.tile_region_index[y * 256 + x]];
 					auto count_4x1_walkable = [&](size_t walk_x, size_t walk_y) {
 						size_t r = 0;
 						if (is_walkable(walk_x, walk_y)) ++r;
@@ -6360,7 +7181,7 @@ struct game_load_functions : state_functions {
 					};
 					size_t walk_x = x * 4;
 					size_t walk_y = y * 4;
-					paths_t::region* r2 = nullptr;
+					regions_t::region* r2 = nullptr;
 					if (!r->walkable()) {
 						std::array<size_t, 4> n_walkable {};
 						n_walkable[0] = count_4x1_walkable(walk_x, walk_y);
@@ -6377,7 +7198,7 @@ struct game_load_functions : state_functions {
 							if (nindex == r->index) continue;
 							if (nindex < 0x2000) {
 								if (nindex >= 5000) continue;
-								auto* nr = &st.paths.regions[nindex];
+								auto* nr = &st.regions.regions[nindex];
 								if (nr->walkable()) {
 									highest_n = n;
 									highest_nindex = nindex;
@@ -6395,8 +7216,8 @@ struct game_load_functions : state_functions {
 							}
 						}
 						if (highest_n) {
-							if (highest_nindex < 0x2000) r2 = &st.paths.regions[highest_nindex];
-							else r2 = st.paths.split_regions[highest_nindex - 0x2000].a;
+							if (highest_nindex < 0x2000) r2 = &st.regions.regions[highest_nindex];
+							else r2 = st.regions.split_regions[highest_nindex - 0x2000].a;
 						}
 					} else {
 						std::array<size_t, 8> n_unwalkable {};
@@ -6418,7 +7239,7 @@ struct game_load_functions : state_functions {
 							if (nindex == r->index) continue;
 							if (nindex < 0x2000) {
 								if (nindex >= 5000) continue;
-								auto* nr = &st.paths.regions[nindex];
+								auto* nr = &st.regions.regions[nindex];
 								if (nr->walkable()) {
 									highest_n = n;
 									highest_nindex = nindex;
@@ -6440,23 +7261,23 @@ struct game_load_functions : state_functions {
 							}
 						}
 						if (highest_n) {
-							if (highest_nindex < 0x2000) r2 = &st.paths.regions[highest_nindex];
-							else r2 = st.paths.split_regions[highest_nindex - 0x2000].a;
+							if (highest_nindex < 0x2000) r2 = &st.regions.regions[highest_nindex];
+							else r2 = st.regions.split_regions[highest_nindex - 0x2000].a;
 						}
 					}
 					uint16_t mask = 0;
 					if (!r->walkable() && (!r2 || !r2->walkable())) {
 						mask = 0xffff;
 					}
-					st.paths.tile_region_index[y * 256 + x] = 0x2000 + st.paths.split_regions.size();
-					st.paths.split_regions.push_back({ mask, r, r2 ? r2 : r });
+					st.regions.tile_region_index[y * 256 + x] = 0x2000 + st.regions.split_regions.size();
+					st.regions.split_regions.push_back({ mask, r, r2 ? r2 : r });
 				}
 			}
-			log("created %d split regions\n", st.paths.split_regions.size());
+			log("created %d split regions\n", st.regions.split_regions.size());
 
-			for (auto* r : ptr(st.paths.regions)) {
+			for (auto* r : ptr(st.regions.regions)) {
 				r->priority = 0;
-				static_vector<paths_t::region*, 5> nvec;
+				static_vector<regions_t::region*, 5> nvec;
 				for (auto* nr : r->non_walkable_neighbors) {
 					if (nr->tile_count >= 4) {
 						if (std::find(nvec.begin(), nvec.end(), nr) == nvec.end()) {
@@ -6564,16 +7385,16 @@ struct game_load_functions : state_functions {
 					uint8_t flags1 = (uint8_t)(cur_dir ^ 2 * (next_walkable ^ cur_dir & 1) ^ 1);
 					if (cur_dir == 0) { 
 						uint8_t flags = flags0 & 3 | 4 * (flags1 & 3 | 4 * (lut1val | 2 * next_walkable));
-						st.paths.contours[cur_dir].push_back({ {cy, cx, nx}, cur_dir, flags });
+						st.regions.contours[cur_dir].push_back({ {cy, cx, nx}, cur_dir, flags });
 					} else if (cur_dir == 1) {
 						uint8_t flags = flags0 & 3 | 4 * (flags1 & 3 | 4 * (lut1val | 2 * next_walkable));
-						st.paths.contours[cur_dir].push_back({ { cx, cy, ny}, cur_dir, flags });
+						st.regions.contours[cur_dir].push_back({ { cx, cy, ny}, cur_dir, flags });
 					} else if (cur_dir == 2) {
 						uint8_t flags = flags1 & 3 | 4 * (flags0 & 3 | 4 * (next_walkable | 2 * lut1val));
-						st.paths.contours[cur_dir].push_back({ { cy, nx, cx}, cur_dir, flags });
+						st.regions.contours[cur_dir].push_back({ { cy, nx, cx}, cur_dir, flags });
 					} else if (cur_dir == 3) {
 						uint8_t flags = flags1 & 3 | 4 * (flags0 & 3 | 4 * (next_walkable | 2 * lut1val));
-						st.paths.contours[cur_dir].push_back({ { cx, ny, cy}, cur_dir, flags });
+						st.regions.contours[cur_dir].push_back({ { cx, ny, cy}, cur_dir, flags });
 					} else xcept("unreachable");
 
 					if (!next_walkable) cur_dir = next_dir;
@@ -6595,7 +7416,7 @@ struct game_load_functions : state_functions {
 
 			}
 
-			for (auto& v : st.paths.contours) {
+			for (auto& v : st.regions.contours) {
 				std::sort(v.begin(), v.end(), [&](auto& a, auto& b) {
 					if (a.v[0] != b.v[0]) return a.v[0] < b.v[0];
 					if (a.v[1] != b.v[1]) return a.v[1] < b.v[1];
@@ -6606,20 +7427,20 @@ struct game_load_functions : state_functions {
 
 		};
 
-		st.paths.tile_bounding_box = { {0, 0}, {game_st.map_tile_width, game_st.map_tile_height} };
+		st.regions.tile_bounding_box = { {0, 0}, {game_st.map_tile_width, game_st.map_tile_height} };
 
 		set_unwalkable_flags();
 
 // 		for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 // 			for (size_t x = 0; x != game_st.map_tile_width; ++x) {
-// 				auto& index = st.paths.tile_region_index[y * 256 + x];
+// 				auto& index = st.regions.tile_region_index[y * 256 + x];
 // 				index = 4999;
 // 			}
 // 		}
 
 		for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 			for (size_t x = 0; x != game_st.map_tile_width; ++x) {
-				auto& index = st.paths.tile_region_index[y * 256 + x];
+				auto& index = st.regions.tile_region_index[y * 256 + x];
 				auto& t = st.tiles[y * game_st.map_tile_height + x];
 				if (~t.flags & tile_t::flag_walkable) index = 0x1ffd;
 				else if (t.flags & tile_t::flag_middle) index = 0x1ff9;
@@ -6734,7 +7555,7 @@ struct game_load_functions : state_functions {
 
 	void generate_sight_values() {
 		for (size_t i = 0; i < game_st.sight_values.size(); ++i) {
-			auto&v = game_st.sight_values[i];
+			auto& v = game_st.sight_values[i];
 			v.max_width = 3 + (int)i * 2;
 			v.max_height = 3 + (int)i * 2;
 			v.min_width = 3;
@@ -6743,14 +7564,14 @@ struct game_load_functions : state_functions {
 			v.ext_masked_count = 0;
 		}
 
-		for (auto&v : game_st.sight_values) {
+		for (auto& v : game_st.sight_values) {
 			struct base_mask_t {
-				sight_values_t::maskdat_node_t*maskdat_node;
+				sight_values_t::maskdat_node_t* maskdat_node;
 				bool masked;
 			};
 			a_vector<base_mask_t> base_mask(v.max_width*v.max_height);
 			auto mask = [&](size_t index) {
-				if (index >= base_mask.size()) xcept("attempt to mask invalid base mask index %d (size %d) (broken brood war algorithm)", index, base_mask.size());
+				if (index >= base_mask.size()) xcept("attempt to mask invalid base mask index %d (size %d)", index, base_mask.size());
 				base_mask[index].masked = true;
 			};
 			v.min_mask_size = v.min_width*v.min_height;
@@ -6764,7 +7585,7 @@ struct game_load_functions : state_functions {
 			auto generate_base_mask = [&]() {
 				int offset = v.max_height / 2 - v.max_width / 2;
 				int half_width = v.max_width / 2;
-				int	max_x2 = half_width;
+				int max_x2 = half_width;
 				int max_x1 = half_width * 2;
 				int cur_x1 = 0;
 				int cur_x2 = half_width;
@@ -6805,7 +7626,7 @@ struct game_load_functions : state_functions {
 			};
 			generate_base_mask();
 			int masked_count = 0;
-			for (auto&v : base_mask) {
+			for (auto& v : base_mask) {
 				if (v.masked) ++masked_count;
 			}
 			log("%d %d - masked_count is %d\n", v.max_width, v.max_height, masked_count);
@@ -6814,7 +7635,7 @@ struct game_load_functions : state_functions {
 			v.maskdat.clear();
 			v.maskdat.resize(masked_count);
 
-			auto*center = &base_mask[v.max_height / 2 * v.max_width + v.max_width / 2];
+			auto* center = &base_mask[v.max_height / 2 * v.max_width + v.max_width / 2];
 			center->maskdat_node = &v.maskdat.front();
 
 			auto at = [&](int index) -> base_mask_t& {
@@ -6838,7 +7659,7 @@ struct game_load_functions : state_functions {
 						for (int i = 0; i < n; ++i) {
 							if (at(this_y*v.max_width + this_x).masked) {
 								if (this_x || this_y) {
-									auto*this_entry = &v.maskdat.at(next_entry_index++);
+									auto* this_entry = &v.maskdat.at(next_entry_index++);
 
 									int prev_x = this_x;
 									int prev_y = this_y;
@@ -6978,7 +7799,7 @@ struct game_load_functions : state_functions {
 		using tag_list_t = a_vector<std::pair<tag_t, bool>>;
 		auto read_chunks = [&](const tag_list_t&tags) {
 			data_reader_le r(data.data(), data.data() + data.size());
-			a_unordered_map<tag_t, data_reader_le> chunks;
+			a_unordered_map<tag_t, data_reader_le, tag_t> chunks;
 			while (r.left()) {
 				tag_t tag = r.get<std::array<char, 4>>();
 				uint32_t len = r.get<uint32_t>();
@@ -7875,15 +8696,28 @@ void global_init(global_state&st) {
 		st.direction_table[(192 + i) % 256].y = -v;
 	}
 
-	for (int i = 0; i != 32; ++i) {
-		for (int i2 = 0; i2 != 8; ++i2) {
-			st.repulse_direction_table[i2 * 32 + i] = direction_t::from_raw(i < 4 ? i + 64 : i - 32);
-		}
+	auto direction_from_index = [](size_t index) {
+		int v = index;
+		if (v >= 128) v = -(256 - v);
+		return direction_t::from_raw(v);
+	};
+
+	for (size_t i = 0; i != 256; ++i) {
+		st.repulse_direction_table[i] = direction_from_index(i % 32 + (i < 128 ? 32 : -64));
 	}
+//	for (int i = 0; i != 32; ++i) {
+//		for (int i2 = 0; i2 != 8; ++i2) {
+//			st.repulse_direction_table[i * 8 + i2] = direction_t::from_raw(i2 < 4 ? i * 8 + i2 + 32 : i * 8 + i2 - 64);
+//		}
+//	}
 
 }
 
 void init() {
+
+//	log("%d\n", (fp8::from_raw(-253) * (fp8::integer(1) / 2)).raw_value);
+//	log("%d\n", (fp8::from_raw(-253) / 2).raw_value);
+//	xcept("stop");
 
 	global_state global_st;
 	game_state game_st;
@@ -7896,13 +8730,13 @@ void init() {
 	game_load_functions game_load_funcs(st);
 	game_load_funcs.load_map_file(R"(X:\Starcraft\StarCraft\maps\testone.scm)");
 
-	auto order_move = [&](int x, int y) {
+	auto order_move = [&](int unit_id, int x, int y) {
 		state_functions funcs(st);
-		funcs.set_unit_order(&st.visible_units.front(), funcs.get_order_type(Orders::Move), xy(x, y));
+		funcs.set_unit_order(&st.units[unit_id], funcs.get_order_type(Orders::Move), xy(x, y));
 	};
-	auto order_stop = [&]() {
+	auto order_stop = [&](int unit_id) {
 		state_functions funcs(st);
-		funcs.set_unit_order(&st.visible_units.front(), funcs.get_order_type(Orders::Stop), nullptr);
+		funcs.set_unit_order(&st.units[unit_id], funcs.get_order_type(Orders::Stop), nullptr);
 	};
 
 	uint32_t random_state = 42;
@@ -7914,8 +8748,23 @@ void init() {
 
 	int frame = 0;
 	auto tick = [&]() {
-		if (frame % 8 == 0) {
-			order_move(2207 + random() % 128, 1833 + random() % 128);
+		if (true) {
+			for (unit_t* u : ptr(st.visible_units)) {
+				order_move(u - &st.units.front(), 68 * 32, 60 * 32);
+			}
+		} else if (true) {
+			if (random() % 8 == 0) {
+				for (unit_t* u : ptr(st.visible_units)) {
+					order_move(u - &st.units.front(), 2207 + random() % 128, 1833 + random() % 128);
+				}
+			}
+		} else {
+			if (frame % 8 == 0) {
+				order_move(0, 2207 + random() % 128, 1833 + random() % 128);
+			}
+			if (frame % 64 == 0) {
+				order_move(1699, 2207 + random() % 128, 1833 + random() % 128);
+			}
 		}
 	};
 
@@ -7924,26 +8773,27 @@ void init() {
 		advance(st);
 	}
 
-	for (frame = 1; frame <= 148; ++frame) {
+	for (frame = 1; ; ++frame) {
 		log("frame %d\n", frame);
 		tick();
 		advance(st);
 	}
+	log("%d\n", st.units[1699].exact_position.y.raw_value);
 	xcept("stop");
 
 	for (size_t frame = 0; frame != 12; ++frame) {
 
 		if (frame == 2) {
-			order_move(2187, 2066);
+			order_move(0, 2187, 2066);
 		}
 		if (frame == 6) {
-			order_stop();
+			order_stop(0);
 		}
 		if (frame == 8) {
-			order_move(2187, 2066);
+			order_move(0, 2187, 2066);
 		}
 		if (frame == 10) {
-			order_stop();
+			order_stop(0);
 		}
 
 		advance(st);
