@@ -33,7 +33,7 @@ static const std::array<int, 16 * 2> repulse_adjust_table = {
 
 // Broodwar linked lists insert new elements between the first and second entry.
 template<typename cont_T, typename T>
-void bw_insert_list(cont_T&cont, T&v) {
+static void bw_insert_list(cont_T& cont, T& v) {
 	if (cont.empty()) cont.push_front(v);
 	else cont.insert(++cont.begin(), v);
 }
@@ -2364,9 +2364,17 @@ struct state_functions {
 		return true;
 	}
 
-	bool maybe_is_going_to(const unit_t* u, xy position) {
+	bool is_moving_along_path(const unit_t* u) const {
 		if (!u->path) return false;
-		xcept("maybe_is_going_to fixme");
+		if (u->path->next == u->sprite->position) return false;
+		if (u->flingy_movement_type != 0) return true;
+		int remaining_distance = xy_length(u->path->next - u->sprite->position);
+		if (remaining_distance > 16) return true;
+		auto remaining_turn = fp8::extend(u->desired_velocity_direction - u->next_velocity_direction).abs();
+		if (remaining_distance * 2 >= remaining_turn.raw_value) return true;
+		if (u->path->current_short_path_index >= u->path->short_path.size() - 1) {
+			if (st.regions.get_region_at(u->sprite->position) != u->path->long_path[u->path->current_long_path_index]) return true;
+		}
 		return false;
 	}
 
@@ -2615,78 +2623,6 @@ struct state_functions {
 					else w.neighbors.push_back({pos, flags, is_goal});
 				}
 			}
-		};
-
-		auto pf_generate_neighbors  = [&](xy pos, int a) {
-			w.has_found_goal = false;
-			w.neighbors.clear();
-			w.visited_areas.clear();
-
-			w.cur_pos = pos;
-			w.cur_pos_max = pos + xy(64, 64);
-			w.cur_pos_min = pos - xy(64, 64);
-			if (pos.x < 64) w.cur_pos_min.x = 0;
-			if (pos.y < 64) w.cur_pos_min.y = 0;
-			if ((size_t)pos.x + 64 >= game_st.map_width) w.cur_pos_max.x = game_st.map_width - 1;
-			if ((size_t)pos.y + 64 >= game_st.map_height) w.cur_pos_max.y = game_st.map_height - 1;
-			if ((a & (0x10 | (8|1))) == 0) w.cur_pos_min.y = pos.y;
-			if ((a & (0x20 | (1|2))) == 0) w.cur_pos_max.x = pos.x;
-			if ((a & (0x40 | (2|4))) == 0) w.cur_pos_max.y = pos.y;
-			if ((a & (0x80 | (4|8))) == 0) w.cur_pos_min.x = pos.x;
-
-			pf_box_terrain();
-			pf_box_units();
-
-			w.box_neighbors[0] = pf_box_find(0, pos.y, pos.x, pos.x, w.cur_pos_min.y - 1);
-			if (w.box_neighbors[0]) w.cur_pos_min.y = w.box_neighbors[0]->v[0] + w.inner[0] + 1;
-			w.box_neighbors[1] = pf_box_find(1, pos.x, pos.y, pos.y, w.cur_pos_max.x + 1);
-			if (w.box_neighbors[1]) w.cur_pos_max.x = w.box_neighbors[1]->v[0] + w.inner[1] - 1;
-			w.box_neighbors[2] = pf_box_find(2, pos.y, pos.x, pos.x, w.cur_pos_max.y + 1);
-			if (w.box_neighbors[2]) w.cur_pos_max.y = w.box_neighbors[2]->v[0] + w.inner[2] - 1;
-			w.box_neighbors[3] = pf_box_find(3, pos.x, pos.y, pos.y, w.cur_pos_min.x - 1);
-			if (w.box_neighbors[3]) w.cur_pos_min.x = w.box_neighbors[3]->v[0] + w.inner[3] + 1;
-
-			if (w.cur_pos_min.y == pos.y && w.cur_pos_max.x == pos.x) a &= ~1;
-			if (w.cur_pos_max.y == pos.y) {
-				if (w.cur_pos_max.x == pos.x) a &= ~2;
-				if (w.cur_pos_min.x == pos.x) a &= ~4;
-			}
-			if (w.cur_pos_min.y == pos.y) {
-				if (w.cur_pos_min.x == pos.x) a &= ~8;
-				if (w.cur_pos_min.y == pos.y) a &= ~0x10;
-			}
-			if (w.cur_pos_max.x == pos.x) a &= ~0x20;
-			if (w.cur_pos_max.y == pos.y) a &= ~0x40;
-			if (w.cur_pos_min.x == pos.x) a &= ~0x80;
-
-			if (a & 0x10) {
-				a |= (8|1);
-				pf_add_neighbor({pos.x, w.cur_pos_min.y}, w.box_neighbors[0] ? ~(0x40|0x10|8|1) : ~0x40);
-			}
-			if (a & 0x20) {
-				a |= (1|2);
-				pf_add_neighbor({w.cur_pos_max.x, pos.y}, w.box_neighbors[1] ? ~(0x80|0x20|2|1) : ~0x80);
-			}
-			if (a & 0x40) {
-				a |= (2|4);
-				pf_add_neighbor({pos.x, w.cur_pos_max.y}, w.box_neighbors[2] ? ~(0x40|0x10|4|2) : ~0x10);
-			}
-			if (a & 0x80) {
-				a |= (4|8);
-				pf_add_neighbor({w.cur_pos_min.x, pos.y}, w.box_neighbors[3] ? ~(0x80|0x20|8|4) : ~0x20);
-			}
-
-
-			for (int dir = 0; dir != 4; ++dir) {
-				if (a & (1 << dir)) {
-					if (add_neighbors(dir)) break;
-				}
-			}
-
-			for (auto& v : w.visited_areas) {
-				pf_mark_visited(v);
-			}
-
 		};
 
 		auto visit_area = [&](int from_x, int from_y, int to_x, int to_y) {
@@ -3095,6 +3031,77 @@ struct state_functions {
 			} while (cur->x <= area.to.x);
 		};
 
+		auto pf_generate_neighbors  = [&](xy pos, int a) {
+			w.has_found_goal = false;
+			w.neighbors.clear();
+			w.visited_areas.clear();
+
+			w.cur_pos = pos;
+			w.cur_pos_max = pos + xy(64, 64);
+			w.cur_pos_min = pos - xy(64, 64);
+			if (pos.x < 64) w.cur_pos_min.x = 0;
+			if (pos.y < 64) w.cur_pos_min.y = 0;
+			if ((size_t)pos.x + 64 >= game_st.map_width) w.cur_pos_max.x = game_st.map_width - 1;
+			if ((size_t)pos.y + 64 >= game_st.map_height) w.cur_pos_max.y = game_st.map_height - 1;
+			if ((a & (0x10 | (8|1))) == 0) w.cur_pos_min.y = pos.y;
+			if ((a & (0x20 | (1|2))) == 0) w.cur_pos_max.x = pos.x;
+			if ((a & (0x40 | (2|4))) == 0) w.cur_pos_max.y = pos.y;
+			if ((a & (0x80 | (4|8))) == 0) w.cur_pos_min.x = pos.x;
+
+			pf_box_terrain();
+			pf_box_units();
+
+			w.box_neighbors[0] = pf_box_find(0, pos.y, pos.x, pos.x, w.cur_pos_min.y - 1);
+			if (w.box_neighbors[0]) w.cur_pos_min.y = w.box_neighbors[0]->v[0] + w.inner[0] + 1;
+			w.box_neighbors[1] = pf_box_find(1, pos.x, pos.y, pos.y, w.cur_pos_max.x + 1);
+			if (w.box_neighbors[1]) w.cur_pos_max.x = w.box_neighbors[1]->v[0] + w.inner[1] - 1;
+			w.box_neighbors[2] = pf_box_find(2, pos.y, pos.x, pos.x, w.cur_pos_max.y + 1);
+			if (w.box_neighbors[2]) w.cur_pos_max.y = w.box_neighbors[2]->v[0] + w.inner[2] - 1;
+			w.box_neighbors[3] = pf_box_find(3, pos.x, pos.y, pos.y, w.cur_pos_min.x - 1);
+			if (w.box_neighbors[3]) w.cur_pos_min.x = w.box_neighbors[3]->v[0] + w.inner[3] + 1;
+
+			if (w.cur_pos_min.y == pos.y && w.cur_pos_max.x == pos.x) a &= ~1;
+			if (w.cur_pos_max.y == pos.y) {
+				if (w.cur_pos_max.x == pos.x) a &= ~2;
+				if (w.cur_pos_min.x == pos.x) a &= ~4;
+			}
+			if (w.cur_pos_min.y == pos.y) {
+				if (w.cur_pos_min.x == pos.x) a &= ~8;
+				if (w.cur_pos_min.y == pos.y) a &= ~0x10;
+			}
+			if (w.cur_pos_max.x == pos.x) a &= ~0x20;
+			if (w.cur_pos_max.y == pos.y) a &= ~0x40;
+			if (w.cur_pos_min.x == pos.x) a &= ~0x80;
+
+			if (a & 0x10) {
+				a |= (8|1);
+				pf_add_neighbor({pos.x, w.cur_pos_min.y}, w.box_neighbors[0] ? ~(0x40|0x10|8|1) : ~0x40);
+			}
+			if (a & 0x20) {
+				a |= (1|2);
+				pf_add_neighbor({w.cur_pos_max.x, pos.y}, w.box_neighbors[1] ? ~(0x80|0x20|2|1) : ~0x80);
+			}
+			if (a & 0x40) {
+				a |= (2|4);
+				pf_add_neighbor({pos.x, w.cur_pos_max.y}, w.box_neighbors[2] ? ~(0x40|0x10|4|2) : ~0x10);
+			}
+			if (a & 0x80) {
+				a |= (4|8);
+				pf_add_neighbor({w.cur_pos_min.x, pos.y}, w.box_neighbors[3] ? ~(0x80|0x20|8|4) : ~0x20);
+			}
+
+			for (int dir = 0; dir != 4; ++dir) {
+				if (a & (1 << dir)) {
+					if (add_neighbors(dir)) break;
+				}
+			}
+
+			for (auto& v : w.visited_areas) {
+				pf_mark_visited(v);
+			}
+
+		};
+
 		bool has_found_goal = false;
 		bool is_tired = false;
 		int n_open_nodes_in_neighbor_region = 0;
@@ -3384,7 +3391,8 @@ struct state_functions {
 				auto unit_bb = unit_bounding_box(pf.u, pf.destination);
 				for (unit_t* u : find_units({pf.destination, pf.destination})) {
 					if (is_intersecting(unit_bb, unit_sprite_bounding_box(u))) {
-						xcept("pathfinder_find_short_path fixme units_can_collide");
+						// fixme
+						//xcept("pathfinder_find_short_path fixme units_can_collide");
 //						if (units_can_collide(pf.u, u)) {
 //							pf.target_unit = u;
 //							break;
@@ -3520,19 +3528,42 @@ struct state_functions {
 	}
 
 	bool unit_path_to(unit_t* u, xy to) {
-		if (maybe_is_going_to(u, to)) return true;
+		if (is_moving_along_path(u)) return true;
 		if (!u_ground_unit(u)) {
 			set_unit_move_target(u, to);
 			create_single_segment_path(u, to);
 			return true;
 		}
 		if (path_progress(u, to)) to = u->path->next;
-		if (!u->path) return false;
+		else if (!u->path) return false;
 		if (u->next_target_waypoint != to) u->next_target_waypoint = to;
 		if (u->next_movement_waypoint != to) {
 			u->next_movement_waypoint = to;
 			u_set_movement_flag(u, 1);
 		}
+		return true;
+	}
+
+	bool unit_update_path_movement_state(unit_t* u, bool allow_new_path) {
+		if (unit_is_at_move_target(u) || u->movement_state & 4) {
+			u->movement_state = movement_states::UM_AtMoveTarget;
+			return true;
+		}
+		if (u_collision(u) && u_ground_unit(u)) {
+			st.paths.erase(u->path->iterator);
+			u->path = nullptr;
+			u->movement_state = movement_states::UM_CheckIllegal;
+			return true;
+		}
+		auto next_movement_state = movement_states::UM_AnotherPath;
+		if (!allow_new_path || u->path) {
+			if (!u->path || ~u->path->state_flags & 1) return false;
+			next_movement_state = movement_states::UM_NewMoveTarget;
+		}
+		if (u->movement_state >= movement_states::UM_FixCollision && u->movement_state <= movement_states::UM_TerrainSlide) {
+			next_movement_state = movement_states::UM_TurnAndStart;
+		}
+		u->movement_state = next_movement_state;
 		return true;
 	}
 
@@ -3592,7 +3623,9 @@ struct state_functions {
 		bool going_to_next_waypoint = false;
 		if (go_to_next_waypoint()) {
 			going_to_next_waypoint = true;
-			xcept("go to next waypoint!");
+			update_unit_movement_values(u, ems);
+			// fixme: collision stuff
+			finish_unit_movement(u, ems);
 		}
 		if (u_collision(u) && u_ground_unit(u)) {
 			u->movement_state = movement_states::UM_CheckIllegal;
@@ -3725,8 +3758,68 @@ struct state_functions {
 		return true;
 	}
 
+	bool movement_UM_StartPath(unit_t* u, execute_movement_struct& ems) {
+		auto next_movement_state = movement_states::UM_FailedPath;
+		if (unit_path_to(u, u->move_target.pos)) {
+			next_movement_state = movement_states::UM_FollowPath;
+			if (u->user_action_flags & 2) {
+				u->user_action_flags &= ~2;
+				if (u->flingy_movement_type == 2) {
+					u->path->delay = lcg_rand(51, 0, 2);
+					next_movement_state = movement_states::UM_UIOrderDelay;
+				}
+			}
+		}
+		u->movement_state = next_movement_state;
+		return true;
+	}
+
 	bool movement_UM_FollowPath(unit_t* u, execute_movement_struct& ems) {
-		xcept("UM_FollowPath");
+		if (unit_update_path_movement_state(u, true)) return true;
+		if (!unit_path_to(u, u->move_target.pos)) {
+			u->movement_state = movement_states::UM_AnotherPath;
+			return true;
+		}
+		update_unit_movement_values(u, ems);
+		// fixme: collision stuff
+		if (u->sprite->position != ems.position) {
+			if (u->pathing_collision_interval) {
+				if (u->pathing_collision_interval > 2) u->pathing_collision_interval = 2;
+				else --u->pathing_collision_interval;
+			}
+		}
+		finish_unit_movement(u, ems);
+		if (unit_is_at_move_target(u)) {
+			u->movement_state = movement_states::UM_AtMoveTarget;
+		} else {
+			if (u->path) {
+				if (u->path->delay) --u->path->delay;
+				else {
+					u->path->delay = 30;
+					u->movement_state = movement_states::UM_ScoutPath;
+				}
+			}
+		}
+		return false;
+	}
+
+	bool movement_UM_ScoutPath(unit_t* u, execute_movement_struct& ems) {
+		if (unit_update_path_movement_state(u, true)) return true;
+		// fixme: collision stuff
+		u->movement_state = movement_states::UM_FollowPath;
+		return true;
+	}
+
+	bool movement_UM_AtMoveTarget(unit_t* u, execute_movement_struct& ems) {
+		st.paths.erase(u->path->iterator);
+		u->path = nullptr;
+		if (u->next_movement_waypoint != u->move_target.pos) u->next_movement_waypoint = u->move_target.pos;
+		if (!u_ground_unit(u) || u->movement_flags & 4) {
+			u->movement_state = movement_states::UM_AtRest;
+		} else {
+			u->movement_state = movement_states::UM_CheckIllegal;
+		}
+		return true;
 	}
 
 	bool execute_movement(unit_t* u) {
@@ -3755,13 +3848,23 @@ struct state_functions {
 			case movement_states::UM_Dormant:
 				cont = movement_UM_Dormant(u, ems);
 				break;
+			case movement_states::UM_AtMoveTarget:
+				cont = movement_UM_AtMoveTarget(u, ems);
+				break;
 
 			case movement_states::UM_CheckIllegal:
 				cont = movement_UM_CheckIllegal(u, ems);
 				break;
 
+			case movement_states::UM_StartPath:
+				cont = movement_UM_StartPath(u, ems);
+				break;
+
 			case movement_states::UM_FollowPath:
 				cont = movement_UM_FollowPath(u, ems);
+				break;
+			case movement_states::UM_ScoutPath:
+				cont = movement_UM_ScoutPath(u, ems);
 				break;
 
 			case movement_states::UM_AnotherPath:
@@ -8705,19 +8808,10 @@ void global_init(global_state&st) {
 	for (size_t i = 0; i != 256; ++i) {
 		st.repulse_direction_table[i] = direction_from_index(i % 32 + (i < 128 ? 32 : -64));
 	}
-//	for (int i = 0; i != 32; ++i) {
-//		for (int i2 = 0; i2 != 8; ++i2) {
-//			st.repulse_direction_table[i * 8 + i2] = direction_t::from_raw(i2 < 4 ? i * 8 + i2 + 32 : i * 8 + i2 - 64);
-//		}
-//	}
 
 }
 
 void init() {
-
-//	log("%d\n", (fp8::from_raw(-253) * (fp8::integer(1) / 2)).raw_value);
-//	log("%d\n", (fp8::from_raw(-253) / 2).raw_value);
-//	xcept("stop");
 
 	global_state global_st;
 	game_state game_st;
@@ -8750,7 +8844,7 @@ void init() {
 	auto tick = [&]() {
 		if (true) {
 			for (unit_t* u : ptr(st.visible_units)) {
-				order_move(u - &st.units.front(), 68 * 32, 60 * 32);
+				if (frame == 50) order_move(u - &st.units.front(), 68 * 32, 60 * 32);
 			}
 		} else if (true) {
 			if (random() % 8 == 0) {
