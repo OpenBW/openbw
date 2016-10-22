@@ -146,7 +146,8 @@ struct regions_t {
 		a_vector<region*> non_walkable_neighbors;
 		int priority = 0;
 
-		int pathfinder_flag = 0;
+		mutable int pathfinder_flag = 0; // fixme: remove
+		mutable void* pathfinder_node = nullptr; // fixme: remove
 
 		bool walkable() const {
 			return flags != 0x1ffd;
@@ -178,25 +179,6 @@ struct regions_t {
 	a_vector<split_region> split_regions;
 
 	std::array<a_vector<contour>, 4> contours;
-
-	region* get_new_region() {
-		if (regions.capacity() != 5000) regions.reserve(5000);
-		if (regions.size() >= 5000) xcept("too many regions");
-		regions.emplace_back();
-		region* r = &regions.back();
-		r->index = regions.size() - 1;
-		return r;
-	}
-
-	region* get_region_at(xy pos) {
-		size_t index = tile_region_index.at((size_t)pos.y / 32 * 256 + (size_t)pos.x / 32);
-		if (index >= 0x2000) {
-			size_t mask_index = ((size_t)pos.y / 8 & 3) * 4 + ((size_t)pos.x / 8 & 3);
-			auto* split = &split_regions[index - 0x2000];
-			if (split->mask & (1 << mask_index)) return split->a;
-			else return split->b;
-		} else return &regions[index];
-	}
 
 };
 
@@ -331,20 +313,19 @@ struct order_target {
 	const unit_type_t* unit_type = nullptr;
 };
 
-struct order_t : link_base {
+struct order_t: link_base {
 
 	const order_type_t* order_type;
 	order_target target;
 };
 
-struct path_t {
-	a_list<path_t>::iterator iterator;
+struct path_t: link_base {
 
-	int delay;
-	int creation_frame;
-	int state_flags;
+	int delay = 0;
+	int creation_frame = 0;
+	int state_flags = 0;
 
-	a_deque<regions_t::region*> long_path;
+	a_deque<const regions_t::region*> long_path;
 	size_t full_long_path_size;
 	a_deque<xy> short_path;
 
@@ -354,6 +335,8 @@ struct path_t {
 	xy source;
 	xy destination;
 	xy next;
+
+	unit_id last_collision_unit;
 
 };
 

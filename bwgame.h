@@ -127,6 +127,8 @@ struct game_state {
 
 	size_t repulse_field_width;
 	size_t repulse_field_height;
+
+	regions_t regions;
 };
 
 struct state_base_copyable {
@@ -237,6 +239,7 @@ struct state_base_non_copyable {
 	intrusive_list<order_t, default_link_f> free_orders;
 	a_vector<order_t> orders = a_vector<order_t>(2000);
 
+	intrusive_list<path_t, default_link_f> free_paths;
 	a_list<path_t> paths;
 
 	static const size_t unit_finder_group_size = 32;
@@ -248,8 +251,6 @@ struct state_base_non_copyable {
 	a_vector<a_vector<unit_finder_entry>> unit_finder_groups;
 	intrusive_list<unit_finder_entry, default_link_f> unit_finder_list;
 	using unit_finder_list_iterator = decltype(unit_finder_list)::iterator;
-
-	regions_t regions;
 };
 
 struct state : state_base_copyable, state_base_non_copyable {
@@ -297,7 +298,7 @@ struct state_functions {
 		if (value) u->status_flags |= flag;
 		else u->status_flags &= ~flag;
 	}
-	
+
 	void u_set_movement_flag(flingy_t* u, int flag) {
 		u->movement_flags |= flag;
 	}
@@ -963,8 +964,18 @@ struct state_functions {
 		return true;
 	}
 
+	const regions_t::region* get_region_at(xy pos) const {
+		size_t index = game_st.regions.tile_region_index.at((size_t)pos.y / 32 * 256 + (size_t)pos.x / 32);
+		if (index >= 0x2000) {
+			size_t mask_index = ((size_t)pos.y / 8 & 3) * 4 + ((size_t)pos.x / 8 & 3);
+			auto* split = &game_st.regions.split_regions[index - 0x2000];
+			if (split->mask & (1 << mask_index)) return split->a;
+			else return split->b;
+		} else return &game_st.regions.regions[index];
+	}
+
 	bool is_reachable(xy from, xy to) const {
-		return st.regions.get_region_at(from)->group_index == st.regions.get_region_at(to)->group_index;
+		return get_region_at(from)->group_index == get_region_at(to)->group_index;
 	}
 
 	bool cc_can_be_infested(const unit_t* u) const {
@@ -1971,30 +1982,30 @@ struct state_functions {
 
 	bool contour_is_space_available(const contour_search& s, xy pos) const {
 
-		auto cmp_u = [&](int v, regions_t::contour& c) {
+		auto cmp_u = [&](int v, const regions_t::contour& c) {
 			return v < c.v[0];
 		};
-		auto cmp_l = [&](regions_t::contour& c, int v) {
+		auto cmp_l = [&](const regions_t::contour& c, int v) {
 			return c.v[0] < v;
 		};
 
-		auto& c0 = st.regions.contours[0];
+		auto& c0 = game_st.regions.contours[0];
 		for (auto i = std::upper_bound(c0.begin(), c0.end(), pos.y, cmp_u); i != c0.begin();) {
 			--i;
 			if (s.inner[0] + i->v[0] < pos.y) break;
 			if (s.inner[1] + i->v[1] <= pos.x && s.inner[3] + i->v[2] >= pos.x) return false;
 		}
-		auto& c1 = st.regions.contours[1];
+		auto& c1 = game_st.regions.contours[1];
 		for (auto i = std::lower_bound(c1.begin(), c1.end(), pos.x, cmp_l); i != c1.end(); ++i) {
 			if (s.inner[1] + i->v[0] > pos.x) break;
 			if (s.inner[2] + i->v[1] <= pos.y && s.inner[0] + i->v[2] >= pos.y) return false;
 		}
-		auto& c2 = st.regions.contours[2];
+		auto& c2 = game_st.regions.contours[2];
 		for (auto i = std::lower_bound(c2.begin(), c2.end(), pos.y, cmp_l); i != c2.end(); ++i) {
 			if (s.inner[2] + i->v[0] > pos.y) break;
 			if (s.inner[1] + i->v[1] <= pos.x && s.inner[3] + i->v[2] >= pos.x) return false;
 		}
-		auto& c3 = st.regions.contours[3];
+		auto& c3 = game_st.regions.contours[3];
 		for (auto i = std::upper_bound(c3.begin(), c3.end(), pos.x, cmp_u); i != c3.begin();) {
 			--i;
 			if (s.inner[3] + i->v[0] < pos.x) break;
@@ -2072,7 +2083,7 @@ struct state_functions {
 
 	void set_unit_move_target(unit_t* u, xy move_target) {
 		if (u->move_target.pos == move_target) return;
-		if (u->path) xcept("set_unit_move_target: fixme");
+		if (u->path) u->path->state_flags |= 1;
 		move_target = restrict_move_target_to_valid_bounds(u, move_target);
 		set_flingy_move_target(u, move_target);
 		if (u_immovable(u)) u_unset_status_flag(u, unit_t::status_flag_immovable);
@@ -2373,7 +2384,7 @@ struct state_functions {
 		auto remaining_turn = fp8::extend(u->desired_velocity_direction - u->next_velocity_direction).abs();
 		if (remaining_distance * 2 >= remaining_turn.raw_value) return true;
 		if (u->path->current_short_path_index >= u->path->short_path.size() - 1) {
-			if (st.regions.get_region_at(u->sprite->position) != u->path->long_path[u->path->current_long_path_index]) return true;
+			if (get_region_at(u->sprite->position) != u->path->long_path[u->path->current_long_path_index]) return true;
 		}
 		return false;
 	}
@@ -2386,43 +2397,242 @@ struct state_functions {
 		unit_t* u = nullptr;
 		unit_t* target_unit = nullptr;
 		xy source;
-		regions_t::region* source_region = nullptr;
-		regions_t::region* destination_region = nullptr;
+		const regions_t::region* source_region = nullptr;
+		const regions_t::region* destination_region = nullptr;
 		rect unit_bb;
 		rect target_unit_bb;
 		xy destination;
 
-		a_deque<regions_t::region*> long_path;
+		a_deque<const regions_t::region*> long_path;
 		size_t full_long_path_size;
 		a_deque<xy> short_path;
 
 		size_t current_long_path_index = 0;
 		size_t current_short_path_index = 0;
 
-		size_t highest_open_size = 0;
-		size_t all_nodes_size = 0;
+		size_t short_highest_open_size = 0;
+		size_t short_all_nodes_size = 0;
+		size_t long_highest_open_size = 0;
+		size_t long_all_nodes_size = 0;
 
 		int field_1c = 0;
 		int field_1d = 0;
 		int field_1e = 0;
 		int field_1f = 0;
-		int field_164 = 0;
-		int field_168 = 0;
 	};
 
-	void pathfinder_find_long_path(pathfinder& pf) {
-		log("find long path from region %d to %d\n", pf.source_region->index, pf.destination_region->index);
-		xcept("pathfinder_find_long_path");
+	bool pathfinder_find_long_path(pathfinder& pf) {
+		log("find long path from %d %d to %d %d, region %d to %d\n", pf.source.x, pf.source.y, pf.destination.x, pf.destination.y, pf.source_region->index, pf.destination_region->index);
+		if (pf.source_region == pf.destination_region) return false;
+		pf.field_1c = 0;
+
+		struct node_t {
+			node_t* prev = nullptr;
+			xy_fp8 pos;
+			const regions_t::region* region = nullptr;
+			fp8 total_cost{};
+			fp8 estimated_remaining_cost{};
+			fp8 estimated_final_cost{};
+			bool visited = false;
+		};
+		struct cmp_node {
+			bool operator()(const node_t* a, const node_t* b) const {
+				// fixme: Order of equal elements is implementation-defined.
+				//        (Implement binary heap?)
+				return a->estimated_final_cost >= b->estimated_final_cost;
+			}
+		};
+		a_vector<node_t*> open;
+
+		a_list<node_t> all_nodes;
+
+		node_t* goal_node = nullptr;
+
+		auto region_pos = [&](const regions_t::region* r) {
+			if (r == pf.source_region) return to_xy_fp8(pf.source);
+			if (r == pf.destination_region) return to_xy_fp8(pf.destination);
+			return r->center;
+		};
+
+		auto find = [&](const regions_t::region* from_region, const regions_t::region* to_region) {
+
+			xy_fp8 to_pos = region_pos(to_region);
+
+			all_nodes.emplace_back();
+			node_t* start_node = &all_nodes.back();
+			start_node->pos = region_pos(from_region);
+			start_node->region = from_region;
+			start_node->estimated_remaining_cost = fp8::integer(128 * 128);
+			start_node->estimated_final_cost = start_node->estimated_remaining_cost;
+			start_node->region->pathfinder_node = (void*)start_node;
+
+			open.push_back(start_node);
+			std::push_heap(open.begin(), open.end(), cmp_node());
+
+			while (!open.empty()) {
+				node_t* cur = open.front();
+				std::pop_heap(open.begin(), open.end(), cmp_node());
+				open.pop_back();
+
+				log("visit %d %g %g %g\n", cur->region->index, cur->estimated_remaining_cost.raw_value / 256.0, cur->total_cost.raw_value / 256.0, cur->estimated_final_cost.raw_value / 256.0);
+				a_vector<node_t*> sorted = open;
+				std::sort(sorted.begin(), sorted.end(), [&](auto* a, auto* b) {
+					return a->estimated_final_cost < b->estimated_final_cost;
+				});
+				log("%d entries:\n", sorted.size());
+				for (auto& v : sorted) {
+					log("  %d %g %g %g\n", v->region->index, v->estimated_remaining_cost.raw_value / 256.0, v->total_cost.raw_value / 256.0, v->estimated_final_cost.raw_value / 256.0);
+				}
+
+				if (cur->region == to_region) {
+					goal_node = cur;
+					break;
+				}
+				cur->visited = true;
+
+				auto add = [&](const regions_t::region* r) {
+					if (open.size() == 125) return;
+					if (all_nodes.size() == 350) return;
+					xy_fp8 pos = region_pos(r);
+					fp8 cost = xy_length(pos - cur->pos);
+					log("cost from %g %g to %g %g -> %g\n", cur->pos.x.raw_value / 256.0, cur->pos.y.raw_value / 256.0, pos.x.raw_value / 256.0, pos.y.raw_value / 256.0, cost.raw_value / 256.0);
+					if (r->group_index != pf.source_region->group_index) {
+						cost *= 2;
+					}
+					fp8 total_cost = cur->total_cost + cost;
+					node_t* n = (node_t*)r->pathfinder_node;
+					if (!n) {
+						all_nodes.emplace_back();
+						n = &all_nodes.back();
+						n->prev = cur;
+						n->pos = pos;
+						n->region = r;
+						n->total_cost = total_cost;
+						n->estimated_remaining_cost = xy_length(to_pos - pos);
+						n->estimated_final_cost = n->total_cost + n->estimated_remaining_cost;
+						n->visited = false;
+						r->pathfinder_node = (void*)n;
+						open.push_back(n);
+						std::push_heap(open.begin(), open.end(), cmp_node());
+					} else if (cur->prev != n) {
+						if (total_cost < n->total_cost) {
+							n->prev = cur;
+							n->total_cost = total_cost;
+							fp8 estimated_final_cost = n->total_cost + n->estimated_remaining_cost;
+							if (n->visited) {
+								n->estimated_final_cost = estimated_final_cost;
+								n->visited = false;
+								open.push_back(n);
+								std::push_heap(open.begin(), open.end(), cmp_node());
+							} else {
+								if (n->estimated_final_cost != estimated_final_cost) {
+									n->estimated_final_cost = estimated_final_cost;
+									// fixme: C++ heaps provide no way to adjust the priority of a random element.
+									//        To get better performance here we could write our own heap code.
+									std::make_heap(open.begin(), open.end(), cmp_node());
+								}
+							}
+						}
+					}
+				};
+				for (auto* n : cur->region->walkable_neighbors) {
+					add(n);
+				}
+				if (cur->region->group_index != pf.source_region->group_index) {
+					for (auto* n : cur->region->non_walkable_neighbors) {
+						add(n);
+					}
+				}
+				if (open.size() > pf.long_highest_open_size) {
+					pf.long_highest_open_size = open.size();
+				}
+				if (open.size() == 125) break;
+				if (all_nodes.size() == 350) break;
+
+			}
+			if (!goal_node && !open.empty()) {
+				goal_node = open.front();
+				std::pop_heap(open.begin(), open.end(), cmp_node());
+				open.pop_back();
+			}
+
+			if (!goal_node) {
+				pf.field_1c = 1;
+				start_node->estimated_remaining_cost = xy_length(to_pos - start_node->region->center);
+				fp8 best_cost = start_node->estimated_remaining_cost;
+				node_t* best_node = start_node;
+				for (auto i = std::next(all_nodes.begin()); i != all_nodes.end(); ++i) {
+					if (i->estimated_remaining_cost < best_cost) {
+						best_cost = i->estimated_remaining_cost;
+						best_node = &*i;
+					}
+				}
+				goal_node = best_node;
+			}
+
+		};
+
+		bool path_is_reversed;
+		if (pf.source_region->group_index == pf.destination_region->group_index) {
+			find(pf.source_region, pf.destination_region);
+			path_is_reversed = false;
+		} else {
+			find(pf.destination_region, pf.source_region);
+			path_is_reversed = true;
+			if (goal_node->region != pf.source_region) {
+				for (auto& v : all_nodes) {
+					v.region->pathfinder_node = nullptr;
+				}
+				if (pf.source_region->group_index == goal_node->region->group_index) {
+					find(pf.source_region, goal_node->region);
+					path_is_reversed = false;
+				} else {
+					find(goal_node->region, pf.source_region);
+				}
+			}
+		}
+
+		pf.long_all_nodes_size = all_nodes.size();
+
+		pf.long_path.clear();
+		pf.full_long_path_size = 0;
+		pf.current_long_path_index = (size_t)0 - 1;
+		if (goal_node) {
+			size_t full_path_size = 0;
+			if (path_is_reversed) {
+				for (auto* n = goal_node; n; n = n->prev) {
+					if (pf.long_path.size() != 50) pf.long_path.push_back(n->region);
+					++full_path_size;
+				}
+			} else {
+				for (auto* n = goal_node; n; n = n->prev) {
+					++full_path_size;
+				}
+				for (size_t i = full_path_size; i > 50; --i) {
+					goal_node = goal_node->prev;
+				}
+				for (auto* n = goal_node; n; n = n->prev) {
+					pf.long_path.push_front(n->region);
+				}
+			}
+			pf.full_long_path_size = full_path_size;
+		}
+		for (auto& v : all_nodes) {
+			v.region->pathfinder_node = nullptr;
+		}
+		log("found long path of %d size\n", pf.full_long_path_size);
+		return true;
+
 	}
-	void pathfinder_find_short_path(pathfinder& pf, xy target, regions_t::region* target_region) {
+	void pathfinder_find_short_path(pathfinder& pf, xy target, const regions_t::region* target_region) {
 
 		bool target_is_destination = target == pf.destination;
 		bool target_region_walkable = target_region && target_region->walkable();
 
-		regions_t::region* source_region = pf.source_region;
-		regions_t::region* destination_region = st.regions.get_region_at(pf.destination);
+		const regions_t::region* source_region = pf.source_region;
+		const regions_t::region* destination_region = get_region_at(pf.destination);
 
-		regions_t::region* move_to_region = target_region ? target_region : destination_region;
+		const regions_t::region* move_to_region = target_region ? target_region : destination_region;
 
 		for (auto* nr : move_to_region->walkable_neighbors) {
 			if (nr == source_region) continue;
@@ -2480,14 +2690,16 @@ struct state_functions {
 			bool is_goal = false;
 			int depth = 0;
 			int directional_flags = 0;
-			regions_t::region* region = nullptr;
+			const regions_t::region* region = nullptr;
 			bool is_target_region = false;
 			bool is_neighbor_region = false;
 			bool visited = false;
 		};
 		struct cmp_node {
 			bool operator()(const node_t* a, const node_t* b) const {
-				return a->estimated_final_cost < b->estimated_final_cost;
+				// fixme: Order of equal elements is implementation-defined.
+				//        (Implement binary heap?)
+				return a->estimated_final_cost >= b->estimated_final_cost;
 			}
 		};
 		a_vector<node_t*> open;
@@ -2514,38 +2726,67 @@ struct state_functions {
 		pf_area_visited.push_back({(int)game_st.map_width, {}});
 
 		auto pf_remove_visited_flags = [&](xy pos, int flags) {
+			log("pf_remove_visited_flags %d %d in %02x\n", pos.x, pos.y, (uint8_t)flags);
 			auto cur = std::upper_bound(pf_area_visited.begin(), pf_area_visited.end(), pos.x, [&](int a, auto& b) {
 				return a < b.x;
 			});
 			--cur;
-			if (cur->y.empty()) return flags;
+			log("cur is %d\n", cur->x);
 
 			auto i = cur->y.begin();
 			for (;i != cur->y.end(); ++i) {
-				if (pos.y <= i->first) break;
+				if (pos.y <= i->second) break;
 			}
 			if (i == cur->y.end()) return flags;
 			int mask = 0;
 			if (pos.y <= i->first) mask |= 0x19;
 			if (pos.y >= i->second) mask |= 0x46;
-			if (cur->x == pos.x) {
-				xcept("pf_remove_visited_flags fixme");
+			if (pos.x == cur->x) {
+				mask |= 0x8c;
+				if (cur != pf_area_visited.begin()) {
+					auto prev = std::prev(cur);
+					i = prev->y.begin();
+					for (;i != prev->y.end(); ++i) {
+						if (pos.y <= i->second) break;
+					}
+					if (i != prev->y.end()) {
+						if (pos.y >= i->first && pos.y <= i->second) {
+							mask &= 0x7f;
+							if (pos.y > i->first) mask &= 0xf7;
+							if (pos.y < i->second) mask &= 0xfb;
+						}
+					}
+				}
 			}
-
-			log("mask %#x\n", mask);
+			auto next = std::next(cur);
+			if (pos.x == next->x - 1) {
+				mask |= 0x23;
+				i = next->y.begin();
+				for (;i != next->y.end(); ++i) {
+					if (pos.y <= i->second) break;
+				}
+				if (i != next->y.end()) {
+					if (pos.y >= i->first && pos.y <= i->second) {
+						mask &= 0xdf;
+						if (pos.y > i->first) mask &= 0xfe;
+						if (pos.y < i->second) mask &= 0xfd;
+					}
+				}
+			}
+			log("pf_remove_visited_flags out %02x\n", (uint8_t)(flags & mask));
 			return flags & mask;
 		};
 
 		auto pf_box_terrain = [&]() {
 
-			auto cmp_u = [&](int v, regions_t::contour& c) {
+			auto cmp_u = [&](int v, const regions_t::contour& c) {
 				return v < c.v[0];
 			};
-			auto cmp_l = [&](regions_t::contour& c, int v) {
+			auto cmp_l = [&](const regions_t::contour& c, int v) {
 				return c.v[0] < v;
 			};
 
-			auto& c0 = st.regions.contours[0];
+			auto& c0 = game_st.regions.contours[0];
 			for (auto i = std::upper_bound(c0.begin(), c0.end(), w.cur_pos_min.y - w.inner[0] - 1, cmp_u); i != c0.end(); ++i) {
 				if (i->v[0] > w.cur_pos.y - w.inner[0] - 1) break;
 				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.x) {
@@ -2554,7 +2795,7 @@ struct state_functions {
 					}
 				}
 			}
-			auto& c1 = st.regions.contours[1];
+			auto& c1 = game_st.regions.contours[1];
 			for (auto i = std::lower_bound(c1.begin(), c1.end(), w.cur_pos.x - w.inner[1], cmp_l); i != c1.end(); ++i) {
 				if (i->v[0] > w.cur_pos_max.x - w.inner[1] + 1) break;
 				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.y) {
@@ -2563,7 +2804,7 @@ struct state_functions {
 					}
 				}
 			}
-			auto& c2 = st.regions.contours[2];
+			auto& c2 = game_st.regions.contours[2];
 			for (auto i = std::lower_bound(c2.begin(), c2.end(), w.cur_pos.y - w.inner[2], cmp_l); i != c2.end(); ++i) {
 				if (i->v[0] > w.cur_pos_max.y - w.inner[2] + 1) break;
 				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.x) {
@@ -2572,7 +2813,7 @@ struct state_functions {
 					}
 				}
 			}
-			auto& c3 = st.regions.contours[3];
+			auto& c3 = game_st.regions.contours[3];
 			for (auto i = std::upper_bound(c3.begin(), c3.end(), w.cur_pos_min.x - w.inner[3] - 1, cmp_u); i != c3.begin(); ++i) {
 				if (i->v[0] > w.cur_pos.x - w.inner[3] - 1) break;
 				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.y) {
@@ -2589,12 +2830,13 @@ struct state_functions {
 		};
 
 		auto pf_box_find = [&](int dir, int v, int v0, int v1, int v2) {
+			// FIXME: this function needs to be implemented for terrain
 			return (regions_t::contour*)nullptr;
 		};
 
 		auto pf_add_neighbor = [&](xy pos, int flags) {
 			if (pos == w.cur_pos) return;
-			log("pf add neighbor %d %d flags %#x\n", pos.x, pos.y, flags);
+			log("pf add neighbor %d %d flags %02x\n", pos.x, pos.y, (uint8_t)flags);
 			bool is_goal = false;
 			if (w.target_unit) {
 				if (pos.x == w.target_unit_bb.from.x || pos.x == w.target_unit_bb.to.x) {
@@ -2627,381 +2869,486 @@ struct state_functions {
 
 		auto visit_area = [&](int from_x, int from_y, int to_x, int to_y) {
 			if (to_x < from_x) std::swap(from_x, to_x);
-			if (to_y < to_y) std::swap(from_y, to_y);
+			if (to_y < from_y) std::swap(from_y, to_y);
+			//log("visit area %d %d %d %d (target %d %d)\n", from_x, from_y, to_x, to_y, w.target.x, w.target.y);
 			if (w.target.x >= from_x && w.target.x <= to_x) {
 				if (w.target.y >= from_y && w.target.y <= to_y) {
 					w.neighbors.push_back({w.target, 0xff, true});
 					w.has_found_goal = true;
 					log("goal found\n");
-					return true;
 				}
 			}
 			w.visited_areas.push_back({xy{from_x, from_y}, xy{to_x, to_y}});
-			return false;
 		};
 
 		auto add_neighbors = [&](int n) {
-			if (true) {
-				regions_t::contour c{};
-				xy pos = w.cur_pos;
-				xy pos_max = w.cur_pos_max;
-				xy pos_min = w.cur_pos_min;
-				if (n == 0) {
-					if (pos.x < pos_max.x) {
-						int xval = pos_max.x;
-						int yval = pos_min.y;
-						int box_y = pos_min.y;
-						if (w.box_neighbors[1]) {
-							auto* i = w.box_neighbors[1];
-							box_y = i->v[1] + w.inner[i->flags & 3] - 1;
-							if (box_y > yval) yval = box_y;
-						}
-						int flags = 0x3b;
-						auto* i = pf_box_find(0, pos.y - 1, pos.x, xval, yval - 1);
-						if (i) {
-							c = *i;
-							c.v[0] += w.outer[c.dir];
-							c.v[1] += w.outer[c.flags & 3];
-							c.v[2] += w.outer[(c.flags >> 2) & 3];
-							yval = c.v[0];
-							if (xval == c.v[2]) {
-								if (c.flags & 0x20) flags = 0x33;
-								else flags = 0;
-							} else if (xval < c.v[2]) {
-								flags = 0x22;
-							}
-						}
-						if (w.box_neighbors[1]) {
-							flags &= 0xfd;
-							if (box_y < yval) flags &= 0xde;
-						}
-						if (yval >= pos.y) {
-							flags |= 0x44;
-						} else {
-							pf_add_neighbor({xval, pos.y}, 0xe7);
-						}
-						pf_add_neighbor({xval, yval}, flags);
-						if (yval == pos_min.y) pf_add_neighbor({pos.x, yval}, 0xdd);
-						if (i) {
-							if (xval > c.v[2]) pf_add_neighbor({c.v[2], c.v[0]}, 0x11);
-							while (true) {
-								if (c.v[1] < pos.x) {
-									pos_max.x = pos.x;
-									break;
-								}
-								pos_max.x = c.v[1];
-								pf_add_neighbor({c.v[1], c.v[0]}, 0x18);
-								if (i == &w.x_boxes[0].front()) break;
-								--i;
-								c = *i;
-								c.v[0] += w.outer[c.dir];
-								c.v[1] += w.outer[c.flags & 3];
-								c.v[2] += w.outer[(c.flags >> 2) & 3];
-								if (c.v[0] != yval) break;
-								if (c.v[2] < pos.x) break;
-								if (c.v[2] <= xval) pf_add_neighbor({c.v[2], c.v[0]}, 0x11);
-							}
-						}
-						if (visit_area(pos.x, pos.y, xval, yval)) return true;
-						pos.y = yval;
+			log("add neighbors %d\n", n);
+			regions_t::contour c{};
+			xy pos = w.cur_pos;
+			xy pos_max = w.cur_pos_max;
+			xy pos_min = w.cur_pos_min;
+			if (n == 0) {
+				if (pos.x < pos_max.x) {
+					int xval = pos_max.x;
+					int yval = pos_min.y;
+					int box_y = pos_min.y;
+					if (w.box_neighbors[1]) {
+						auto* i = w.box_neighbors[1];
+						box_y = i->v[1] + w.inner[i->flags & 3] - 1;
+						if (box_y > yval) yval = box_y;
 					}
-					if (pos.y > pos_min.y) {
-						int xval = pos_max.x;
-						int yval = pos_min.y;
-						int box_x = pos_min.y;
-						if (w.box_neighbors[0]) {
-							auto* i = w.box_neighbors[0];
-							box_x = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
-							if (box_x < xval) xval = box_x;
+					int flags = 0x3b;
+					auto* i = pf_box_find(0, pos.y - 1, pos.x, xval, yval - 1);
+					if (i) {
+						c = *i;
+						c.v[0] += w.outer[c.dir];
+						c.v[1] += w.outer[c.flags & 3];
+						c.v[2] += w.outer[(c.flags >> 2) & 3];
+						yval = c.v[0];
+						if (xval == c.v[2]) {
+							if (c.flags & 0x20) flags = 0x33;
+							else flags = 0;
+						} else if (xval < c.v[2]) {
+							flags = 0x22;
 						}
-						int flags = 0x3b;
-						auto* i = pf_box_find(1, pos.x + 1, yval, pos.y, xval + 1);
-						if (i) {
-							c = *i;
-							c.v[0] += w.outer[c.dir];
-							c.v[1] += w.outer[c.flags & 3];
-							c.v[2] += w.outer[(c.flags >> 2) & 3];
-							xval = c.v[0];
-							if (yval == c.v[1]) {
-								if (c.flags & 0x10) flags = 0x39;
-								else flags = 0;
-							} else if (yval > c.v[1]) {
-									flags = 0x18;
-							}
-						}
-						if (w.box_neighbors[0]) {
-							flags &= 0xf7;
-							if (box_x > xval) flags &= 0xde;
-						}
-						if (xval <= pos.x) {
-							flags |= 0x84;
-						} else {
-							pf_add_neighbor({pos.x, yval}, 0xdd);
-						}
-						pf_add_neighbor({xval, yval}, flags);
-						if (xval < pos_max.y) pf_add_neighbor({xval, pos.y}, 1);
-						if (i) {
-							if (yval < c.v[1]) pf_add_neighbor({c.v[2], c.v[0]}, 0x33);
-							while (c.v[2] <= pos.y) {
-								pf_add_neighbor({c.v[0], c.v[2]}, 0x34);
-								if (i == &w.x_boxes[1].back()) break;
-								++i;
-								c = *i;
-								c.v[0] += w.outer[c.dir];
-								c.v[1] += w.outer[c.flags & 3];
-								c.v[2] += w.outer[(c.flags >> 2) & 3];
-								if (c.v[0] != xval || c.v[1] > pos.y) {
-									pf_add_neighbor({xval, pos.y}, 0x33);
-								}
-								if (c.v[1] >= yval) pf_add_neighbor({c.v[0], c.v[1]}, 0x33);
-							}
-						}
-						if (visit_area(pos.x, pos.y, xval, yval)) return true;
 					}
-					return false;
-				} else if (n == 1) {
-					if (pos.x < pos_max.x) {
-						int xval = pos_max.x;
-						int yval = pos_max.y;
-						int box_y = pos_max.y;
-						if (w.box_neighbors[1]) {
-							auto* i = w.box_neighbors[1];
-							box_y = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
-							if (box_y < yval) yval = box_y;
-						}
-						int flags = 0x67;
-						auto* i = pf_box_find(2, pos.y + 1, pos.x, xval, yval + 1);
-						if (i) {
-							c = *i;
-							c.v[0] += w.outer[c.dir];
-							c.v[1] += w.outer[c.flags & 3];
-							c.v[2] += w.outer[(c.flags >> 2) & 3];
-							if (pos.x < c.v[2]) pf_add_neighbor({c.v[1], c.v[0]}, 0x44);
-							yval = c.v[0];
+					if (w.box_neighbors[1]) {
+						flags &= 0xfd;
+						if (box_y < yval) flags &= 0xde;
+					}
+					if (yval >= pos.y) {
+						flags |= 0x44;
+					} else {
+						pf_add_neighbor({xval, pos.y}, 0xe7);
+					}
+					pf_add_neighbor({xval, yval}, flags);
+					if (yval == pos_min.y) pf_add_neighbor({pos.x, yval}, 0xdd);
+					if (i) {
+						if (xval > c.v[2]) pf_add_neighbor({c.v[2], c.v[0]}, 0x11);
+						while (true) {
+							if (c.v[1] < pos.x) {
+								pos_max.x = pos.x;
+								break;
+							}
 							pos_max.x = c.v[1];
-							while (c.v[2] <= xval) {
-								pf_add_neighbor({c.v[2], c.v[0]}, 0x42);
-								if (i == &w.x_boxes[2].back()) break;
-								++i;
-								c = *i;
-								c.v[0] += w.outer[c.dir];
-								c.v[1] += w.outer[c.flags & 3];
-								c.v[2] += w.outer[(c.flags >> 2) & 3];
-								if (c.v[0] - 1 != yval) break;
-								if (c.v[1] - 1 >= xval) break;
-								if (c.v[1] <= xval) pf_add_neighbor({c.v[1], c.v[0]}, 0x44);
-							}
-							if (xval == c.v[2]) {
-								if (c.flags & 0x20) flags = 0x63;
-								else flags = 0;
-							} else if (xval < c.v[2]) {
-								flags = 0x21;
-							}
-						}
-						if (w.box_neighbors[1]) {
-							flags &= 0xfe;
-							if (box_y > yval) flags &= 0xdd;
-						}
-						if (yval <= pos.y) {
-							flags |= 0x18;
-						} else {
-							pf_add_neighbor({xval, pos.y}, 0xbb);
-						}
-						pf_add_neighbor({xval, yval}, flags);
-						if (yval == pos_max.y) pf_add_neighbor({pos.x, yval}, 0xde);
-						if (visit_area(pos.x, pos.y, xval, yval)) return true;
-						pos.y = yval;
-					}
-					if (pos.y < pos_max.y) {
-						int xval = pos_max.x;
-						int yval = pos_max.y;
-						int box_x = pos_max.x;
-						if (w.box_neighbors[2]) {
-							auto* i = w.box_neighbors[2];
-							box_x = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
-							if (box_x < xval) xval = box_x;
-						}
-						int flags = 0x67;
-						auto* i = pf_box_find(1, pos.x + 1, pos.y, yval, xval + 1);
-						if (i) {
+							pf_add_neighbor({c.v[1], c.v[0]}, 0x18);
+							if (i == &w.x_boxes[0].front()) break;
+							--i;
 							c = *i;
 							c.v[0] += w.outer[c.dir];
 							c.v[1] += w.outer[c.flags & 3];
 							c.v[2] += w.outer[(c.flags >> 2) & 3];
-							if (c.v[0] < pos_max.x) pf_add_neighbor({c.v[0], pos.y}, 2);
-							if (c.v[1] > pos.y) pf_add_neighbor({c.v[0], c.v[1]}, 0x21);
-							xval = c.v[0];
-							while (c.v[2] < yval) {
-								pf_add_neighbor({c.v[0], c.v[2]}, 0x22);
-								if (i == &w.x_boxes[1].back()) break;
-								++i;
-								c = *i;
-								c.v[0] += w.outer[c.dir];
-								c.v[1] += w.outer[c.flags & 3];
-								c.v[2] += w.outer[(c.flags >> 2) & 3];
-								if (c.v[0] - 1 != xval) break;
-								if (c.v[1] - 1 >= yval) break;
-								if (c.v[1] <= pos.y && c.v[1] <= pos_max.y) pf_add_neighbor({c.v[0], c.v[1]}, 0x21);
-							}
-							if (c.v[2] == yval) {
-								if (c.flags & 0x20) flags = 0x66;
-								else flags = 0;
-							} else if (c.v[2] > yval) {
-								flags = 0x44;
-							}
+							if (c.v[0] != yval) break;
+							if (c.v[2] < pos.x) break;
+							if (c.v[2] <= xval) pf_add_neighbor({c.v[2], c.v[0]}, 0x11);
 						}
-						if (w.box_neighbors[2]) {
-							flags &= 0xfb;
-							if (box_x > xval) flags &= 0xbd;
-						}
-						if (xval <= pos.x) {
-							flags |= 0x88;
-						} else {
-							pf_add_neighbor({pos.x, yval}, 0xde);
-						}
-						pf_add_neighbor({xval, yval}, flags);
-						if (visit_area(pos.x, pos.y, xval, yval)) return true;
 					}
-					return false;
-				} else if (n == 2) {
-					if (pos.x > pos_min.x) {
-						int xval = pos_min.x;
-						int yval = pos_max.y;
-						int box_y = pos_max.y;
-						if (w.box_neighbors[3]) {
-							auto* i = w.box_neighbors[3];
-							box_y = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
-							if (box_y < yval) yval = box_y;
-						}
-						int flags = 0xce;
-						auto* i = pf_box_find(2, pos.y + 1, xval, pos.x, yval + 1);
-						if (i) {
-							c = *i;
-							c.v[0] += w.outer[c.dir];
-							c.v[1] += w.outer[c.flags & 3];
-							c.v[2] += w.outer[(c.flags >> 2) & 3];
-							yval = c.v[0];
-							if (xval == c.v[1]) {
-								if (c.flags & 0x10) flags = 0xcc;
-								else flags = 0;
-							} else if (xval > c.v[1]) {
-								flags = 0x88;
-							}
-						}
-						if (w.box_neighbors[3]) {
-							flags &= 0xf7;
-							if (box_y < yval) flags &= 0x7b;
-						}
-						if (yval <= pos.y) {
-							flags |= 0x11;
-						} else {
-							pf_add_neighbor({xval, pos.y}, 0xbd);
-						}
-						pf_add_neighbor({xval, yval}, flags);
-						if (yval == pos_max.y) pf_add_neighbor({pos.x, yval}, 0x77);
-						if (i) {
-							if (xval < c.v[1]) pf_add_neighbor({c.v[1], c.v[0]}, 0x44);
-							while (true) {
-								if (c.v[2] > pos.x) {
-									pf_add_neighbor({pos.x, c.v[0]}, 0x21);
-									pos_min.x = pos.x;
-									break;
-								}
-								pos_min.x = c.v[2];
-								pf_add_neighbor({c.v[2], c.v[0]}, 0x42);
-								if (i == &w.x_boxes[2].back()) break;
-								++i;
-								c = *i;
-								c.v[0] += w.outer[c.dir];
-								c.v[1] += w.outer[c.flags & 3];
-								c.v[2] += w.outer[(c.flags >> 2) & 3];
-								if (c.v[0] != yval) break;
-								if (c.v[1] > pos.x) break;
-								pf_add_neighbor({c.v[1], c.v[0]}, 0x44);
-							}
-						}
-						if (visit_area(pos.x, pos.y, xval, yval)) return true;
-						pos.y = yval;
-					}
-					if (pos.y < pos_max.y) {
-						int xval = pos_max.x;
-						int yval = pos_min.y;
-						int box_x = pos_min.y;
-						if (w.box_neighbors[2]) {
-							auto* i = w.box_neighbors[2];
-							box_x = i->v[1] + w.inner[i->flags & 3] - 1;
-							if (box_x > xval) xval = box_x;
-						}
-						int flags = 0xce;
-						auto* i = pf_box_find(3, pos.x - 1, pos.y, yval, xval - 1);
-						if (i) {
-							c = *i;
-							c.v[0] += w.outer[c.dir];
-							c.v[1] += w.outer[c.flags & 3];
-							c.v[2] += w.outer[(c.flags >> 2) & 3];
-							xval = c.v[0];
-							if (yval == c.v[1]) {
-								if (c.flags & 0x20) flags = 0xc6;
-								else flags = 0;
-							} else if (yval > c.v[1]) {
-								flags = 0x42;
-							}
-						}
-						if (w.box_neighbors[2]) {
-							flags &= 0xfd;
-							if (box_x > xval) flags &= 0xbb;
-						}
-						if (xval >= pos.x) {
-							flags |= 0x22;
-						} else {
-							pf_add_neighbor({pos.x, yval}, 0x77);
-						}
-						pf_add_neighbor({xval, yval}, flags);
-						if (xval > pos_min.y) pf_add_neighbor({xval, pos.y}, 4);
-						if (i) {
-							if (yval > c.v[2]) pf_add_neighbor({c.v[0], c.v[2]}, 0x84);
-							while (c.v[1] >= pos.y) {
-								pf_add_neighbor({c.v[0], c.v[2]}, 0x88);
-								if (i == &w.x_boxes[3].front()) break;
-								--i;
-								c = *i;
-								c.v[0] += w.outer[c.dir];
-								c.v[1] += w.outer[c.flags & 3];
-								c.v[2] += w.outer[(c.flags >> 2) & 3];
-								if (c.v[0] != xval || c.v[2] < pos.y) {
-									pf_add_neighbor({xval, pos.y}, 0x84);
-								}
-								if (c.v[2] <= yval) pf_add_neighbor({c.v[0], c.v[2]}, 0x84);
-							}
-						}
-						if (visit_area(pos.x, pos.y, xval, yval)) return true;
-					}
-					return false;
+					visit_area(pos.x, pos.y, xval, yval);
+					pos.y = yval;
 				}
+				if (pos.y > pos_min.y) {
+					int xval = pos_max.x;
+					int yval = pos_min.y;
+					int box_x = pos_min.y;
+					if (w.box_neighbors[0]) {
+						auto* i = w.box_neighbors[0];
+						box_x = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
+						if (box_x < xval) xval = box_x;
+					}
+					int flags = 0x3b;
+					auto* i = pf_box_find(1, pos.x + 1, yval, pos.y, xval + 1);
+					if (i) {
+						c = *i;
+						c.v[0] += w.outer[c.dir];
+						c.v[1] += w.outer[c.flags & 3];
+						c.v[2] += w.outer[(c.flags >> 2) & 3];
+						xval = c.v[0];
+						if (yval == c.v[1]) {
+							if (c.flags & 0x10) flags = 0x39;
+							else flags = 0;
+						} else if (yval > c.v[1]) {
+								flags = 0x18;
+						}
+					}
+					if (w.box_neighbors[0]) {
+						flags &= 0xf7;
+						if (box_x > xval) flags &= 0xde;
+					}
+					if (xval <= pos.x) {
+						flags |= 0x84;
+					} else {
+						pf_add_neighbor({pos.x, yval}, 0xdd);
+					}
+					pf_add_neighbor({xval, yval}, flags);
+					if (xval < pos_max.y) pf_add_neighbor({xval, pos.y}, 1);
+					if (i) {
+						if (yval < c.v[1]) pf_add_neighbor({c.v[2], c.v[0]}, 0x33);
+						while (c.v[2] <= pos.y) {
+							pf_add_neighbor({c.v[0], c.v[2]}, 0x34);
+							if (i == &w.x_boxes[1].back()) break;
+							++i;
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							if (c.v[0] != xval || c.v[1] > pos.y) {
+								pf_add_neighbor({xval, pos.y}, 0x33);
+							}
+							if (c.v[1] >= yval) pf_add_neighbor({c.v[0], c.v[1]}, 0x33);
+						}
+					}
+					visit_area(pos.x, pos.y, xval, yval);
+				}
+				return false;
+			} else if (n == 1) {
+				if (pos.x < pos_max.x) {
+					int xval = pos_max.x;
+					int yval = pos_max.y;
+					int box_y = pos_max.y;
+					if (w.box_neighbors[1]) {
+						auto* i = w.box_neighbors[1];
+						box_y = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
+						if (box_y < yval) yval = box_y;
+					}
+					int flags = 0x67;
+					auto* i = pf_box_find(2, pos.y + 1, pos.x, xval, yval + 1);
+					if (i) {
+						c = *i;
+						c.v[0] += w.outer[c.dir];
+						c.v[1] += w.outer[c.flags & 3];
+						c.v[2] += w.outer[(c.flags >> 2) & 3];
+						if (pos.x < c.v[2]) pf_add_neighbor({c.v[1], c.v[0]}, 0x44);
+						yval = c.v[0];
+						pos_max.x = c.v[1];
+						while (c.v[2] <= xval) {
+							pf_add_neighbor({c.v[2], c.v[0]}, 0x42);
+							if (i == &w.x_boxes[2].back()) break;
+							++i;
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							if (c.v[0] - 1 != yval) break;
+							if (c.v[1] - 1 >= xval) break;
+							if (c.v[1] <= xval) pf_add_neighbor({c.v[1], c.v[0]}, 0x44);
+						}
+						if (xval == c.v[2]) {
+							if (c.flags & 0x20) flags = 0x63;
+							else flags = 0;
+						} else if (xval < c.v[2]) {
+							flags = 0x21;
+						}
+					}
+					if (w.box_neighbors[1]) {
+						flags &= 0xfe;
+						if (box_y > yval) flags &= 0xdd;
+					}
+					if (yval <= pos.y) {
+						flags |= 0x18;
+					} else {
+						pf_add_neighbor({xval, pos.y}, 0xbb);
+					}
+					pf_add_neighbor({xval, yval}, flags);
+					if (yval == pos_max.y) pf_add_neighbor({pos.x, yval}, 0xde);
+					visit_area(pos.x, pos.y, xval, yval);
+					pos.y = yval;
+				}
+				if (pos.y < pos_max.y) {
+					int xval = pos_max.x;
+					int yval = pos_max.y;
+					int box_x = pos_max.x;
+					if (w.box_neighbors[2]) {
+						auto* i = w.box_neighbors[2];
+						box_x = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
+						if (box_x < xval) xval = box_x;
+					}
+					int flags = 0x67;
+					auto* i = pf_box_find(1, pos.x + 1, pos.y, yval, xval + 1);
+					if (i) {
+						c = *i;
+						c.v[0] += w.outer[c.dir];
+						c.v[1] += w.outer[c.flags & 3];
+						c.v[2] += w.outer[(c.flags >> 2) & 3];
+						if (c.v[0] < pos_max.x) pf_add_neighbor({c.v[0], pos.y}, 2);
+						if (c.v[1] > pos.y) pf_add_neighbor({c.v[0], c.v[1]}, 0x21);
+						xval = c.v[0];
+						while (c.v[2] < yval) {
+							pf_add_neighbor({c.v[0], c.v[2]}, 0x22);
+							if (i == &w.x_boxes[1].back()) break;
+							++i;
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							if (c.v[0] - 1 != xval) break;
+							if (c.v[1] - 1 >= yval) break;
+							if (c.v[1] <= pos.y && c.v[1] <= pos_max.y) pf_add_neighbor({c.v[0], c.v[1]}, 0x21);
+						}
+						if (c.v[2] == yval) {
+							if (c.flags & 0x20) flags = 0x66;
+							else flags = 0;
+						} else if (c.v[2] > yval) {
+							flags = 0x44;
+						}
+					}
+					if (w.box_neighbors[2]) {
+						flags &= 0xfb;
+						if (box_x > xval) flags &= 0xbd;
+					}
+					if (xval <= pos.x) {
+						flags |= 0x88;
+					} else {
+						pf_add_neighbor({pos.x, yval}, 0xde);
+					}
+					pf_add_neighbor({xval, yval}, flags);
+					visit_area(pos.x, pos.y, xval, yval);
+				}
+				return false;
+			} else if (n == 2) {
+				if (pos.x > pos_min.x) {
+					int xval = pos_min.x;
+					int yval = pos_max.y;
+					int box_y = pos_max.y;
+					if (w.box_neighbors[3]) {
+						auto* i = w.box_neighbors[3];
+						box_y = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
+						if (box_y < yval) yval = box_y;
+					}
+					int flags = 0xce;
+					auto* i = pf_box_find(2, pos.y + 1, xval, pos.x, yval + 1);
+					if (i) {
+						c = *i;
+						c.v[0] += w.outer[c.dir];
+						c.v[1] += w.outer[c.flags & 3];
+						c.v[2] += w.outer[(c.flags >> 2) & 3];
+						yval = c.v[0];
+						if (xval == c.v[1]) {
+							if (c.flags & 0x10) flags = 0xcc;
+							else flags = 0;
+						} else if (xval > c.v[1]) {
+							flags = 0x88;
+						}
+					}
+					if (w.box_neighbors[3]) {
+						flags &= 0xf7;
+						if (box_y < yval) flags &= 0x7b;
+					}
+					if (yval <= pos.y) {
+						flags |= 0x11;
+					} else {
+						pf_add_neighbor({xval, pos.y}, 0xbd);
+					}
+					pf_add_neighbor({xval, yval}, flags);
+					if (yval == pos_max.y) pf_add_neighbor({pos.x, yval}, 0x77);
+					if (i) {
+						if (xval < c.v[1]) pf_add_neighbor({c.v[1], c.v[0]}, 0x44);
+						while (true) {
+							if (c.v[2] > pos.x) {
+								pf_add_neighbor({pos.x, c.v[0]}, 0x21);
+								pos_min.x = pos.x;
+								break;
+							}
+							pos_min.x = c.v[2];
+							pf_add_neighbor({c.v[2], c.v[0]}, 0x42);
+							if (i == &w.x_boxes[2].back()) break;
+							++i;
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							if (c.v[0] != yval) break;
+							if (c.v[1] > pos.x) break;
+							pf_add_neighbor({c.v[1], c.v[0]}, 0x44);
+						}
+					}
+					visit_area(pos.x, pos.y, xval, yval);
+					pos.y = yval;
+				}
+				if (pos.y < pos_max.y) {
+					int xval = pos_max.x;
+					int yval = pos_min.y;
+					int box_x = pos_min.y;
+					if (w.box_neighbors[2]) {
+						auto* i = w.box_neighbors[2];
+						box_x = i->v[1] + w.inner[i->flags & 3] - 1;
+						if (box_x > xval) xval = box_x;
+					}
+					int flags = 0xce;
+					auto* i = pf_box_find(3, pos.x - 1, pos.y, yval, xval - 1);
+					if (i) {
+						c = *i;
+						c.v[0] += w.outer[c.dir];
+						c.v[1] += w.outer[c.flags & 3];
+						c.v[2] += w.outer[(c.flags >> 2) & 3];
+						xval = c.v[0];
+						if (yval == c.v[1]) {
+							if (c.flags & 0x20) flags = 0xc6;
+							else flags = 0;
+						} else if (yval > c.v[1]) {
+							flags = 0x42;
+						}
+					}
+					if (w.box_neighbors[2]) {
+						flags &= 0xfd;
+						if (box_x > xval) flags &= 0xbb;
+					}
+					if (xval >= pos.x) {
+						flags |= 0x22;
+					} else {
+						pf_add_neighbor({pos.x, yval}, 0x77);
+					}
+					pf_add_neighbor({xval, yval}, flags);
+					if (xval > pos_min.y) pf_add_neighbor({xval, pos.y}, 4);
+					if (i) {
+						if (yval > c.v[2]) pf_add_neighbor({c.v[0], c.v[2]}, 0x84);
+						while (c.v[1] >= pos.y) {
+							pf_add_neighbor({c.v[0], c.v[2]}, 0x88);
+							if (i == &w.x_boxes[3].front()) break;
+							--i;
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							if (c.v[0] != xval || c.v[2] < pos.y) {
+								pf_add_neighbor({xval, pos.y}, 0x84);
+							}
+							if (c.v[2] <= yval) pf_add_neighbor({c.v[0], c.v[2]}, 0x84);
+						}
+					}
+					visit_area(pos.x, pos.y, xval, yval);
+				}
+				return false;
+			} else {
+				if (pos.x > pos_min.x) {
+					int xval = pos_min.x;
+					int yval = pos_min.y;
+					int box_y = pos_min.y;
+					if (w.box_neighbors[3]) {
+						auto* i = w.box_neighbors[3];
+						box_y = i->v[1] + w.inner[i->flags & 3] - 1;
+						if (box_y > yval) yval = box_y;
+					}
+					int flags = 0x9d;
+					auto* i = pf_box_find(0, pos.y - 1, xval, pos.x, yval - 1);
+					if (i) {
+						c = *i;
+						c.v[0] += w.outer[c.dir];
+						c.v[1] += w.outer[c.flags & 3];
+						c.v[2] += w.outer[(c.flags >> 2) & 3];
+						if (pos.x <= c.v[2]) {
+							pf_add_neighbor({pos.x, c.v[0]}, 0x22);
+						} else {
+							pf_add_neighbor({c.v[2], c.v[0]}, 0x11);
+						}
+						yval = c.v[0];
+						pos_min.x = c.v[2];
+						while (c.v[1] > xval) {
+							pf_add_neighbor({c.v[1], c.v[0]}, 0x18);
+							if (i == &w.x_boxes[0].front()) break;
+							--i;
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							if (c.v[0] + 1 != yval) break;
+							if (c.v[2] + 1 <= xval) break;
+							if (c.v[2] >= xval) pf_add_neighbor({c.v[2], c.v[0]}, 0x11);
+						}
+						if (xval == c.v[1]) {
+							if (c.flags & 0x10) flags = 0x9c;
+							else flags = 0;
+						} else if (xval > c.v[1]) {
+							flags = 0x84;
+						}
+					}
+					if (w.box_neighbors[3]) {
+						flags &= 0xfb;
+						if (box_y < yval) flags &= 0x77;
+					}
+					if (yval >= pos.y) {
+						flags |= 0x44;
+					} else {
+						pf_add_neighbor({xval, pos.y}, 0xee);
+					}
+					pf_add_neighbor({xval, yval}, flags);
+					if (yval == pos_min.y) pf_add_neighbor({pos.x, yval}, 0x7b);
+					visit_area(pos.x, pos.y, xval, yval);
+					pos.y = yval;
+				}
+				if (pos.y > pos_min.y) {
+					int xval = pos_min.x;
+					int yval = pos_min.y;
+					int box_x = pos_min.x;
+					if (w.box_neighbors[0]) {
+						auto* i = w.box_neighbors[0];
+						box_x = i->v[1] + w.inner[i->flags & 3] - 1;
+						if (box_x > xval) xval = box_x;
+					}
+					int flags = 0x9d;
+					auto* i = pf_box_find(3, pos.x - 1, yval, pos.y, xval - 1);
+					if (i) {
+						c = *i;
+						c.v[0] += w.outer[c.dir];
+						c.v[1] += w.outer[c.flags & 3];
+						c.v[2] += w.outer[(c.flags >> 2) & 3];
+						if (c.v[0] > pos_min.x) pf_add_neighbor({c.v[0], pos.y}, 8);
+						if (c.v[2] < pos.y) pf_add_neighbor({c.v[0], c.v[2]}, 0x84);
+						xval = c.v[0];
+						while (c.v[1] > yval) {
+							pf_add_neighbor({c.v[0], c.v[2]}, 0x88);
+							if (i == &w.x_boxes[3].front()) break;
+							--i;
+							c = *i;
+							c.v[0] += w.outer[c.dir];
+							c.v[1] += w.outer[c.flags & 3];
+							c.v[2] += w.outer[(c.flags >> 2) & 3];
+							if (c.v[0] + 1 != xval) break;
+							if (c.v[2] + 1 <= yval) break;
+							if (c.v[2] >= yval) pf_add_neighbor({c.v[0], c.v[2]}, 0x84);
+						}
+						if (c.v[1] == yval) {
+							if (c.flags & 0x10) flags = 0x99;
+							else flags = 0;
+						} else if (c.v[1] > yval) {
+							flags = 0x11;
+						}
+					}
+					if (w.box_neighbors[0]) {
+						flags &= 0xfe;
+						if (box_x < xval) flags &= 0xe7;
+					}
+					if (xval >= pos.x) {
+						flags |= 0x21;
+					} else {
+						pf_add_neighbor({pos.x, yval}, 0x7b);
+					}
+					pf_add_neighbor({xval, yval}, flags);
+					visit_area(pos.x, pos.y, xval, yval);
+				}
+				return false;
 			}
-			xcept("add_neighbors %d\n", n);
-			return false;
 		};
 
 		auto pf_mark_visited = [&](rect area) {
 			auto next = std::upper_bound(pf_area_visited.begin(), pf_area_visited.end(), area.from.x, [&](int a, auto& b) {
 				return a < b.x;
 			});
-			auto cur = next;
-			--cur;
-			if (area.from.x < cur->x) {
-				if (pf_area_visited.size() == 128) return;
-				next = pf_area_visited.insert(next, {area.from.x, cur->y});
+			auto cur = std::prev(next);
+			if (area.from.x > cur->x) {
+				if (pf_area_visited.size() == 128 + 1) return;
+				cur = pf_area_visited.insert(next, {area.from.x, cur->y});
+				next = std::next(cur);
 			}
 			if (area.from.x > area.to.x) return;
 			do {
 				if (next->x > area.to.x + 1) {
-					if (pf_area_visited.size() == 128) return;
+					if (pf_area_visited.size() == 128 + 1) return;
 					next = pf_area_visited.insert(next, {area.to.x + 1, cur->y});
+					cur = std::prev(next);
 				}
 				auto i = cur->y.begin();
 				for (;i != cur->y.end(); ++i) {
-					if (area.from.y <= i->first + 1) break;
+					if (area.from.y <= i->second + 1) break;
 				}
 				if (i == cur->y.end()) {
 					if (cur->y.size() == 10) return;
@@ -3013,16 +3360,13 @@ struct state_functions {
 					} else {
 						if (i->first > area.from.y) i->first = area.from.y;
 						if (i->second < area.to.y) i->second = area.to.y;
-						if (cur->y.size() >= 2) {
-							for (auto t = cur->y.begin();;) {
-								auto n = t;
-								++n;
-								if (n == cur->y.end()) break;
-								if (n->first - 1 > t->second) {
-									if (t->second < n->second) t->second = n->second;
-									t = cur->y.erase(n);
-								} else t = n;
-							}
+						auto t = cur->y.begin();
+						for (auto n = std::next(t); n != cur->y.end(); n = std::next(t)) {
+							if (n->first - 1 > t->second) {
+								if (t->second < n->second) t->second = n->second;
+								t = cur->y.erase(n);
+								if (t == cur->y.end()) break;
+							} else t = n;
 						}
 					}
 				}
@@ -3097,7 +3441,14 @@ struct state_functions {
 			}
 
 			for (auto& v : w.visited_areas) {
+				log("pf_mark_visited %d %d %d %d\n", v.from.x, v.from.y, v.to.x, v.to.y);
 				pf_mark_visited(v);
+				for (auto& v2 : pf_area_visited) {
+					log("x %d\n", v2.x);
+					for (auto& v3 : v2.y) {
+						log("  y %d %d\n", v3.first, v3.second);
+					}
+				}
 			}
 
 		};
@@ -3109,17 +3460,26 @@ struct state_functions {
 
 		node_t* goal_node = nullptr;
 		while (!open.empty()) {
+
+			log("heap: \n");
+			for (auto& v : open) {
+				log(" %d %d %g\n", v->pos.x, v->pos.y, v->estimated_final_cost.raw_value / 256.0);
+			}
+
 			node_t* cur = open.front();
-			std::pop_heap(open.begin(), open.end());
+			std::pop_heap(open.begin(), open.end(), cmp_node());
 			open.pop_back();
 			if (cur->is_goal) {
 				goal_node = cur;
 				break;
 			}
 
+			log("visit %d %d (%d %d) cost %g\n", cur->pos.x, cur->pos.y, cur->pos.x / 32, cur->pos.y / 32, cur->estimated_final_cost.raw_value / 256.0);
+
 			if (cur->directional_flags != 0) {
 				cur->directional_flags = pf_remove_visited_flags(cur->pos, cur->directional_flags);
 			}
+			log("cur->directional_flags is %#x\n", cur->directional_flags);
 
 			bool is_exhausted;
 			if (n_open_nodes_in_target_region <= 0 || has_found_goal || (target_is_destination && all_nodes.size() < 150)) {
@@ -3134,6 +3494,8 @@ struct state_functions {
 					is_tired = true;
 				}
 			}
+			log("is_exhausted is %d\n", is_exhausted);
+			log("has_found_goal is %d\n", has_found_goal);
 			if (cur->is_target_region && is_exhausted) {
 				goal_node = cur;
 				break;
@@ -3160,14 +3522,14 @@ struct state_functions {
 						if (!v.flags) continue;
 					}
 				}
-				auto* n_region = st.regions.get_region_at(v.pos);
+				auto* n_region = get_region_at(v.pos);
 				fp8 cost = xy_length(to_xy_fp8(v.pos) - to_xy_fp8(cur->pos));
-				if (target_region_walkable && n_region != target_region) {
+				if (target_region_walkable && n_region != target_region && n_region != source_region) {
 					cost *= 2;
 				}
 				fp8 total_cost = cur->total_cost + cost;
 				node_t* n = nullptr;
-				for (auto i = ++all_nodes.begin(); i != all_nodes.end(); ++i) {
+				for (auto i = std::next(all_nodes.begin()); i != all_nodes.end(); ++i) {
 					if (i->pos == v.pos) {
 						n = &*i;
 						break;
@@ -3184,6 +3546,7 @@ struct state_functions {
 					n->total_cost = total_cost;
 					n->estimated_remaining_cost = xy_length(to_xy_fp8(target) - to_xy_fp8(n->pos));
 					n->estimated_final_cost = n->total_cost + n->estimated_remaining_cost;
+					log("added node %d %d (%d %d) cost %g\n", n->pos.x, n->pos.y, n->pos.x / 32, n->pos.y / 32, n->estimated_final_cost.raw_value / 256.0);
 					n->visited = n->directional_flags == 0 && !n->is_goal;
 					n->is_target_region = n->region == target_region;
 					n->is_neighbor_region = n->region->pathfinder_flag != 0;
@@ -3213,10 +3576,11 @@ struct state_functions {
 							if (n->is_neighbor_region) ++n_open_nodes_in_neighbor_region;
 						} else {
 							if (n->estimated_final_cost != estimated_final_cost) {
+								log("change cost of %d %d from %g to %g\n", n->pos.x, n->pos.y, n->estimated_final_cost.raw_value / 256.0, estimated_final_cost.raw_value / 256.0);
 								n->estimated_final_cost = estimated_final_cost;
 								// fixme: C++ heaps provide no way to adjust the priority of a random element.
 								//        To get better performance here we could write our own heap code.
-								std::make_heap(open.begin(), open.end());
+								std::make_heap(open.begin(), open.end(), cmp_node());
 							}
 						}
 						if (open.size() == 150) break;
@@ -3224,104 +3588,104 @@ struct state_functions {
 				}
 			}
 
-			if (open.size() > pf.highest_open_size) {
-				pf.highest_open_size = open.size();
+			if (open.size() > pf.short_highest_open_size) {
+				pf.short_highest_open_size = open.size();
 			}
 
-			has_found_goal = true;
+			has_found_goal = found_goal;
 			if (open.size() == 150 || all_nodes.size() == 250) {
 				if (!found_goal && !n_open_nodes_in_target_region) break;
 			}
 		}
 		log("goal_node is %p\n", goal_node);
 
-		pf.field_1d = 1;
+		if (!goal_node) {
+			pf.field_1d = 1;
 
-		int n_unvisited_nodes = 0;
-		int n_unvisited_destination_region_nodes = 0;
+			int n_unvisited_nodes = 0;
+			int n_unvisited_destination_region_nodes = 0;
 
-		for (auto i = ++all_nodes.begin(); i != all_nodes.end(); ++i) {
-			if (i->region->pathfinder_flag) ++i->region->pathfinder_flag;
-			if (!i->visited) {
-				if (i->directional_flags) i->directional_flags = pf_remove_visited_flags(i->pos, i->directional_flags);
-				if (i->directional_flags) {
-					++n_unvisited_nodes;
-					if (i->region == destination_region) ++n_unvisited_destination_region_nodes;
-				} else {
-					i->visited = true;
-					if (i->is_target_region) --n_open_nodes_in_target_region;
+			for (auto i = std::next(all_nodes.begin()); i != all_nodes.end(); ++i) {
+				if (i->region->pathfinder_flag) ++i->region->pathfinder_flag;
+				if (!i->visited) {
+					if (i->directional_flags) i->directional_flags = pf_remove_visited_flags(i->pos, i->directional_flags);
+					if (i->directional_flags) {
+						++n_unvisited_nodes;
+						if (i->region == destination_region) ++n_unvisited_destination_region_nodes;
+					} else {
+						i->visited = true;
+						if (i->is_target_region) --n_open_nodes_in_target_region;
+					}
 				}
 			}
-		}
 
-		if (target_is_destination) {
-			n_unvisited_nodes = n_unvisited_destination_region_nodes;
-			for (auto* nr : move_to_region->walkable_neighbors) {
-				if (nr == source_region) continue;
-				if (nr->pathfinder_flag < 2) {
-					++n_unvisited_nodes;
-					break;
-				} else {
-					n_unvisited_nodes -= nr->pathfinder_flag / 2;
-					if (n_unvisited_nodes < 0) n_unvisited_nodes = 0;
+			if (target_is_destination) {
+				n_unvisited_nodes = n_unvisited_destination_region_nodes;
+				for (auto* nr : move_to_region->walkable_neighbors) {
+					if (nr == source_region) continue;
+					if (nr->pathfinder_flag < 2) {
+						++n_unvisited_nodes;
+						break;
+					} else {
+						n_unvisited_nodes -= nr->pathfinder_flag / 2;
+						if (n_unvisited_nodes < 0) n_unvisited_nodes = 0;
+					}
 				}
 			}
-		}
-		log("n_unvisited_nodes is %d\n", n_unvisited_nodes);
-		log("n_open_nodes_in_target_region is %d\n", n_open_nodes_in_target_region);
-		goal_node = start_node;
-		start_node->estimated_remaining_cost = xy_length(to_xy_fp8(target - start_node->pos));
-		if (n_unvisited_nodes == 0 || n_open_nodes_in_target_region == 0) {
-			fp8 best_cost = fp8::integer(128 * 128);
-			if (n_open_nodes_in_target_region == 0) best_cost = start_node->estimated_remaining_cost;
-			node_t* best_node = start_node;
-			for (auto i = ++all_nodes.begin(); i != all_nodes.end(); ++i) {
-				if (i->estimated_remaining_cost < best_cost) {
-					if (target_is_destination || i->region == source_region || (n_open_nodes_in_target_region && i->region == destination_region)) {
-						best_cost = i->estimated_remaining_cost;
+			log("n_unvisited_nodes is %d\n", n_unvisited_nodes);
+			log("n_open_nodes_in_target_region is %d\n", n_open_nodes_in_target_region);
+			goal_node = start_node;
+			start_node->estimated_remaining_cost = xy_length(to_xy_fp8(target - start_node->pos));
+			if (n_unvisited_nodes == 0 || n_open_nodes_in_target_region == 0) {
+				fp8 best_cost = fp8::integer(128 * 128);
+				if (n_open_nodes_in_target_region == 0) best_cost = start_node->estimated_remaining_cost;
+				node_t* best_node = start_node;
+				for (auto i = std::next(all_nodes.begin()); i != all_nodes.end(); ++i) {
+					if (i->estimated_remaining_cost < best_cost) {
+						if (target_is_destination || i->region == source_region || (n_open_nodes_in_target_region && i->region == destination_region)) {
+							best_cost = i->estimated_remaining_cost;
+							best_node = &*i;
+						}
+					}
+				}
+				goal_node = best_node;
+				pf.field_1e = 1;
+				pf.field_1f = 1;
+			} else {
+				fp8 best_cost = fp8::integer(128 * 128);
+				node_t* best_node = start_node;
+				for (auto i = std::next(all_nodes.begin()); i != all_nodes.end(); ++i) {
+					fp8 cost = i->estimated_remaining_cost;
+					if (i->region == destination_region || i->region == target_region) {
+						cost += i->total_cost / 2;
+					} else {
+						if (i->region->pathfinder_flag) {
+							cost = cost * 3 / 2;
+						} else {
+							if (i->region == source_region) cost *= 2;
+							else cost *= 4;
+						}
+					}
+					if (i->visited) cost *= 32;
+					if (cost < best_cost) {
+						best_cost = cost;
 						best_node = &*i;
 					}
 				}
+				goal_node = best_node;
 			}
-			goal_node = best_node;
-			pf.field_1e = 1;
-			pf.field_1f = 1;
-		} else {
-			fp8 best_cost = fp8::integer(128 * 128);
-			node_t* best_node = start_node;
-			for (auto i = ++all_nodes.begin(); i != all_nodes.end(); ++i) {
-				fp8 cost = i->estimated_remaining_cost;
-				if (i->region == destination_region || i->region == target_region) {
-					cost += i->total_cost / 2;
-				} else {
-					if (i->region->pathfinder_flag) {
-						cost = cost * 3 / 2;
-					} else {
-						if (i->region == source_region) cost *= 2;
-						else cost *= 4;
-					}
-				}
-				if (i->visited) cost *= 32;
-				if (cost < best_cost) {
-					best_cost = cost;
-					best_node = &*i;
-				}
-			}
-			goal_node = best_node;
 		}
 
-		pf.all_nodes_size = all_nodes.size();
+		pf.short_all_nodes_size = all_nodes.size();
 
-		if (goal_node) {
-			pf.short_path.clear();
-			pf.current_short_path_index = 0;
-			for (auto* n = goal_node; n != start_node && pf.short_path.size() < 128; n = n->prev) {
-				pf.short_path.push_front(n->pos);
-			}
-			if (pf.short_path.size() > 50) {
-				pf.short_path[49] = pf.short_path.back();
-				pf.short_path.resize(50);
-			}
+		pf.short_path.clear();
+		pf.current_short_path_index = 0;
+		for (auto* n = goal_node; n != start_node && pf.short_path.size() < 128; n = n->prev) {
+			pf.short_path.push_front(n->pos);
+		}
+		if (pf.short_path.size() > 50) {
+			pf.short_path[49] = pf.short_path.back();
+			pf.short_path.resize(50);
 		}
 		for (auto* nr : move_to_region->walkable_neighbors) {
 			if (nr == source_region) continue;
@@ -3340,9 +3704,9 @@ struct state_functions {
 					bool entirely_walkable = true;
 					for (size_t y = (size_t)bb.from.y; entirely_walkable && y < (size_t)bb.to.y; y += 32) {
 						for (size_t x = (size_t)bb.from.x; x < (size_t)bb.to.x; x += 32) {
-							size_t index = st.regions.tile_region_index.at(y / 32 * 256 + x / 32);
+							size_t index = game_st.regions.tile_region_index.at(y / 32 * 256 + x / 32);
 							if (index < 0x2000) {
-								auto* region = &st.regions.regions[index];
+								auto* region = &game_st.regions.regions[index];
 								if (!region->walkable()) {
 									entirely_walkable = false;
 									break;
@@ -3363,7 +3727,7 @@ struct state_functions {
 	bool pathfinder_find_next_short_path(pathfinder& pf) {
 		++pf.current_long_path_index;
 		if (pf.current_long_path_index >= pf.long_path.size()) return false;
-		regions_t::region* source_region = pf.long_path[pf.current_long_path_index];
+		const regions_t::region* source_region = pf.long_path[pf.current_long_path_index];
 		while (source_region != pf.source_region) {
 			if (pf.current_long_path_index >= pf.long_path.size()) return false;
 			++pf.current_long_path_index;
@@ -3375,7 +3739,7 @@ struct state_functions {
 			target = to_xy(pf.long_path[pf.current_long_path_index + 2]->center);
 			adjust_target = false;
 		}
-		regions_t::region* target_region = nullptr;
+		const regions_t::region* target_region = nullptr;
 		if (pf.current_long_path_index != pf.long_path.size() - 1) {
 			target_region = pf.long_path[pf.current_long_path_index + 1];
 		} else {
@@ -3421,7 +3785,7 @@ struct state_functions {
 		log("source_region %p target_region %p\n", source_region, target_region);
 		log("pathfinder_find_short_path source_region %d target %d %d target_region %d\n", source_region->index, target.x, target.y, target_region ? target_region->index : -1);
 		pathfinder_find_short_path(pf, target, target_region);
-		if (pf.short_path.empty()) {
+		if (!pf.short_path.empty()) {
 			xy last_path_pos = pf.short_path.back();
 			if (pf.field_1e) {
 				if (adjust_target || last_path_pos != target) pf.destination = last_path_pos;
@@ -3437,41 +3801,83 @@ struct state_functions {
 		} else return false;
 	}
 
-	bool pathfinder_find(pathfinder& pf) {
-		pf.source_region = st.regions.get_region_at(pf.source);
-		pf.destination_region = st.regions.get_region_at(pf.destination);
+	bool pathfinder_find(pathfinder& pf, bool short_path_only = false) {
+		pf.source_region = get_region_at(pf.source);
+		pf.destination_region = get_region_at(pf.destination);
 		pf.unit_bb = unit_type_bounding_box(pf.u->unit_type);
-		pf.highest_open_size = 0;
-		pf.all_nodes_size = 0;
+		pf.short_highest_open_size = 0;
+		pf.short_all_nodes_size = 0;
+		pf.long_all_nodes_size = 0;
+		pf.long_highest_open_size = 0;
 		pf.field_1c = 0;
 		pf.field_1d = 0;
 		pf.field_1e = 0;
 		pf.field_1f = 0;
-		pf.field_164 = 0;
-		pf.field_168 = 0;
+		if (short_path_only) return pathfinder_find_next_short_path(pf);
 		if (pf.source_region == pf.destination_region) {
 			pf.long_path = { pf.source_region };
 			pf.full_long_path_size = 1;
 			pf.current_long_path_index = (size_t)0 - 1;
 			return pathfinder_find_next_short_path(pf);
 		} else {
-			pathfinder_find_long_path(pf);
-			xcept("pathfinder_find fixme");
-			return false;
+			if (!pathfinder_find_long_path(pf)) return false;
+			return pathfinder_find_next_short_path(pf);
 		}
 	}
 
-	bool path_progress(unit_t* u, xy to) {
+	path_t* new_path() {
+		// We need a (first-in-last-out) free list of paths since the
+		// last_collision_unit is reused.
+		if (!st.free_paths.empty()) {
+			path_t* r = &st.free_paths.front();
+			st.free_paths.pop_front();
+			return r;
+		}
+		if (st.paths.size() >= 1024) return nullptr;
+		return &*st.paths.emplace(st.paths.end());
+	}
+
+	void free_path(path_t* path) {
+		st.free_paths.push_front(*path);
+	}
+
+	bool path_progress(unit_t* u, xy to, const unit_t* consider_collision_with_unit = nullptr) {
 		u_unset_movement_flag(u, 0x40);
 		u_set_movement_flag(u, 0x10);
 		pathfinder pf;
+		bool find_new_path = true;
 		if (u->path) {
-			xcept("path_progress: fixme");
-		} else {
+			++u->path->current_short_path_index;
+			if (u->path->current_short_path_index < u->path->short_path.size()) {
+				find_new_path = false;
+			} else {
+				pf.u = u;
+				pf.source = u->sprite->position;
+				pf.destination = u->path->destination;
+				pf.long_path = std::move(u->path->long_path);
+				pf.full_long_path_size = u->path->full_long_path_size;
+				pf.current_long_path_index = u->path->current_long_path_index;
+				pf.short_path = std::move(u->path->short_path);
+				pf.current_short_path_index = u->path->current_short_path_index;
+				free_path(u->path);
+				u->path = nullptr;
+				if (pf.current_long_path_index + 1 < pf.long_path.size()) {
+					if (pf.full_long_path_size == pf.long_path.size() || pf.current_long_path_index + 4 < pf.long_path.size()) {
+						if (pf.source != pf.destination) {
+							if (pathfinder_find(pf, true)) {
+								if (!pf.long_path.empty() && !pf.short_path.empty()) find_new_path = false;
+							}
+						}
+					}
+				}
+			}
+		}
+		if (find_new_path) {
 			pf.u = u;
 			pf.source = u->sprite->position;
 			pf.destination = to;
 			pathfinder_find(pf);
+			if (pf.long_path.empty() || pf.short_path.empty()) return false;
 		}
 		auto update_move_target = [&]() {
 			xy move_target = to;
@@ -3484,7 +3890,7 @@ struct state_functions {
 			set_flingy_move_target(u, move_target);
 			u->move_target.unit = move_target_unit;
 		};
-		path_t* path = nullptr;
+		path_t* path = u->path;
 		if (!path) {
 			if (pf.field_1e) {
 				if (to != pf.destination) {
@@ -3502,24 +3908,21 @@ struct state_functions {
 					pf.long_path.resize((24 - pf.short_path.size()) * 2);
 				}
 			}
-			if (st.paths.size() < 1024) {
-				auto i = st.paths.emplace(st.paths.end());
-				path = &*i;
-				path->iterator = i;
+			path = new_path();
+			if (!path) return false;
+			path->delay = 0;
+			path->creation_frame = st.current_frame;
+			path->state_flags = 0;
+			path->long_path = std::move(pf.long_path);
+			path->full_long_path_size = pf.full_long_path_size;
+			path->current_long_path_index = pf.current_long_path_index;
+			path->short_path = std::move(pf.short_path);
+			path->current_short_path_index = 0;
 
-				path->delay = 0;
-				path->creation_frame = st.current_frame;
-				path->state_flags = 0;
-				path->long_path = pf.long_path;
-				path->current_long_path_index = pf.current_long_path_index;
-				path->short_path = pf.short_path;
-				path->current_short_path_index = 0;
+			path->source = u->sprite->position;
+			path->destination = to;
 
-				path->source = u->sprite->position;
-				path->destination = to;
-
-				u->path = path;
-			} else return false;
+			u->path = path;
 		}
 		path->next = path->short_path.at(path->current_short_path_index);
 		if (path->next == u->move_target.pos) u_unset_movement_flag(u, 0x10);
@@ -3527,14 +3930,14 @@ struct state_functions {
 		return true;
 	}
 
-	bool unit_path_to(unit_t* u, xy to) {
+	bool unit_path_to(unit_t* u, xy to, const unit_t* consider_collision_with_unit = nullptr) {
 		if (is_moving_along_path(u)) return true;
 		if (!u_ground_unit(u)) {
 			set_unit_move_target(u, to);
 			create_single_segment_path(u, to);
 			return true;
 		}
-		if (path_progress(u, to)) to = u->path->next;
+		if (path_progress(u, to, consider_collision_with_unit)) to = u->path->next;
 		else if (!u->path) return false;
 		if (u->next_target_waypoint != to) u->next_target_waypoint = to;
 		if (u->next_movement_waypoint != to) {
@@ -3550,7 +3953,7 @@ struct state_functions {
 			return true;
 		}
 		if (u_collision(u) && u_ground_unit(u)) {
-			st.paths.erase(u->path->iterator);
+			free_path(u->path);
 			u->path = nullptr;
 			u->movement_state = movement_states::UM_CheckIllegal;
 			return true;
@@ -3752,9 +4155,8 @@ struct state_functions {
 	}
 
 	bool movement_UM_AnotherPath(unit_t* u, execute_movement_struct& ems) {
-		if (unit_path_to(u, u->move_target.pos)) {
-			u->movement_state = movement_states::UM_FollowPath;
-		} else u->movement_state = movement_states::UM_FailedPath;
+		if (unit_path_to(u, u->move_target.pos)) u->movement_state = movement_states::UM_FollowPath;
+		else u->movement_state = movement_states::UM_FailedPath;
 		return true;
 	}
 
@@ -3811,7 +4213,7 @@ struct state_functions {
 	}
 
 	bool movement_UM_AtMoveTarget(unit_t* u, execute_movement_struct& ems) {
-		st.paths.erase(u->path->iterator);
+		free_path(u->path);
 		u->path = nullptr;
 		if (u->next_movement_waypoint != u->move_target.pos) u->next_movement_waypoint = u->move_target.pos;
 		if (!u_ground_unit(u) || u->movement_flags & 4) {
@@ -3819,6 +4221,28 @@ struct state_functions {
 		} else {
 			u->movement_state = movement_states::UM_CheckIllegal;
 		}
+		return true;
+	}
+
+	bool movement_UM_NewMoveTarget(unit_t* u, execute_movement_struct& ems) {
+		u->path->state_flags &= ~1;
+		if (!unit_update_path_movement_state(u, true)) {
+			free_path(u->path);
+			u->path = nullptr;
+			u->movement_state = movement_states::UM_Repath;
+		}
+		return true;
+	}
+
+	bool movement_UM_Repath(unit_t* u, execute_movement_struct& ems) {
+		const unit_t* collision_unit = nullptr;
+		if (u->path) {
+			collision_unit = get_unit(u->path->last_collision_unit);
+			free_path(u->path);
+			u->path = nullptr;
+		}
+		if (unit_path_to(u, u->move_target.pos, collision_unit)) u->movement_state = movement_states::UM_FollowPath;
+		else u->movement_state = movement_states::UM_FailedPath;
 		return true;
 	}
 
@@ -3860,6 +4284,16 @@ struct state_functions {
 				cont = movement_UM_StartPath(u, ems);
 				break;
 
+			case movement_states::UM_NewMoveTarget:
+				cont = movement_UM_NewMoveTarget(u, ems);
+				break;
+			case movement_states::UM_AnotherPath:
+				cont = movement_UM_AnotherPath(u, ems);
+				break;
+			case movement_states::UM_Repath:
+				cont = movement_UM_Repath(u, ems);
+				break;
+
 			case movement_states::UM_FollowPath:
 				cont = movement_UM_FollowPath(u, ems);
 				break;
@@ -3867,9 +4301,6 @@ struct state_functions {
 				cont = movement_UM_ScoutPath(u, ems);
 				break;
 
-			case movement_states::UM_AnotherPath:
-				cont = movement_UM_AnotherPath(u, ems);
-				break;
 			default:
 				xcept("fixme: movement state %d\n", u->movement_state);
 			}
@@ -4005,7 +4436,7 @@ struct state_functions {
 		auto& sight_vals = game_st.sight_values.at(range);
 		size_t tile_x = (size_t)pos.x / 32;
 		size_t tile_y = (size_t)pos.y / 32;
-		tile_t*base_tile = &st.tiles[tile_x + tile_y*game_st.map_tile_width];
+		tile_t* base_tile = &st.tiles[tile_x + tile_y*game_st.map_tile_width];
 		if (!in_air) {
 			auto* cur = sight_vals.maskdat.data();
 			auto* end = cur + sight_vals.min_mask_size;
@@ -4275,7 +4706,7 @@ struct state_functions {
 		} else if (visible_to_everyone(u)) {
 			return 0xff;
 		}
-		
+
 		uint32_t detected_flags = 0;
 
 		detected_flags |= 1 << u->owner;
@@ -4591,7 +5022,7 @@ struct state_functions {
 		set_image_modifier(image, image->modifier);
 		update_image_frame_index(image);
 	}
-	
+
 	void set_image_heading(image_t* image, direction_t heading) {
 		if (image->flags & image_t::flag_uses_special_offset) update_image_special_offset(image);
 		if (image->flags & image_t::flag_has_directional_frames) {
@@ -4743,7 +5174,7 @@ struct state_functions {
 			image_t* script_image = image;
 			image_t* image = create_image(image_type, script_image->sprite, offset, order, script_image);
 			if (!image) return (image_t*)nullptr;
-			
+
 			if (image->modifier == 0 && iscript_unit && u_hallucination(iscript_unit)) {
 				if (game_st.is_replay || iscript_unit->owner == game_st.local_player) {
 					set_image_modifier(image, image_t::modifier_hallucination);
@@ -4850,7 +5281,7 @@ struct state_functions {
 // 				a = *p++;
 // 				b = *p++;
 // 				if (no_side_effects) break;
-// 
+//
 // 				break;
 
 			case opc_sprol:
@@ -5013,7 +5444,7 @@ struct state_functions {
 				xcept("iscript: unhandled opcode %d", opc);
 			}
 		}
-		
+
 	}
 
 	bool iscript_run_anim(image_t* image, int new_anim) {
@@ -5039,7 +5470,7 @@ struct state_functions {
 		log("image %d: iscript run anim %d pc %d\n", image - st.images.data(), new_anim, anims_pc[new_anim]);
 		return iscript_execute(image, image->iscript_state);
 	}
-	
+
 	void image_update_cloak(image_t* image) {
 		if (image->modifier_data2) --image->modifier_data2;
 		else {
@@ -5070,7 +5501,7 @@ struct state_functions {
 
 		remove_sprite_from_tile_line(sprite);
 		bw_insert_list(st.free_sprites, *sprite);
-		
+
 		return false;
 	}
 
@@ -5269,7 +5700,7 @@ struct state_functions {
 	}
 
 	void update_unit_speed(unit_t*u) {
-		
+
 		int movement_type = u->unit_type->flingy->movement_type;
 		if (movement_type != 0 && movement_type != 1) {
 			if (u->flingy_movement_type == 2) {
@@ -5340,7 +5771,7 @@ struct state_functions {
 		if (st.unit_counts[u->owner][u->unit_type->id] < 0) st.unit_counts[u->owner][u->unit_type->id] = 0;
 	}
 
-	// 
+	//
 	// Unit finder --
 	// In Broodwar the unit finder works by keeping all units in two sorted vectors, one for x and one for y.
 	// Each unit is inserted into each vector twice with the top left and bottom right coordinates respectively.
@@ -5353,7 +5784,7 @@ struct state_functions {
 	// to be at least as large as the largest unit type in the game, by extending right and bottom, and then
 	// doing an additional bounds check when iterating to make sure it only returns units in the original search area.
 	// Otherwise, no bounds check is performed (as a performance optimization) since the indices already match the search area.
-	// 
+	//
 	// This means the order units are returned are essentially sorted as follows, where a and b are imaginary structures
 	// where a.from is the upper left and a.to is the bottom right of the unit bounding box, area is the search area,
 	// and a.insert_order is a unique incremental value that is set each time a unit is inserted:
@@ -5361,10 +5792,10 @@ struct state_functions {
 	//   int bx = b.from.x >= area.from.x ? b.from.x : b.to.x;
 	//   if (ax == bx) return a.insert_order > b.insert_order;
 	//   else return ax < bx;
-	// 
+	//
 	// In other words, they are sorted by leftmost x if it is within the area, otherwise rightmost x, and after that
 	// by reverse insertion order.
-	// 
+	//
 	// Now, as far as I can tell, the search area is supposed to be inclusive, so if you search from [32,32] to [64,64]
 	// and some unit's bounding box is from [0,0] to [32,32] then that unit should be returned (unit bounding boxes
 	// seem to be inclusive in all directions (edit: maybe not)).
@@ -5381,7 +5812,7 @@ struct state_functions {
 	// Note: There appear to be two search methods, the above paragraph only applies to one of them. The second method
 	// only does a lookup on the left and top coordinates, then iterates and does exclusive bounds checking. Thus, the
 	// only difference is the special case for small search areas (it is not present in the second method).
-	//  
+	//
 	// The order units are found is important sometimes, but not other times. For instance in code where we select
 	// one unit that matches some criterion, it is critically important that we select the right one where multiple
 	// might match. The easiest way to do this is to iterate through units in the same order as Broodwar.
@@ -5389,7 +5820,7 @@ struct state_functions {
 	// some criterion we select the correct one based on the sorting function above. Then we would not be able to
 	// break the iteration early, and also adding the logic to each search might be inconvenient or even slow
 	// in some cases.
-	// 
+	//
 	// To return units in the same order with good performance, we pretty much need to use the same method,
 	// however we do not need to keep a sorted list on the y axis. I believe dropping the y axis and just doing
 	// bounds check when iterating is equally fast or faster, and insert/erase is twice as fast.
@@ -5402,16 +5833,16 @@ struct state_functions {
 	// keeping one sorted vector for each. When inserting we just insert into the lower bound index of the appropriate
 	// group. To make iteration fast, each entry has a pointer to the next entry (in sorted order). The next entry
 	// might be in a different group and empty groups are skipped.
-	// 
+	//
 	// We expand the search in the same way as Broodwar, and take care to perform the bounds checking in the same
 	// way. Since we don't keep a sorted vector of y values, we specifically do an inclusive or exclusive bounds check
 	// based on whether the search height was smaller than the largest unit height.
 	// (this is currently incorrect for the second method, fixme?)
-	// 
+	//
 	// It might be worth considering maintaining two different unit finders, one ordered and one unordered, or even
 	// just an unordered one and then doing the additional work mentioned above when the order matters.
 	// Will have to see later in the development after the number of searches has gone up.
-	// 
+	//
 
 	void unit_finder_insert(unit_t* u) {
 		if (ut_turret(u)) return;
@@ -5625,14 +6056,14 @@ struct state_functions {
 
 		unit_finder_insert(index_from, u, bb.from.x);
 		unit_finder_insert(index_to, u, bb.to.x);
-		
+
 	}
 
 
 
 	struct unit_finder_search {
 		using value_type = unit_t*;
-		
+
 		struct iterator {
 			using value_type = unit_t*;
 			using iterator_category = std::forward_iterator_tag;
@@ -5787,7 +6218,7 @@ struct state_functions {
 		u->unit_type = unit_type;
 		u->resource_type = 0;
 		u->secondary_order_timer = 0;
-		
+
 		if (!iscript_execute_sprite(u->sprite)) {
 			xcept("initialize_unit_type: iscript removed the sprite (if this throws, then Broodwar would crash)");
 			u->sprite = nullptr;
@@ -6003,7 +6434,7 @@ struct state_functions {
 		for (image_t* img : ptr(sprite->images)) {
 			set_image_heading(img, heading);
 		}
-		
+
 	}
 
 	void apply_unit_effects(unit_t*u) {
@@ -6374,7 +6805,7 @@ struct state_functions {
 			increment_repulse_field(u);
 		}
 		reset_unit_path(u);
-		
+
 		u->movement_state = 0;
 		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
 		else u->pathing_flags &= ~1;
@@ -6743,7 +7174,16 @@ struct game_load_functions : state_functions {
 
 	}
 
-	void paths_create() {
+	regions_t::region* get_new_region() {
+		if (game_st.regions.regions.capacity() != 5000) game_st.regions.regions.reserve(5000);
+		if (game_st.regions.regions.size() >= 5000) xcept("too many regions");
+		game_st.regions.regions.emplace_back();
+		regions_t::region* r = &game_st.regions.regions.back();
+		r->index = game_st.regions.regions.size() - 1;
+		return r;
+	}
+
+	void regions_create() {
 
 		a_vector<uint8_t> unwalkable_flags(256 * 4 * 256 * 4);
 
@@ -6833,8 +7273,8 @@ struct game_load_functions : state_functions {
 		};
 
 		auto create_region = [&](rect_t<xy_t<size_t>> area) {
-			auto* r = st.regions.get_new_region();
-			uint16_t flags = (uint16_t)st.regions.tile_region_index[area.from.y * 256 + area.from.x];
+			auto* r = get_new_region();
+			uint16_t flags = (uint16_t)game_st.regions.tile_region_index[area.from.y * 256 + area.from.x];
 			if (flags < 5000) xcept("attempt to create region inside another region");
 			r->flags = flags;
 			r->tile_area = area;
@@ -6844,8 +7284,8 @@ struct game_load_functions : state_functions {
 			size_t index = r->index;
 			for (size_t y = area.from.y; y != area.to.y; ++y) {
 				for (size_t x = area.from.x; x != area.to.x; ++x) {
-					if (st.regions.tile_region_index[y * 256 + x] < 5000) xcept("attempt to create overlapping region");
-					st.regions.tile_region_index[y * 256 + x] = (uint16_t)index;
+					if (game_st.regions.tile_region_index[y * 256 + x] < 5000) xcept("attempt to create overlapping region");
+					game_st.regions.tile_region_index[y * 256 + x] = (uint16_t)index;
 					++tile_count;
 				}
 			}
@@ -6855,9 +7295,6 @@ struct game_load_functions : state_functions {
 
 		auto create_unreachable_bottom_region = [&]() {
 			auto* r = create_region({ {0, game_st.map_tile_height - 1}, {game_st.map_tile_width, game_st.map_tile_height} });
-			// The scale of the area and center values are way off for this region.
-			// It's probably a bug with no consequence, since the region is ignored when
-			// creating the other regions.
 			r->area = { {0, (int)game_st.map_height - 32}, {(int)game_st.map_width, (int)game_st.map_height} };
 			r->center.x = ((fp8::integer(r->area.from.x) + fp8::integer(r->area.to.x)) / 2);
 			r->center.y = ((fp8::integer(r->area.from.y) + fp8::integer(r->area.to.y)) / 2);
@@ -6871,7 +7308,7 @@ struct game_load_functions : state_functions {
 			size_t region_x = 0;
 			size_t region_y = 0;
 
-			auto bb = st.regions.tile_bounding_box;
+			auto bb = game_st.regions.tile_bounding_box;
 
 			auto find_empty_region = [&](size_t x, size_t y) {
 				if (x >= bb.to.x) {
@@ -6881,7 +7318,7 @@ struct game_load_functions : state_functions {
 				int start_x = x;
 				int start_y = y;
 				while (true) {
-					size_t index = st.regions.tile_region_index[y * 256 + x];
+					size_t index = game_st.regions.tile_region_index[y * 256 + x];
 					if (index >= 5000) {
 						//log("found region at %d %d index %x\n", x, y, index);
 						region_tile_index = index;
@@ -6903,7 +7340,7 @@ struct game_load_functions : state_functions {
 			size_t next_y = bb.from.y;
 
 			bool has_expanded_all = false;
-			size_t initial_regions_size = st.regions.regions.size();
+			size_t initial_regions_size = game_st.regions.regions.size();
 
 			int prev_size = 7 * 8;
 
@@ -6916,7 +7353,7 @@ struct game_load_functions : state_functions {
 					if (start_y >= bb.to.y) start_y = bb.from.y;
 				}
 				if (find_empty_region(start_x, start_y)) {
-						
+
 					auto find_area = [this](size_t begin_x, size_t begin_y, size_t index) {
 						size_t max_end_x = std::min(begin_x + 8, game_st.map_tile_width);
 						size_t max_end_y = std::min(begin_y + 7, game_st.map_tile_height);
@@ -6929,7 +7366,7 @@ struct game_load_functions : state_functions {
 						while ((x_is_good || y_is_good) && (end_x != max_end_x && end_y != max_end_y)) {
 							if (x_is_good) {
 								for (size_t y = begin_y; y != end_y; ++y) {
-									if (st.regions.tile_region_index[y * 256 + end_x] != index) {
+									if (game_st.regions.tile_region_index[y * 256 + end_x] != index) {
 										x_is_good = false;
 										break;
 									}
@@ -6937,14 +7374,14 @@ struct game_load_functions : state_functions {
 							}
 							if (y_is_good) {
 								for (size_t x = begin_x; x != end_x; ++x) {
-									if (st.regions.tile_region_index[end_y * 256 + x] != index) {
+									if (game_st.regions.tile_region_index[end_y * 256 + x] != index) {
 										y_is_good = false;
 										break;
 									}
 								}
 							}
 
-							if (st.regions.tile_region_index[end_y * 256 + end_x] != index) {
+							if (game_st.regions.tile_region_index[end_y * 256 + end_x] != index) {
 								its_all_good = false;
 							}
 							if (its_all_good) {
@@ -6993,7 +7430,7 @@ struct game_load_functions : state_functions {
 					next_x = area.to.x;
 					next_y = area.from.y;
 
-					if (st.regions.regions.size() >= 5000) xcept("too many regions (nooks and crannies)");
+					if (game_st.regions.regions.size() >= 5000) xcept("too many regions (nooks and crannies)");
 
 					auto* r = create_region(area);
 
@@ -7012,18 +7449,18 @@ struct game_load_functions : state_functions {
 						size_t index = r->index;
 
 						auto is_neighbor = [&](size_t x, size_t y) {
-							if (x != 0 && st.regions.tile_region_index[y * 256 + x - 1] == index) return true;
-							if (x != game_st.map_tile_width - 1 && st.regions.tile_region_index[y * 256 + x + 1] == index) return true;
-							if (y != 0 && st.regions.tile_region_index[(y - 1) * 256 + x] == index) return true;
-							if (y != game_st.map_tile_height - 1 && st.regions.tile_region_index[(y + 1) * 256 + x] == index) return true;
+							if (x != 0 && game_st.regions.tile_region_index[y * 256 + x - 1] == index) return true;
+							if (x != game_st.map_tile_width - 1 && game_st.regions.tile_region_index[y * 256 + x + 1] == index) return true;
+							if (y != 0 && game_st.regions.tile_region_index[(y - 1) * 256 + x] == index) return true;
+							if (y != game_st.map_tile_height - 1 && game_st.regions.tile_region_index[(y + 1) * 256 + x] == index) return true;
 							return false;
 						};
 
 						for (int i = 0; i < 2; ++i) {
 							for (size_t y = begin_y; y != end_y; ++y) {
 								for (size_t x = begin_x; x != end_x; ++x) {
-									if (st.regions.tile_region_index[y * 256 + x] == flags && is_neighbor(x, y)) {
-										st.regions.tile_region_index[y * 256 + x] = index;
+									if (game_st.regions.tile_region_index[y * 256 + x] == flags && is_neighbor(x, y)) {
+										game_st.regions.tile_region_index[y * 256 + x] = index;
 									}
 								}
 							}
@@ -7035,14 +7472,14 @@ struct game_load_functions : state_functions {
 
 					if (size <= 6 && !has_expanded_all) {
 						has_expanded_all = true;
-						for (size_t i = initial_regions_size; i != st.regions.regions.size(); ++i) {
-							expand(&st.regions.regions[i]);
+						for (size_t i = initial_regions_size; i != game_st.regions.regions.size(); ++i) {
+							expand(&game_st.regions.regions[i]);
 						}
 					}
 
 				} else {
-					if (st.regions.regions.size() >= 5000) xcept("too many regions (nooks and crannies)");
-					log("created %d regions\n", st.regions.regions.size());
+					if (game_st.regions.regions.size() >= 5000) xcept("too many regions (nooks and crannies)");
+					log("created %d regions\n", game_st.regions.regions.size());
 					break;
 				}
 			}
@@ -7052,7 +7489,7 @@ struct game_load_functions : state_functions {
 				size_t n = 0;
 				auto test = [&](bool cond, size_t x, size_t y) {
 					if (!cond) r[n++] = 0x1fff;
-					else r[n++] = st.regions.tile_region_index[y * 256 + x];
+					else r[n++] = game_st.regions.tile_region_index[y * 256 + x];
 				};
 				test(tile_y > 0, tile_x, tile_y - 1);
 				test(tile_x > 0, tile_x - 1, tile_y);
@@ -7067,7 +7504,7 @@ struct game_load_functions : state_functions {
 
 			auto refresh_regions = [&]() {
 
-				for (auto* r : ptr(st.regions.regions)) {
+				for (auto* r : ptr(game_st.regions.regions)) {
 					int max = std::numeric_limits<int>::max();
 					int min = std::numeric_limits<int>::min();
 					r->area = { { max, max }, { min, min } };
@@ -7075,9 +7512,9 @@ struct game_load_functions : state_functions {
 				}
 				for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 					for (size_t x = 0; x != game_st.map_tile_width; ++x) {
-						size_t index = st.regions.tile_region_index[y * 256 + x];
+						size_t index = game_st.regions.tile_region_index[y * 256 + x];
 						if (index < 5000) {
-							auto* r = &st.regions.regions[index];
+							auto* r = &game_st.regions.regions[index];
 							++r->tile_count;
 							if (r->area.from.x >(int)x * 32) r->area.from.x = x * 32;
 							if (r->area.from.y > (int)y * 32) r->area.from.y = y * 32;
@@ -7087,11 +7524,11 @@ struct game_load_functions : state_functions {
 					}
 				}
 
-				for (auto* r : ptr(st.regions.regions)) {
+				for (auto* r : ptr(game_st.regions.regions)) {
 					if (r->tile_count == 0) r->flags = 0x1fff;
 				}
 
-				for (auto* r : ptr(st.regions.regions)) {
+				for (auto* r : ptr(game_st.regions.regions)) {
 					if (r->tile_count == 0) continue;
 
 					r->walkable_neighbors.clear();
@@ -7099,12 +7536,12 @@ struct game_load_functions : state_functions {
 
 					for (int y = r->area.from.y / 32; y != r->area.to.y / 32; ++y) {
 						for (int x = r->area.from.x / 32; x != r->area.to.x / 32; ++x) {
-							if (st.regions.tile_region_index[y * 256 + x] != r->index) continue;
+							if (game_st.regions.tile_region_index[y * 256 + x] != r->index) continue;
 							auto neighbors = get_neighbors(x, y);
 							for (size_t i = 0; i < 8; ++i) {
 								size_t nindex = neighbors[i];
 								if (nindex == 0x1fff || nindex == r->index) continue;
-								auto* nr = &st.regions.regions[nindex];
+								auto* nr = &game_st.regions.regions[nindex];
 								bool add = false;
 								if (i < 4 || !r->walkable() || !nr->walkable()) {
 									add = true;
@@ -7159,23 +7596,22 @@ struct game_load_functions : state_functions {
 
 					if (!r->non_walkable_neighbors.empty()) {
 						for (auto& v : r->non_walkable_neighbors) {
-							if (v == &st.regions.regions.front() && &v != &r->non_walkable_neighbors.back()) std::swap(v, r->non_walkable_neighbors.back());
+							if (v == &game_st.regions.regions.front() && &v != &r->non_walkable_neighbors.back()) std::swap(v, r->non_walkable_neighbors.back());
 						}
 					}
 
 				}
 
-				for (auto* r : ptr(st.regions.regions)) {
-					r->center.x = ((fp8::integer(r->area.from.x) + fp8::integer(r->area.to.x)) / 2);
-					r->center.y = ((fp8::integer(r->area.from.y) + fp8::integer(r->area.to.y)) / 2);
+				for (auto* r : ptr(game_st.regions.regions)) {
+					r->center = {fp8::integer(r->tile_center.x * 32 + 16), fp8::integer(r->tile_center.y * 32 + 16)};
 				}
 
-				for (auto* r : ptr(st.regions.regions)) {
+				for (auto* r : ptr(game_st.regions.regions)) {
 					if (r->group_index < 0x4000) r->group_index = 0;
 				}
 				a_vector<regions_t::region*> stack;
 				size_t next_group_index = 1;
-				for (auto* r : ptr(st.regions.regions)) {
+				for (auto* r : ptr(game_st.regions.regions)) {
 					if (r->group_index == 0 && r->tile_count) {
 						size_t group_index = next_group_index++;
 						r->group_index = group_index;
@@ -7199,7 +7635,7 @@ struct game_load_functions : state_functions {
 
 			for (size_t n = 6;; n += 2) {
 
-				for (auto* r : reverse(ptr(st.regions.regions))) {
+				for (auto* r : reverse(ptr(game_st.regions.regions))) {
 					if (r->tile_count == 0 || r->tile_count >= n || r->group_index >= 0x4000) continue;
 					regions_t::region* smallest_neighbor = nullptr;
 					auto eval = [&](auto* nr) {
@@ -7214,7 +7650,7 @@ struct game_load_functions : state_functions {
 						auto* merge_into = smallest_neighbor;
 						for (size_t y = r->area.from.y / 32; y != r->area.to.y / 32; ++y) {
 							for (size_t x = r->area.from.x / 32; x != r->area.to.x / 32; ++x) {
-								size_t& index = st.regions.tile_region_index[y * 256 + x];
+								size_t& index = game_st.regions.tile_region_index[y * 256 + x];
 								if (index == r->index) index = merge_into->index;
 							}
 						}
@@ -7229,32 +7665,32 @@ struct game_load_functions : state_functions {
 				}
 
 				size_t n_non_empty_regions = 0;
-				for (auto* r : ptr(st.regions.regions)) {
+				for (auto* r : ptr(game_st.regions.regions)) {
 					if (r->tile_count) ++n_non_empty_regions;
 				}
 				log("n_non_empty_regions is %d\n", n_non_empty_regions);
 				if (n_non_empty_regions < 2500) break;
 			}
 
- 			a_vector<size_t> reindex(5000);
- 			size_t new_region_count = 0;
-			for (size_t i = 0; i != st.regions.regions.size(); ++i) {
-				auto* r = &st.regions.regions[i];
+			a_vector<size_t> reindex(5000);
+			size_t new_region_count = 0;
+			for (size_t i = 0; i != game_st.regions.regions.size(); ++i) {
+				auto* r = &game_st.regions.regions[i];
 				r->walkable_neighbors.clear();
 				r->non_walkable_neighbors.clear();
 				if (r->tile_count == 0) continue;
 				size_t new_index = new_region_count++;
 				reindex[i] = new_index;
 				r->index = new_index;
-				st.regions.regions[new_index] = std::move(*r);
+				game_st.regions.regions[new_index] = std::move(*r);
 			}
 			for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 				for (size_t x = 0; x != game_st.map_tile_height; ++x) {
-					size_t& index = st.regions.tile_region_index[y * 256 + x];
+					size_t& index = game_st.regions.tile_region_index[y * 256 + x];
 					index = reindex[index];
 				}
 			}
-			st.regions.regions.resize(new_region_count);
+			game_st.regions.regions.resize(new_region_count);
 
 			log("new_region_count is %d\n", new_region_count);
 
@@ -7265,7 +7701,7 @@ struct game_load_functions : state_functions {
 					auto tile = st.tiles[y * game_st.map_tile_width + x];
 					if (~tile.flags & tile_t::flag_partially_walkable) continue;
 					auto neighbors = get_neighbors(x, y);
-					auto* r = &st.regions.regions[st.regions.tile_region_index[y * 256 + x]];
+					auto* r = &game_st.regions.regions[game_st.regions.tile_region_index[y * 256 + x]];
 					auto count_4x1_walkable = [&](size_t walk_x, size_t walk_y) {
 						size_t r = 0;
 						if (is_walkable(walk_x, walk_y)) ++r;
@@ -7301,7 +7737,7 @@ struct game_load_functions : state_functions {
 							if (nindex == r->index) continue;
 							if (nindex < 0x2000) {
 								if (nindex >= 5000) continue;
-								auto* nr = &st.regions.regions[nindex];
+								auto* nr = &game_st.regions.regions[nindex];
 								if (nr->walkable()) {
 									highest_n = n;
 									highest_nindex = nindex;
@@ -7319,8 +7755,8 @@ struct game_load_functions : state_functions {
 							}
 						}
 						if (highest_n) {
-							if (highest_nindex < 0x2000) r2 = &st.regions.regions[highest_nindex];
-							else r2 = st.regions.split_regions[highest_nindex - 0x2000].a;
+							if (highest_nindex < 0x2000) r2 = &game_st.regions.regions[highest_nindex];
+							else r2 = game_st.regions.split_regions[highest_nindex - 0x2000].a;
 						}
 					} else {
 						std::array<size_t, 8> n_unwalkable {};
@@ -7342,7 +7778,7 @@ struct game_load_functions : state_functions {
 							if (nindex == r->index) continue;
 							if (nindex < 0x2000) {
 								if (nindex >= 5000) continue;
-								auto* nr = &st.regions.regions[nindex];
+								auto* nr = &game_st.regions.regions[nindex];
 								if (nr->walkable()) {
 									highest_n = n;
 									highest_nindex = nindex;
@@ -7364,21 +7800,21 @@ struct game_load_functions : state_functions {
 							}
 						}
 						if (highest_n) {
-							if (highest_nindex < 0x2000) r2 = &st.regions.regions[highest_nindex];
-							else r2 = st.regions.split_regions[highest_nindex - 0x2000].a;
+							if (highest_nindex < 0x2000) r2 = &game_st.regions.regions[highest_nindex];
+							else r2 = game_st.regions.split_regions[highest_nindex - 0x2000].a;
 						}
 					}
 					uint16_t mask = 0;
 					if (!r->walkable() && (!r2 || !r2->walkable())) {
 						mask = 0xffff;
 					}
-					st.regions.tile_region_index[y * 256 + x] = 0x2000 + st.regions.split_regions.size();
-					st.regions.split_regions.push_back({ mask, r, r2 ? r2 : r });
+					game_st.regions.tile_region_index[y * 256 + x] = 0x2000 + game_st.regions.split_regions.size();
+					game_st.regions.split_regions.push_back({ mask, r, r2 ? r2 : r });
 				}
 			}
-			log("created %d split regions\n", st.regions.split_regions.size());
+			log("created %d split regions\n", game_st.regions.split_regions.size());
 
-			for (auto* r : ptr(st.regions.regions)) {
+			for (auto* r : ptr(game_st.regions.regions)) {
 				r->priority = 0;
 				static_vector<regions_t::region*, 5> nvec;
 				for (auto* nr : r->non_walkable_neighbors) {
@@ -7407,7 +7843,7 @@ struct game_load_functions : state_functions {
 					++y;
 					if (y >= game_st.map_walk_height) y = 0;
 				}
-				x &= ~(4 - 1);
+				x = x / 4 * 4;
 				size_t start_x = x;
 				size_t start_y = y;
 				while (is_every_dir_walkable(x, y) && is_every_dir_walkable(x + 1, y) && is_every_dir_walkable(x + 2, y) && is_every_dir_walkable(x + 3, y)) {
@@ -7486,18 +7922,18 @@ struct game_load_functions : state_functions {
 
 					uint8_t flags0 = (uint8_t)(cur_dir ^ 2 * lut1val ^ ~(2 * cur_dir) & 3);
 					uint8_t flags1 = (uint8_t)(cur_dir ^ 2 * (next_walkable ^ cur_dir & 1) ^ 1);
-					if (cur_dir == 0) { 
+					if (cur_dir == 0) {
 						uint8_t flags = flags0 & 3 | 4 * (flags1 & 3 | 4 * (lut1val | 2 * next_walkable));
-						st.regions.contours[cur_dir].push_back({ {cy, cx, nx}, cur_dir, flags });
+						game_st.regions.contours[cur_dir].push_back({ {cy, cx, nx}, cur_dir, flags });
 					} else if (cur_dir == 1) {
 						uint8_t flags = flags0 & 3 | 4 * (flags1 & 3 | 4 * (lut1val | 2 * next_walkable));
-						st.regions.contours[cur_dir].push_back({ { cx, cy, ny}, cur_dir, flags });
+						game_st.regions.contours[cur_dir].push_back({ { cx, cy, ny}, cur_dir, flags });
 					} else if (cur_dir == 2) {
 						uint8_t flags = flags1 & 3 | 4 * (flags0 & 3 | 4 * (next_walkable | 2 * lut1val));
-						st.regions.contours[cur_dir].push_back({ { cy, nx, cx}, cur_dir, flags });
+						game_st.regions.contours[cur_dir].push_back({ { cy, nx, cx}, cur_dir, flags });
 					} else if (cur_dir == 3) {
 						uint8_t flags = flags1 & 3 | 4 * (flags0 & 3 | 4 * (next_walkable | 2 * lut1val));
-						st.regions.contours[cur_dir].push_back({ { cx, ny, cy}, cur_dir, flags });
+						game_st.regions.contours[cur_dir].push_back({ { cx, ny, cy}, cur_dir, flags });
 					} else xcept("unreachable");
 
 					if (!next_walkable) cur_dir = next_dir;
@@ -7519,7 +7955,7 @@ struct game_load_functions : state_functions {
 
 			}
 
-			for (auto& v : st.regions.contours) {
+			for (auto& v : game_st.regions.contours) {
 				std::sort(v.begin(), v.end(), [&](auto& a, auto& b) {
 					if (a.v[0] != b.v[0]) return a.v[0] < b.v[0];
 					if (a.v[1] != b.v[1]) return a.v[1] < b.v[1];
@@ -7530,20 +7966,20 @@ struct game_load_functions : state_functions {
 
 		};
 
-		st.regions.tile_bounding_box = { {0, 0}, {game_st.map_tile_width, game_st.map_tile_height} };
+		game_st.regions.tile_bounding_box = { {0, 0}, {game_st.map_tile_width, game_st.map_tile_height} };
 
 		set_unwalkable_flags();
 
 // 		for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 // 			for (size_t x = 0; x != game_st.map_tile_width; ++x) {
-// 				auto& index = st.regions.tile_region_index[y * 256 + x];
+// 				auto& index = game_st.regions.tile_region_index[y * 256 + x];
 // 				index = 4999;
 // 			}
 // 		}
 
 		for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 			for (size_t x = 0; x != game_st.map_tile_width; ++x) {
-				auto& index = st.regions.tile_region_index[y * 256 + x];
+				auto& index = game_st.regions.tile_region_index[y * 256 + x];
 				auto& t = st.tiles[y * game_st.map_tile_height + x];
 				if (~t.flags & tile_t::flag_walkable) index = 0x1ffd;
 				else if (t.flags & tile_t::flag_middle) index = 0x1ff9;
@@ -8023,7 +8459,7 @@ struct game_load_functions : state_functions {
 			tiles_flags_and(0, game_st.map_tile_height - 1, game_st.map_tile_width, 1, ~(tile_t::flag_walkable | tile_t::flag_has_creep | tile_t::flag_partially_walkable));
 			tiles_flags_or(0, game_st.map_tile_height - 1, game_st.map_tile_width, 1, tile_t::flag_unbuildable);
 
-			paths_create();
+			regions_create();
 		};
 
 		bool bVictoryCondition = false;
@@ -8294,7 +8730,7 @@ struct game_load_functions : state_functions {
 					int timer = u_hallucination(u) ? 1350 : 1800;
 					if (u->remove_timer == 0 || timer < u->remove_timer) u->remove_timer = timer;
 				}
-				
+
 				log("created initial unit %p with id %d\n", u, u - st.units.data());
 
 			}
@@ -8686,7 +9122,7 @@ void global_init(global_state&st) {
 					vec[i] = { x,y };
 				}
 			}
-			
+
 			return lo_offsets.size() - 1;
 		};
 
@@ -8844,7 +9280,8 @@ void init() {
 	auto tick = [&]() {
 		if (true) {
 			for (unit_t* u : ptr(st.visible_units)) {
-				if (frame == 50) order_move(u - &st.units.front(), 68 * 32, 60 * 32);
+				//if (frame == 50) order_move(u - &st.units.front(), 68 * 32, 60 * 32);
+				if (frame == 50) order_move(u - &st.units.front(), 1980, 1928);
 			}
 		} else if (true) {
 			if (random() % 8 == 0) {
