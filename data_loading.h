@@ -119,6 +119,12 @@ struct data_type_cast_helper<direction_t, int8_t> {
 		return direction_t::from_raw(v);
 	}
 };
+template<>
+struct data_type_cast_helper<fp8, int8_t> {
+	fp8 operator()(int8_t v) {
+		return ufp8::from_raw(v).as_signed();
+	}
+};
 
 template<typename to_T, typename from_T>
 to_T data_type_cast(from_T v) {
@@ -218,7 +224,7 @@ unit_types_t load_units_dat(a_string fn) {
 	rawr(uint16_t, last_pissed_sound, units_count);
 	rawr(uint16_t, first_yes_sound, units_count);
 	rawr(uint16_t, last_yes_sound, units_count);
-	rawr(int16_t, staredit_placement_box, total_count);
+	rawr(int16_t, tile_size, total_count);
 	rawr(uint16_t, addon_horizontal, buildings_count);
 	rawr(uint16_t, addon_vertical, buildings_count);
 	rawr(int16_t, dimensions, total_count);
@@ -227,7 +233,7 @@ unit_types_t load_units_dat(a_string fn) {
 	rawr(uint16_t, gas_cost, total_count);
 	rawr(uint16_t, build_time, total_count);
 	rawr(uint16_t, unknown2, total_count);
-	rawr(uint8_t, staredit_group_flags, total_count);
+	rawr(uint8_t, group_flags, total_count);
 	rawr(uint8_t, supply_provided, total_count);
 	rawr(uint8_t, supply_required, total_count);
 	rawr(uint8_t, space_required, total_count);

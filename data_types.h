@@ -83,7 +83,7 @@ struct unit_type_t {
 	int last_pissed_sound;
 	int first_yes_sound;
 	int last_yes_sound;
-	xy staredit_placement_box;
+	xy tile_size;
 	int addon_horizontal;
 	int addon_vertical;
 	rect dimensions;
@@ -92,7 +92,7 @@ struct unit_type_t {
 	int gas_cost;
 	int build_time;
 	int unknown2;
-	int staredit_group_flags;
+	int group_flags;
 	int supply_provided;
 	int supply_required;
 	size_t space_required;
@@ -127,7 +127,7 @@ struct weapon_type_t {
 	int damage_bonus;
 	int cooldown;
 	int damage_factor;
-	direction_t attack_angle;
+	fp8 attack_angle;
 	int launch_spin;
 	int forward_offset;
 	int upward_offset;
