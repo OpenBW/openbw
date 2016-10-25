@@ -242,15 +242,12 @@ struct state_base_non_copyable {
 	intrusive_list<path_t, default_link_f> free_paths;
 	a_list<path_t> paths;
 
-	static const size_t unit_finder_group_size = 32;
 	struct unit_finder_entry {
 		unit_t* u;
 		int value;
-		std::pair<unit_finder_entry*, unit_finder_entry*> link;
 	};
-	a_vector<a_vector<unit_finder_entry>> unit_finder_groups;
-	intrusive_list<unit_finder_entry, default_link_f> unit_finder_list;
-	using unit_finder_list_iterator = decltype(unit_finder_list)::iterator;
+	a_vector<unit_finder_entry> unit_finder_x;
+	a_vector<unit_finder_entry> unit_finder_y;
 };
 
 struct state : state_base_copyable, state_base_non_copyable {
@@ -779,14 +776,15 @@ struct state_functions {
 
 	}
 
+	// todo: does this stuff belong here, or should it be part of graphics stuff?
 	void update_selection_sprite(sprite_t* sprite, int color) {
 		if (!sprite->selection_timer) return;
 		--sprite->selection_timer;
 		if (~sprite->visibility_flags&st.local_mask) sprite->selection_timer = 0;
-		if (sprite->selection_timer & 8 || (sprite->selection_timer == 0 && sprite->flags&SpriteFlags::Selected)) {
-			if (~sprite->flags&SpriteFlags::DrawSelection) {
+		if (sprite->selection_timer & 8 || (sprite->selection_timer == 0 && s_flag(sprite, sprite_t::flag_selected))) {
+			if (!s_flag(sprite, (sprite_t::flags_t)1)) {
 				if (create_selection_circle(sprite, color, idenums::IMAGEID_Selection_Circle_22pixels)) {
-					sprite->flags |= SpriteFlags::DrawSelection;
+					sprite->flags |= 1;
 				}
 			}
 		} else remove_selection_circle(sprite);
@@ -1238,8 +1236,8 @@ struct state_functions {
 			if (!unit_target_is_visible(u, target)) continue;
 			if (!unit_can_attack_target(u, target)) continue;
 			int distance = units_distance(main_unit, target);
-			if (min_distance && distance < min_distance) continue;
 			if (distance > max_distance) continue;
+			if (distance < min_distance) continue;
 			if (!can_turn) {
 				if (!attacking_unit->unit_type->ground_weapon) xcept("find_acquire_target: null ground weapon");
 				if (!unit_target_in_attack_angle(attacking_unit, target, attacking_unit->unit_type->ground_weapon)) continue;
@@ -1974,14 +1972,16 @@ struct state_functions {
 
 	bool unit_dead(const unit_t* u) const {
 		return u->order_type->id == Orders::Die && u->order_state == 1;
-	};
+	}
 
-	struct contour_search {
+	bool unit_type_can_fit_at(const unit_type_t* unit_type, xy pos) const {
+		if (!is_in_map_bounds(unit_type, pos)) return false;
+		if (!is_walkable(pos)) return false;
 		std::array<int, 4> inner;
-		std::array<int, 4> outer;
-	};
-
-	bool contour_is_space_available(const contour_search& s, xy pos) const {
+		inner[0] = unit_type->dimensions.from.y;
+		inner[1] = -unit_type->dimensions.to.x;
+		inner[2] = -unit_type->dimensions.to.y;
+		inner[3] = unit_type->dimensions.from.x;
 
 		auto cmp_u = [&](int v, const regions_t::contour& c) {
 			return v < c.v[0];
@@ -1993,43 +1993,27 @@ struct state_functions {
 		auto& c0 = game_st.regions.contours[0];
 		for (auto i = std::upper_bound(c0.begin(), c0.end(), pos.y, cmp_u); i != c0.begin();) {
 			--i;
-			if (s.inner[0] + i->v[0] < pos.y) break;
-			if (s.inner[1] + i->v[1] <= pos.x && s.inner[3] + i->v[2] >= pos.x) return false;
+			if (inner[0] + i->v[0] < pos.y) break;
+			if (inner[1] + i->v[1] <= pos.x && inner[3] + i->v[2] >= pos.x) return false;
 		}
 		auto& c1 = game_st.regions.contours[1];
 		for (auto i = std::lower_bound(c1.begin(), c1.end(), pos.x, cmp_l); i != c1.end(); ++i) {
-			if (s.inner[1] + i->v[0] > pos.x) break;
-			if (s.inner[2] + i->v[1] <= pos.y && s.inner[0] + i->v[2] >= pos.y) return false;
+			if (inner[1] + i->v[0] > pos.x) break;
+			if (inner[2] + i->v[1] <= pos.y && inner[0] + i->v[2] >= pos.y) return false;
 		}
 		auto& c2 = game_st.regions.contours[2];
 		for (auto i = std::lower_bound(c2.begin(), c2.end(), pos.y, cmp_l); i != c2.end(); ++i) {
-			if (s.inner[2] + i->v[0] > pos.y) break;
-			if (s.inner[1] + i->v[1] <= pos.x && s.inner[3] + i->v[2] >= pos.x) return false;
+			if (inner[2] + i->v[0] > pos.y) break;
+			if (inner[1] + i->v[1] <= pos.x && inner[3] + i->v[2] >= pos.x) return false;
 		}
 		auto& c3 = game_st.regions.contours[3];
 		for (auto i = std::upper_bound(c3.begin(), c3.end(), pos.x, cmp_u); i != c3.begin();) {
 			--i;
-			if (s.inner[3] + i->v[0] < pos.x) break;
-			if (s.inner[2] + i->v[1] <= pos.y && s.inner[0] + i->v[2] >= pos.y) return false;
+			if (inner[3] + i->v[0] < pos.x) break;
+			if (inner[2] + i->v[1] <= pos.y && inner[0] + i->v[2] >= pos.y) return false;
 		}
 
 		return true;
-
-	}
-
-	bool unit_type_can_fit_at(const unit_type_t* unit_type, xy pos) const {
-		if (!is_in_map_bounds(unit_type, pos)) return false;
-		if (!is_walkable(pos)) return false;
-		contour_search s;
-		s.inner[0] = unit_type->dimensions.from.y;
-		s.outer[0] = unit_type->dimensions.from.y + 1;
-		s.inner[1] = -unit_type->dimensions.to.x;
-		s.outer[1] = -unit_type->dimensions.to.x - 1;
-		s.inner[2] = -unit_type->dimensions.to.y;
-		s.outer[2] = -unit_type->dimensions.to.y - 1;
-		s.inner[3] = unit_type->dimensions.from.x;
-		s.outer[3] = unit_type->dimensions.from.x + 1;
-		return contour_is_space_available(s, pos);
 	}
 
 	bool unit_target_is_enemy(const unit_t* u, const unit_t* target) const {
@@ -2292,6 +2276,195 @@ struct state_functions {
 		u->movement_flags = ems.pre_movement_flags;
 	}
 
+	bool check_unit_movement_terrain_collision(unit_t* u, xy movement) {
+		xy new_pos = u->sprite->position + movement;
+		if (new_pos.x >= u->terrain_no_collision_bounds.from.x && new_pos.y >= u->terrain_no_collision_bounds.from.y) {
+			if (new_pos.x <= u->terrain_no_collision_bounds.to.x && new_pos.y <= u->terrain_no_collision_bounds.to.y) return false;
+		}
+
+		xy pos = u->sprite->position;
+		rect bounds = {pos - xy(128, 128), pos + xy(128, 128)};
+
+		std::array<int, 4> inner;
+		inner[0] = u->unit_type->dimensions.from.y;
+		inner[1] = -u->unit_type->dimensions.to.x;
+		inner[2] = -u->unit_type->dimensions.to.y;
+		inner[3] = u->unit_type->dimensions.from.x;
+
+		auto cmp_u = [&](int v, const regions_t::contour& c) {
+			return v < c.v[0];
+		};
+		auto cmp_l = [&](const regions_t::contour& c, int v) {
+			return c.v[0] < v;
+		};
+
+		auto& c0 = game_st.regions.contours[0];
+		auto& c1 = game_st.regions.contours[1];
+		auto& c2 = game_st.regions.contours[2];
+		auto& c3 = game_st.regions.contours[3];
+
+		auto i0 = std::upper_bound(c0.begin(), c0.end(), pos.y - inner[0] + 1, cmp_u);
+		auto i1 = std::lower_bound(c1.begin(), c1.end(), pos.x - inner[1] - 1, cmp_l);
+		auto i2 = std::lower_bound(c2.begin(), c2.end(), pos.y - inner[2] - 1, cmp_l);
+		auto i3 = std::upper_bound(c3.begin(), c3.end(), pos.x - inner[3] + 1, cmp_u);
+
+		auto expand = [&](regions_t::contour c) {
+			c.v[0] += inner[c.dir];
+			c.v[1] += inner[c.flags & 3];
+			c.v[2] += inner[(c.flags >> 2) & 3];
+			return c;
+		};
+
+		while (true) {
+			bool done = true;
+			if (i0 != c0.begin()) {
+				done = false;
+				--i0;
+				auto c = expand(*i0);
+				log("i0 %d %d %d\n", c.v[0], c.v[1], c.v[2]);
+				if (c.v[0] >= bounds.from.y) {
+					if (c.v[2] >= bounds.from.x && c.v[1] <= bounds.to.x) {
+						if (pos.x < c.v[1] && pos.y - c.v[0] < c.v[1] - pos.x) {
+							bounds.to.x = c.v[1] - 1;
+						} else if (pos.x > c.v[2] && pos.y - c.v[0] < pos.x - c.v[2]) {
+							bounds.from.x = c.v[2] + 1;
+						} else {
+							bounds.from.y = c.v[0] + 1;
+						}
+					}
+				} else {
+					i0 = c0.begin();
+				}
+			}
+			if (i1 != c1.end()) {
+				done = false;
+				auto c = expand(*i1);
+				log("i1 %d %d %d\n", c.v[0], c.v[1], c.v[2]);
+				++i1;
+				if (c.v[0] <= bounds.to.x) {
+					if (c.v[2] >= bounds.from.y && c.v[1] <= bounds.to.y) {
+						if (pos.y < c.v[1] && c.v[0] - pos.x < c.v[1] - pos.y) {
+							bounds.to.y = c.v[1] - 1;
+						} else if (pos.y > c.v[2] && c.v[0] - pos.x < pos.y - c.v[2]) {
+							bounds.from.y = c.v[2] + 1;
+						} else {
+							bounds.to.x = c.v[0] - 1;
+						}
+					}
+				} else {
+					i1 = c1.end();
+				}
+			}
+			if (i2 != c2.end()) {
+				done = false;
+				auto c = expand(*i2);
+				log("i2 %d %d %d\n", c.v[0], c.v[1], c.v[2]);
+				++i2;
+				if (c.v[0] <= bounds.to.y) {
+					if (c.v[2] >= bounds.from.x && c.v[1] <= bounds.to.x) {
+						if (pos.x < c.v[1] && c.v[0] - pos.y < c.v[1] - pos.x) {
+							bounds.to.x = c.v[1] - 1;
+						} else if (pos.x > c.v[2] && c.v[0] - pos.y < pos.x - c.v[2]) {
+							bounds.from.x = c.v[2] + 1;
+						} else {
+							bounds.to.y = c.v[0] - 1;
+						}
+					}
+				} else {
+					i2 = c2.end();
+				}
+			}
+			if (i3 != c3.begin()) {
+				done = false;
+				--i3;
+				auto c = expand(*i3);
+				log("i3 %d %d %d\n", c.v[0], c.v[1], c.v[2]);
+				if (c.v[0] >= bounds.from.x) {
+					if (c.v[2] >= bounds.from.y && c.v[1] <= bounds.to.y) {
+						if (pos.y < c.v[1] && pos.x - c.v[0] < c.v[1] - pos.y) {
+							bounds.to.y = c.v[1] - 1;
+						} else if (pos.y > c.v[2] && pos.x - c.v[0] < pos.y - c.v[2]) {
+							bounds.from.y = c.v[2] + 1;
+						} else {
+							bounds.from.x = c.v[0] + 1;
+						}
+					}
+				} else {
+					i3 = c3.begin();
+				}
+			}
+			if (done) break;
+		}
+		log("bounds are %d %d %d %d\n", bounds.from.x, bounds.from.y, bounds.to.x, bounds.to.y);
+
+		u->terrain_no_collision_bounds = bounds;
+		if (new_pos.x >= u->terrain_no_collision_bounds.from.x && new_pos.y >= u->terrain_no_collision_bounds.from.y) {
+			if (new_pos.x <= u->terrain_no_collision_bounds.to.x && new_pos.y <= u->terrain_no_collision_bounds.to.y) return false;
+		}
+
+		xy min_pos = pos;
+		xy max_pos = new_pos;
+		if (max_pos.x < min_pos.x) std::swap(min_pos.x, max_pos.x);
+		if (max_pos.y < min_pos.y) std::swap(min_pos.y, max_pos.y);
+
+		if (new_pos.y < pos.y) {
+			for (auto i = std::upper_bound(c0.begin(), c0.end(), pos.y - inner[0] + 1, cmp_u); i != c0.begin();) {
+				--i;
+				auto c = expand(*i);
+				if (c.v[0] < new_pos.y) break;
+				if (c.v[1] <= max_pos.x && c.v[2] >= min_pos.x) {
+					if (~c.flags & 0x30) return true;
+					if (c.v[1] <= min_pos.x) return true;
+					if (c.v[2] >= max_pos.x) return true;
+				}
+			}
+		}
+		if (new_pos.x > pos.x) {
+			for (auto i = std::lower_bound(c1.begin(), c1.end(), pos.x - inner[1] - 1, cmp_l); i != c1.end(); ++i) {
+				auto c = expand(*i);
+				if (c.v[0] > new_pos.y) break;
+				if (c.v[1] <= max_pos.y && c.v[2] >= min_pos.y) {
+					if (~c.flags & 0x30) return true;
+					if (c.v[1] <= min_pos.y) return true;
+					if (c.v[2] >= max_pos.y) return true;
+				}
+			}
+		}
+		if (new_pos.y > pos.y) {
+			for (auto i = std::lower_bound(c2.begin(), c2.end(), pos.y - inner[2] - 1, cmp_l); i != c2.end(); ++i) {
+				auto c = expand(*i);
+				if (c.v[0] > new_pos.y) break;
+				if (c.v[1] <= max_pos.x && c.v[2] >= min_pos.x) {
+					if (~c.flags & 0x30) return true;
+					if (c.v[1] <= min_pos.x) return true;
+					if (c.v[2] >= max_pos.x) return true;
+				}
+			}
+		}
+		if (new_pos.x < pos.x) {
+			for (auto i = std::upper_bound(c3.begin(), c3.end(), pos.x - inner[3] + 1, cmp_u); i != c3.begin();) {
+				--i;
+				auto c = expand(*i);
+				if (c.v[0] < new_pos.y) break;
+				if (c.v[1] <= max_pos.y && c.v[2] >= min_pos.y) {
+					if (~c.flags & 0x30) return true;
+					if (c.v[1] <= min_pos.y) return true;
+					if (c.v[2] >= max_pos.y) return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	bool check_unit_movement_terrain_collision(unit_t* u, execute_movement_struct& ems) {
+		if (u_ground_unit(u)) {
+			return check_unit_movement_terrain_collision(u, ems.position - u->sprite->position);
+		} else {
+			return !is_in_map_bounds(unit_sprite_bounding_box(u));
+		}
+	}
+
 	void update_repulse_direction(unit_t* u) {
 		direction_t repulse_dir = u->repulse_direction;
 		if (!unit_is_at_move_target(u)) {
@@ -2303,7 +2476,7 @@ struct state_functions {
 			if (repulse_dir < direction_t::zero()) repulse_dir = -repulse_dir;
 			u->repulse_flags &= 0xf;
 		} else if ((size_t)bb.to.x > game_st.map_width - 32) {
-			if (repulse_dir >= direction_t::zero()) repulse_dir = -repulse_dir;
+			if (repulse_dir > direction_t::zero()) repulse_dir = -repulse_dir;
 			u->repulse_flags &= 0xf;
 		}
 		if (bb.from.y < 32) {
@@ -2387,7 +2560,6 @@ struct state_functions {
 		int remaining_distance = xy_length(u->path->next - u->sprite->position);
 		if (remaining_distance > 16) return true;
 		auto remaining_turn = fp8::extend(u->desired_velocity_direction - u->next_velocity_direction).abs();
-		log("remaining_turn.raw_value is %d, remaining_distance is %d\n", remaining_turn.raw_value, remaining_distance);
 		if (remaining_turn.raw_value <= remaining_distance * 2) return true;
 		if (u->path->current_short_path_index >= u->path->short_path.size() - 1) {
 			if (get_region_at(u->sprite->position) != u->path->long_path[u->path->current_long_path_index]) return true;
@@ -2607,6 +2779,7 @@ struct state_functions {
 			size_t full_path_size = 0;
 			if (path_is_reversed) {
 				for (auto* n = goal_node; n; n = n->prev) {
+					if (n->region->group_index != pf.source_region->group_index) break;
 					if (pf.long_path.size() != 50) pf.long_path.push_back(n->region);
 					++full_path_size;
 				}
@@ -2658,9 +2831,9 @@ struct state_functions {
 			xy cur_pos_max;
 			xy cur_pos_min;
 
-			std::array<a_vector<regions_t::contour>, 4> x_boxes;
+			std::array<a_vector<regions_t::contour>, 4> local_edges;
 
-			std::array<regions_t::contour*, 4> box_neighbors;
+			std::array<const regions_t::contour*, 4> box_neighbors;
 
 			struct neighbor_t {
 				xy pos;
@@ -2732,12 +2905,12 @@ struct state_functions {
 		pf_area_visited.push_back({(int)game_st.map_width, {}});
 
 		auto pf_remove_visited_flags = [&](xy pos, int flags) {
-			//log("pf_remove_visited_flags %d %d in %02x\n", pos.x, pos.y, (uint8_t)flags);
+			log("pf_remove_visited_flags %d %d in %02x\n", pos.x, pos.y, (uint8_t)flags);
 			auto cur = std::upper_bound(pf_area_visited.begin(), pf_area_visited.end(), pos.x, [&](int a, auto& b) {
 				return a < b.x;
 			});
 			--cur;
-			//log("cur is %d\n", cur->x);
+			log("cur is %d\n", cur->x);
 
 			auto i = cur->y.begin();
 			for (;i != cur->y.end(); ++i) {
@@ -2779,25 +2952,41 @@ struct state_functions {
 					}
 				}
 			}
-			//log("pf_remove_visited_flags out %02x\n", (uint8_t)(flags & mask));
+			log("pf_remove_visited_flags out %02x\n", (uint8_t)(flags & mask));
 			return flags & mask;
 		};
 
-		auto pf_box_terrain = [&]() {
+		auto pf_add_local_edge = [&](int n, const regions_t::contour& c) {
+			log("add local edge %d %d %d %d %#x\n", c.v[0], c.v[1], c.v[2], c.dir, c.flags);
+			auto& local_edges = w.local_edges[n];
+			auto i = local_edges.begin();
+			for (;i != local_edges.end(); ++i) {
+				if (i->v[0] > c.v[0]) break;
+				if (i->v[0] == c.v[0]) {
+					if (c.v[1] + w.inner[c.flags & 3] <= i->v[2] + w.inner[(i->flags >> 2) & 3] + 1) {
+						if (c.v[2] + w.inner[(c.flags >> 2) & 3] >= i->v[1] + w.inner[i->flags & 3] - 1) {
+							if (c.v[1] < i->v[1]) i->v[1] = c.v[1];
+							if (c.v[2] > i->v[2]) i->v[2] = c.v[2];
+							return;
+						}
+					}
+				}
+			}
+			local_edges.insert(i, c);
+		};
 
-			auto cmp_u = [&](int v, const regions_t::contour& c) {
-				return v < c.v[0];
-			};
+		auto pf_add_local_terrain = [&]() {
+
 			auto cmp_l = [&](const regions_t::contour& c, int v) {
 				return c.v[0] < v;
 			};
 
 			auto& c0 = game_st.regions.contours[0];
-			for (auto i = std::upper_bound(c0.begin(), c0.end(), w.cur_pos_min.y - w.inner[0] - 1, cmp_u); i != c0.end(); ++i) {
+			for (auto i = std::lower_bound(c0.begin(), c0.end(), w.cur_pos_min.y - w.inner[0] - 1, cmp_l); i != c0.end(); ++i) {
 				if (i->v[0] > w.cur_pos.y - w.inner[0] - 1) break;
 				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.x) {
 					if (i->v[2] + w.inner[(i->flags >> 2) & 3] >= w.cur_pos_min.x) {
-						xcept("fixme pf_crash");
+						pf_add_local_edge(0, *i);
 					}
 				}
 			}
@@ -2806,7 +2995,7 @@ struct state_functions {
 				if (i->v[0] > w.cur_pos_max.x - w.inner[1] + 1) break;
 				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.y) {
 					if (i->v[2] + w.inner[(i->flags >> 2) & 3] >= w.cur_pos_min.y) {
-						xcept("fixme pf_crash");
+						pf_add_local_edge(1, *i);
 					}
 				}
 			}
@@ -2815,16 +3004,18 @@ struct state_functions {
 				if (i->v[0] > w.cur_pos_max.y - w.inner[2] + 1) break;
 				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.x) {
 					if (i->v[2] + w.inner[(i->flags >> 2) & 3] >= w.cur_pos_min.x) {
-						xcept("fixme pf_crash");
+						pf_add_local_edge(2, *i);
 					}
 				}
 			}
+			log("w.cur_pos_min.x - w.inner[3] - 1 is %d\n", w.cur_pos_min.x - w.inner[3] - 1);
 			auto& c3 = game_st.regions.contours[3];
-			for (auto i = std::upper_bound(c3.begin(), c3.end(), w.cur_pos_min.x - w.inner[3] - 1, cmp_u); i != c3.begin(); ++i) {
+			for (auto i = std::lower_bound(c3.begin(), c3.end(), w.cur_pos_min.x - w.inner[3] - 1, cmp_l); i != c3.end(); ++i) {
+				log("i %d %d %d\n", i->v[0], i->v[1], i->v[2]);
 				if (i->v[0] > w.cur_pos.x - w.inner[3] - 1) break;
 				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.y) {
 					if (i->v[2] + w.inner[(i->flags >> 2) & 3] >= w.cur_pos_min.y) {
-						xcept("fixme pf_crash");
+						pf_add_local_edge(3, *i);
 					}
 				}
 			}
@@ -2835,14 +3026,48 @@ struct state_functions {
 			// FIXME: this function needs to be implemented for pathfinding around units
 		};
 
-		auto pf_box_find = [&](int dir, int v, int v0, int v1, int v2) {
-			// FIXME: this function needs to be implemented for terrain
-			return (regions_t::contour*)nullptr;
+		auto pf_local_edges_find = [&](int dir, int v, int v0, int v1, int v2) -> const regions_t::contour* {
+
+			auto cmp_u = [&](int v, const regions_t::contour& c) {
+				return v < c.v[0];
+			};
+			auto cmp_l = [&](const regions_t::contour& c, int v) {
+				return c.v[0] < v;
+			};
+
+			if (dir == 0) {
+				auto& c0 = w.local_edges[0];
+				for (auto i = std::upper_bound(c0.begin(), c0.end(), v - w.inner[0] + 1, cmp_u); i != c0.begin();) {
+					--i;
+					if (i->v[0] < v2 - w.inner[0]) break;
+					if (std::max(i->v[1] + w.inner[i->flags & 3], v0) <= std::min(i->v[2] + w.inner[(i->flags >> 2) & 3], v1)) return &*i;
+				}
+			} else if (dir == 1) {
+				auto& c1 = w.local_edges[1];
+				for (auto i = std::lower_bound(c1.begin(), c1.end(), v - w.inner[1] - 1, cmp_l); i != c1.end(); ++i) {
+					if (i->v[0] > v2 - w.inner[1]) break;
+					if (std::max(i->v[1] + w.inner[i->flags & 3], v0) <= std::min(i->v[2] + w.inner[(i->flags >> 2) & 3], v1)) return &*i;
+				}
+			} else if (dir == 2) {
+				auto& c2 = w.local_edges[2];
+				for (auto i = std::lower_bound(c2.begin(), c2.end(), v - w.inner[2] - 1, cmp_l); i != c2.end(); ++i) {
+					if (i->v[0] > v2 - w.inner[2]) break;
+					if (std::max(i->v[1] + w.inner[i->flags & 3], v0) <= std::min(i->v[2] + w.inner[(i->flags >> 2) & 3], v1)) return &*i;
+				}
+			} else if (dir == 3) {
+				auto& c3 = w.local_edges[3];
+				for (auto i = std::upper_bound(c3.begin(), c3.end(), v - w.inner[3] + 1, cmp_u); i != c3.begin();) {
+					--i;
+					if (i->v[0] < v2 - w.inner[3]) break;
+					if (std::max(i->v[1] + w.inner[i->flags & 3], v0) <= std::min(i->v[2] + w.inner[(i->flags >> 2) & 3], v1)) return &*i;
+				}
+			}
+			return nullptr;
 		};
 
 		auto pf_add_neighbor = [&](xy pos, int flags) {
+			log("pf add neighbor %d %d flags %02x\n", pos.x, pos.y, (uint8_t)flags);
 			if (pos == w.cur_pos) return;
-			//log("pf add neighbor %d %d flags %02x\n", pos.x, pos.y, (uint8_t)flags);
 			bool is_goal = false;
 			if (w.target_unit) {
 				if (pos.x == w.target_unit_bb.from.x || pos.x == w.target_unit_bb.to.x) {
@@ -2888,11 +3113,12 @@ struct state_functions {
 		};
 
 		auto add_neighbors = [&](int n) {
-			//log("add neighbors %d\n", n);
+			log("add neighbors %d\n", n);
 			regions_t::contour c{};
 			xy pos = w.cur_pos;
 			xy pos_max = w.cur_pos_max;
 			xy pos_min = w.cur_pos_min;
+			log("add neighbors pos %d %d min %d %d max %d %d\n", pos.x, pos.y, pos_min.x, pos_min.y, pos_max.x, pos_max.y);
 			if (n == 0) {
 				if (pos.x < pos_max.x) {
 					int xval = pos_max.x;
@@ -2904,7 +3130,7 @@ struct state_functions {
 						if (box_y > yval) yval = box_y;
 					}
 					int flags = 0x3b;
-					auto* i = pf_box_find(0, pos.y - 1, pos.x, xval, yval - 1);
+					auto* i = pf_local_edges_find(0, pos.y - 1, pos.x, xval, yval - 1);
 					if (i) {
 						c = *i;
 						c.v[0] += w.outer[c.dir];
@@ -2938,7 +3164,7 @@ struct state_functions {
 							}
 							pos_max.x = c.v[1];
 							pf_add_neighbor({c.v[1], c.v[0]}, 0x18);
-							if (i == &w.x_boxes[0].front()) break;
+							if (i == &w.local_edges[0].front()) break;
 							--i;
 							c = *i;
 							c.v[0] += w.outer[c.dir];
@@ -2962,7 +3188,7 @@ struct state_functions {
 						if (box_x < xval) xval = box_x;
 					}
 					int flags = 0x3b;
-					auto* i = pf_box_find(1, pos.x + 1, yval, pos.y, xval + 1);
+					auto* i = pf_local_edges_find(1, pos.x + 1, yval, pos.y, xval + 1);
 					if (i) {
 						c = *i;
 						c.v[0] += w.outer[c.dir];
@@ -2991,7 +3217,7 @@ struct state_functions {
 						if (yval < c.v[1]) pf_add_neighbor({c.v[2], c.v[0]}, 0x33);
 						while (c.v[2] <= pos.y) {
 							pf_add_neighbor({c.v[0], c.v[2]}, 0x34);
-							if (i == &w.x_boxes[1].back()) break;
+							if (i == &w.local_edges[1].back()) break;
 							++i;
 							c = *i;
 							c.v[0] += w.outer[c.dir];
@@ -3017,7 +3243,7 @@ struct state_functions {
 						if (box_y < yval) yval = box_y;
 					}
 					int flags = 0x67;
-					auto* i = pf_box_find(2, pos.y + 1, pos.x, xval, yval + 1);
+					auto* i = pf_local_edges_find(2, pos.y + 1, pos.x, xval, yval + 1);
 					if (i) {
 						c = *i;
 						c.v[0] += w.outer[c.dir];
@@ -3028,7 +3254,7 @@ struct state_functions {
 						pos_max.x = c.v[1];
 						while (c.v[2] <= xval) {
 							pf_add_neighbor({c.v[2], c.v[0]}, 0x42);
-							if (i == &w.x_boxes[2].back()) break;
+							if (i == &w.local_edges[2].back()) break;
 							++i;
 							c = *i;
 							c.v[0] += w.outer[c.dir];
@@ -3069,7 +3295,7 @@ struct state_functions {
 						if (box_x < xval) xval = box_x;
 					}
 					int flags = 0x67;
-					auto* i = pf_box_find(1, pos.x + 1, pos.y, yval, xval + 1);
+					auto* i = pf_local_edges_find(1, pos.x + 1, pos.y, yval, xval + 1);
 					if (i) {
 						c = *i;
 						c.v[0] += w.outer[c.dir];
@@ -3080,7 +3306,7 @@ struct state_functions {
 						xval = c.v[0];
 						while (c.v[2] < yval) {
 							pf_add_neighbor({c.v[0], c.v[2]}, 0x22);
-							if (i == &w.x_boxes[1].back()) break;
+							if (i == &w.local_edges[1].back()) break;
 							++i;
 							c = *i;
 							c.v[0] += w.outer[c.dir];
@@ -3121,7 +3347,7 @@ struct state_functions {
 						if (box_y < yval) yval = box_y;
 					}
 					int flags = 0xce;
-					auto* i = pf_box_find(2, pos.y + 1, xval, pos.x, yval + 1);
+					auto* i = pf_local_edges_find(2, pos.y + 1, xval, pos.x, yval + 1);
 					if (i) {
 						c = *i;
 						c.v[0] += w.outer[c.dir];
@@ -3156,7 +3382,7 @@ struct state_functions {
 							}
 							pos_min.x = c.v[2];
 							pf_add_neighbor({c.v[2], c.v[0]}, 0x42);
-							if (i == &w.x_boxes[2].back()) break;
+							if (i == &w.local_edges[2].back()) break;
 							++i;
 							c = *i;
 							c.v[0] += w.outer[c.dir];
@@ -3171,8 +3397,8 @@ struct state_functions {
 					pos.y = yval;
 				}
 				if (pos.y < pos_max.y) {
-					int xval = pos_max.x;
-					int yval = pos_min.y;
+					int xval = pos_min.x;
+					int yval = pos_max.y;
 					int box_x = pos_min.y;
 					if (w.box_neighbors[2]) {
 						auto* i = w.box_neighbors[2];
@@ -3180,23 +3406,23 @@ struct state_functions {
 						if (box_x > xval) xval = box_x;
 					}
 					int flags = 0xce;
-					auto* i = pf_box_find(3, pos.x - 1, pos.y, yval, xval - 1);
+					auto* i = pf_local_edges_find(3, pos.x - 1, pos.y, yval, xval - 1);
 					if (i) {
 						c = *i;
 						c.v[0] += w.outer[c.dir];
 						c.v[1] += w.outer[c.flags & 3];
 						c.v[2] += w.outer[(c.flags >> 2) & 3];
 						xval = c.v[0];
-						if (yval == c.v[1]) {
+						if (yval == c.v[2]) {
 							if (c.flags & 0x20) flags = 0xc6;
 							else flags = 0;
-						} else if (yval > c.v[1]) {
+						} else if (yval < c.v[2]) {
 							flags = 0x42;
 						}
 					}
 					if (w.box_neighbors[2]) {
 						flags &= 0xfd;
-						if (box_x > xval) flags &= 0xbb;
+						if (box_x < xval) flags &= 0xbb;
 					}
 					if (xval >= pos.x) {
 						flags |= 0x22;
@@ -3204,12 +3430,12 @@ struct state_functions {
 						pf_add_neighbor({pos.x, yval}, 0x77);
 					}
 					pf_add_neighbor({xval, yval}, flags);
-					if (xval > pos_min.y) pf_add_neighbor({xval, pos.y}, 4);
+					if (xval > pos_min.x) pf_add_neighbor({xval, pos.y}, 4);
 					if (i) {
 						if (yval > c.v[2]) pf_add_neighbor({c.v[0], c.v[2]}, 0x84);
 						while (c.v[1] >= pos.y) {
-							pf_add_neighbor({c.v[0], c.v[2]}, 0x88);
-							if (i == &w.x_boxes[3].front()) break;
+							pf_add_neighbor({c.v[0], c.v[1]}, 0x88);
+							if (i == &w.local_edges[3].front()) break;
 							--i;
 							c = *i;
 							c.v[0] += w.outer[c.dir];
@@ -3235,7 +3461,7 @@ struct state_functions {
 						if (box_y > yval) yval = box_y;
 					}
 					int flags = 0x9d;
-					auto* i = pf_box_find(0, pos.y - 1, xval, pos.x, yval - 1);
+					auto* i = pf_local_edges_find(0, pos.y - 1, xval, pos.x, yval - 1);
 					if (i) {
 						c = *i;
 						c.v[0] += w.outer[c.dir];
@@ -3250,7 +3476,7 @@ struct state_functions {
 						pos_min.x = c.v[2];
 						while (c.v[1] > xval) {
 							pf_add_neighbor({c.v[1], c.v[0]}, 0x18);
-							if (i == &w.x_boxes[0].front()) break;
+							if (i == &w.local_edges[0].front()) break;
 							--i;
 							c = *i;
 							c.v[0] += w.outer[c.dir];
@@ -3291,7 +3517,7 @@ struct state_functions {
 						if (box_x > xval) xval = box_x;
 					}
 					int flags = 0x9d;
-					auto* i = pf_box_find(3, pos.x - 1, yval, pos.y, xval - 1);
+					auto* i = pf_local_edges_find(3, pos.x - 1, yval, pos.y, xval - 1);
 					if (i) {
 						c = *i;
 						c.v[0] += w.outer[c.dir];
@@ -3301,8 +3527,8 @@ struct state_functions {
 						if (c.v[2] < pos.y) pf_add_neighbor({c.v[0], c.v[2]}, 0x84);
 						xval = c.v[0];
 						while (c.v[1] > yval) {
-							pf_add_neighbor({c.v[0], c.v[2]}, 0x88);
-							if (i == &w.x_boxes[3].front()) break;
+							pf_add_neighbor({c.v[0], c.v[1]}, 0x88);
+							if (i == &w.local_edges[3].front()) break;
 							--i;
 							c = *i;
 							c.v[0] += w.outer[c.dir];
@@ -3368,8 +3594,8 @@ struct state_functions {
 						if (i->second < area.to.y) i->second = area.to.y;
 						auto t = cur->y.begin();
 						for (auto n = std::next(t); n != cur->y.end(); n = std::next(t)) {
-							if (n->first - 1 > t->second) {
-								if (t->second < n->second) t->second = n->second;
+							if (n->first - 1 < t->second) {
+								if (n->second > t->second) t->second = n->second;
 								t = cur->y.erase(n);
 								if (t == cur->y.end()) break;
 							} else t = n;
@@ -3398,17 +3624,23 @@ struct state_functions {
 			if ((a & (0x40 | (2|4))) == 0) w.cur_pos_max.y = pos.y;
 			if ((a & (0x80 | (4|8))) == 0) w.cur_pos_min.x = pos.x;
 
-			pf_box_terrain();
+			for (auto& v : w.local_edges) v.clear();
+
+			pf_add_local_terrain();
 			pf_box_units();
 
-			w.box_neighbors[0] = pf_box_find(0, pos.y, pos.x, pos.x, w.cur_pos_min.y - 1);
+			w.box_neighbors[0] = pf_local_edges_find(0, pos.y, pos.x, pos.x, w.cur_pos_min.y - 1);
 			if (w.box_neighbors[0]) w.cur_pos_min.y = w.box_neighbors[0]->v[0] + w.inner[0] + 1;
-			w.box_neighbors[1] = pf_box_find(1, pos.x, pos.y, pos.y, w.cur_pos_max.x + 1);
+			w.box_neighbors[1] = pf_local_edges_find(1, pos.x, pos.y, pos.y, w.cur_pos_max.x + 1);
 			if (w.box_neighbors[1]) w.cur_pos_max.x = w.box_neighbors[1]->v[0] + w.inner[1] - 1;
-			w.box_neighbors[2] = pf_box_find(2, pos.y, pos.x, pos.x, w.cur_pos_max.y + 1);
+			w.box_neighbors[2] = pf_local_edges_find(2, pos.y, pos.x, pos.x, w.cur_pos_max.y + 1);
 			if (w.box_neighbors[2]) w.cur_pos_max.y = w.box_neighbors[2]->v[0] + w.inner[2] - 1;
-			w.box_neighbors[3] = pf_box_find(3, pos.x, pos.y, pos.y, w.cur_pos_min.x - 1);
+			w.box_neighbors[3] = pf_local_edges_find(3, pos.x, pos.y, pos.y, w.cur_pos_min.x - 1);
 			if (w.box_neighbors[3]) w.cur_pos_min.x = w.box_neighbors[3]->v[0] + w.inner[3] + 1;
+
+			log("w.inner[2] is %d\n", w.inner[2]);
+			log("w.cur_pos_max.y is %d\n", w.cur_pos_max.y);
+			log("w.box_neighbors[2] is %p\n", w.box_neighbors[2]);
 
 			if (w.cur_pos_min.y == pos.y && w.cur_pos_max.x == pos.x) a &= ~1;
 			if (w.cur_pos_max.y == pos.y) {
@@ -3447,14 +3679,14 @@ struct state_functions {
 			}
 
 			for (auto& v : w.visited_areas) {
-				//log("pf_mark_visited %d %d %d %d\n", v.from.x, v.from.y, v.to.x, v.to.y);
+				log("pf_mark_visited %d %d %d %d\n", v.from.x, v.from.y, v.to.x, v.to.y);
 				pf_mark_visited(v);
-//				for (auto& v2 : pf_area_visited) {
-//					log("x %d\n", v2.x);
-//					for (auto& v3 : v2.y) {
-//						log("  y %d %d\n", v3.first, v3.second);
-//					}
-//				}
+				for (auto& v2 : pf_area_visited) {
+					log("x %d\n", v2.x);
+					for (auto& v3 : v2.y) {
+						log("  y %d %d\n", v3.first, v3.second);
+					}
+				}
 			}
 
 		};
@@ -3480,7 +3712,7 @@ struct state_functions {
 				break;
 			}
 
-			//log("visit %d %d (%d %d) cost %g\n", cur->pos.x, cur->pos.y, cur->pos.x / 32, cur->pos.y / 32, cur->estimated_final_cost.raw_value / 256.0);
+			log("visit %d %d (%d %d) cost %g\n", cur->pos.x, cur->pos.y, cur->pos.x / 32, cur->pos.y / 32, cur->estimated_final_cost.raw_value / 256.0);
 
 			if (cur->directional_flags != 0) {
 				cur->directional_flags = pf_remove_visited_flags(cur->pos, cur->directional_flags);
@@ -3976,25 +4208,31 @@ struct state_functions {
 		return true;
 	}
 
+	void set_unit_immovable(unit_t* u) {
+		u->next_speed = fp8::zero();
+		set_current_speed(u, u->next_speed);
+		stop_unit(u);
+		set_unit_move_target(u, u->sprite->position);
+		u_set_status_flag(u, unit_t::status_flag_immovable);
+		u->user_action_flags &= ~2;
+	}
+
 	bool movement_UM_Init(unit_t* u, execute_movement_struct& ems) {
 		u->pathing_flags &= ~(1 | 2);
 		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
-		u->contour_bounds = { { 0,0 }, { 0,0 } };
+		u->terrain_no_collision_bounds = {{0, 0}, {0, 0}};
 		int next_state = movement_states::UM_Lump;
 		if (!ut_turret(u) && u_iscript_nobrk(u)) {
 			next_state = movement_states::UM_InitSeq;
 		} else if (!u->sprite || unit_dead(u)) {
-			// Should be unreachable, since if we get here the unit is almost certainly already destroyed.
-			// If this throws, eliminate the code path that leads to it.
-			xcept("unreachable?");
 			next_state = movement_states::UM_Lump;
 		} else if (u_in_building(u)) {
 			next_state = movement_states::UM_Bunker;
 		} else if (us_hidden(u)) {
 			if (u_movement_flag(u, 2) || !unit_is_at_move_target(u)) {
-				// SetMoveTarget_xy(u)
-				// ...
-				xcept("todo hidden sprite pathing stuff");
+				set_unit_immovable(u);
+				update_unit_movement_values(u, ems);
+				finish_unit_movement(u, ems);
 			}
 			next_state = movement_states::UM_Hidden;
 		} else if (u_burrowed(u)) {
@@ -4189,7 +4427,8 @@ struct state_functions {
 			return true;
 		}
 		update_unit_movement_values(u, ems);
-		// fixme: collision stuff
+		// fixme: unit collision stuff
+		check_unit_movement_terrain_collision(u, ems);
 		if (u->sprite->position != ems.position) {
 			if (u->pathing_collision_interval) {
 				if (u->pathing_collision_interval > 2) u->pathing_collision_interval = 2;
@@ -5258,7 +5497,7 @@ struct state_functions {
 			case opc_setvertpos:
 				a = *p++;
 				if (no_side_effects) break;
-				if (!iscript_unit || !(iscript_unit->status_flags&(StatusFlags::Completed | StatusFlags::GroundedBuilding))) {
+				if (!iscript_unit || (!u_completed(iscript_unit) && !u_grounded_building(iscript_unit))) {
 					if (image->offset.y != a) {
 						image->offset.y = a;
 						image->flags |= image_t::flag_redraw;
@@ -5552,7 +5791,7 @@ struct state_functions {
 		image->frame_index = 0;
 		image->sprite = sprite;
 		image->offset = offset;
-		image->grp_bounds = { {0,0},{0,0} };
+		image->grp_bounds = {{0, 0}, {0, 0}};
 		image->modifier_data1 = 0;
 		image->modifier_data2 = 0;
 		image->iscript_state.current_script = nullptr;
@@ -5799,79 +6038,6 @@ struct state_functions {
 		if (st.unit_counts[u->owner][u->unit_type->id] < 0) st.unit_counts[u->owner][u->unit_type->id] = 0;
 	}
 
-	//
-	// Unit finder --
-	// In Broodwar the unit finder works by keeping all units in two sorted vectors, one for x and one for y.
-	// Each unit is inserted into each vector twice with the top left and bottom right coordinates respectively.
-	// So a unit is added to x with the left and right values, and into y with the top and bottom.
-	// When inserting into x or y it inserts the unit at the lower bound index (keeping it sorted).
-	// To find units (within a rectangle), it does a lower bound search for the left, right, top and bottom values,
-	// then it iterates [left index, right index) in x, marks all units, then iterates [top index, bottom index) in
-	// y and marks again. Then it reiterates the ones in x and only returns the ones that were double marked.
-	// In order to work properly when the search area is smaller than the unit size, it forces the search area
-	// to be at least as large as the largest unit type in the game, by extending right and bottom, and then
-	// doing an additional bounds check when iterating to make sure it only returns units in the original search area.
-	// Otherwise, no bounds check is performed (as a performance optimization) since the indices already match the search area.
-	//
-	// This means the order units are returned are essentially sorted as follows, where a and b are imaginary structures
-	// where a.from is the upper left and a.to is the bottom right of the unit bounding box, area is the search area,
-	// and a.insert_order is a unique incremental value that is set each time a unit is inserted:
-	//   int ax = a.from.x >= area.from.x ? a.from.x : a.to.x;
-	//   int bx = b.from.x >= area.from.x ? b.from.x : b.to.x;
-	//   if (ax == bx) return a.insert_order > b.insert_order;
-	//   else return ax < bx;
-	//
-	// In other words, they are sorted by leftmost x if it is within the area, otherwise rightmost x, and after that
-	// by reverse insertion order.
-	//
-	// Now, as far as I can tell, the search area is supposed to be inclusive, so if you search from [32,32] to [64,64]
-	// and some unit's bounding box is from [0,0] to [32,32] then that unit should be returned (unit bounding boxes
-	// seem to be inclusive in all directions (edit: maybe not)).
-	// This seems to make sense since searches are initiated for instance by the unit bounding box to find collisions.
-	// The right index and bottom index is found by lower bound lookup, which would give an exclusive search,
-	// but the additional bounds check for small searches is inclusive.
-	// Since the bounds check is only performed for searches smaller than the largest unit size, the result is inclusive
-	// for those searches and exclusive for the larger ones (only for the right and bottom coordinates. Left and top is
-	// always inclusive). The x and y axis are treated individually, so it can be inclusive in one and exclusive in the
-	// other. This would be easily fixed by doing a upper bound search for the right and bottom indices (then it would
-	// always be inclusive).
-	// The largest unit size is 256x160.
-	//
-	// Note: There appear to be two search methods, the above paragraph only applies to one of them. The second method
-	// only does a lookup on the left and top coordinates, then iterates and does exclusive bounds checking. Thus, the
-	// only difference is the special case for small search areas (it is not present in the second method).
-	//
-	// The order units are found is important sometimes, but not other times. For instance in code where we select
-	// one unit that matches some criterion, it is critically important that we select the right one where multiple
-	// might match. The easiest way to do this is to iterate through units in the same order as Broodwar.
-	// Another way to do it would be to store the insertion order in each unit and then when multiple units match
-	// some criterion we select the correct one based on the sorting function above. Then we would not be able to
-	// break the iteration early, and also adding the logic to each search might be inconvenient or even slow
-	// in some cases.
-	//
-	// To return units in the same order with good performance, we pretty much need to use the same method,
-	// however we do not need to keep a sorted list on the y axis. I believe dropping the y axis and just doing
-	// bounds check when iterating is equally fast or faster, and insert/erase is twice as fast.
-	// It would be possible to use a binary search tree like a red-black tree instead of a sorted vector, but
-	// iteration would be slower and for small unit counts insert/erase would be slower too. Also they typically
-	// iterate equal elements in insertion order, but we need reverse insertion order, though that's easy to fix.
-	//
-	//
-	// Okay, so the implementation here splits the x axis up into groups of state::unit_finder_group_size pixels,
-	// keeping one sorted vector for each. When inserting we just insert into the lower bound index of the appropriate
-	// group. To make iteration fast, each entry has a pointer to the next entry (in sorted order). The next entry
-	// might be in a different group and empty groups are skipped.
-	//
-	// We expand the search in the same way as Broodwar, and take care to perform the bounds checking in the same
-	// way. Since we don't keep a sorted vector of y values, we specifically do an inclusive or exclusive bounds check
-	// based on whether the search height was smaller than the largest unit height.
-	// (this is currently incorrect for the second method, fixme?)
-	//
-	// It might be worth considering maintaining two different unit finders, one ordered and one unordered, or even
-	// just an unordered one and then doing the additional work mentioned above when the order matters.
-	// Will have to see later in the development after the number of searches has gone up.
-	//
-
 	void unit_finder_insert(unit_t* u) {
 		if (ut_turret(u)) return;
 
@@ -5881,212 +6047,57 @@ struct state_functions {
 
 	void unit_finder_reinsert(unit_t* u) {
 		if (u->unit_finder_bounding_box.from.x == -1) return;
-
-		rect old_bb = u->unit_finder_bounding_box;
-
-		size_t old_index_from = u->unit_finder_index_from;
-		size_t old_index_to = u->unit_finder_index_to;
-
 		rect bb = unit_sprite_bounding_box(u);
-
-		size_t index_from = unit_finder_group_index(bb.from.x);
-		size_t index_to = unit_finder_group_index(bb.to.x);
-
-		log("move from index %d %d to %d %d\n", old_index_from, old_index_to, index_from, index_to);
-
-		u->unit_finder_bounding_box = bb;
-
-		if (old_index_from == index_from && false) {
-			unit_finder_move(index_from, u, old_bb.from.x, bb.from.x);
-		} else {
-			u->unit_finder_index_from = index_from;
-			unit_finder_remove(old_index_from, u, old_bb.from.x);
-			unit_finder_insert(index_from, u, bb.from.x);
-		}
-		if (old_index_to == index_to && false) {
-			unit_finder_move(index_to, u, old_bb.to.x, bb.to.x);
-		} else {
-			u->unit_finder_index_to = index_to;
-			unit_finder_remove(old_index_to, u, old_bb.to.x);
-			unit_finder_insert(index_to, u, bb.to.x);
-		}
-	}
-
-	state::unit_finder_entry* unit_finder_prev_entry(size_t index) const {
-		while (index--) {
-			if (!st.unit_finder_groups[index].empty()) return &st.unit_finder_groups[index].back();
-		}
-		return nullptr;
-	};
-	state::unit_finder_entry* unit_finder_next_entry(size_t index) const {
-		while (++index != st.unit_finder_groups.size()) {
-			if (!st.unit_finder_groups[index].empty()) return &st.unit_finder_groups[index].front();
-		}
-		return nullptr;
-	};
-
-	auto unit_finder_prev_entry_iterator(size_t index) const {
-		auto* e = unit_finder_prev_entry(index);
-		if (e) return st.unit_finder_list.iterator_to(*e);
-		else return st.unit_finder_list.begin();
-	}
-	auto unit_finder_next_entry_iterator(size_t index) const {
-		auto* e = unit_finder_next_entry(index);
-		if (e) return st.unit_finder_list.iterator_to(*e);
-		else return st.unit_finder_list.end();
-	}
-
-	void unit_finder_move(size_t index, unit_t* u, int old_value, int new_value) {
-		auto& vec = st.unit_finder_groups[index];
-		//if (vec.size() != 1) xcept("vec.size() is %d\n", vec.size());
-		auto old_i = std::lower_bound(vec.begin(), vec.end(), old_value, [](auto& a, int value) {
-			return a.value < value;
-		});
-		while (old_i->u != u) ++old_i;
-		bool new_is_higher = new_value > old_value;
-		if (new_is_higher) {
-			old_i->value = new_value;
-			if (&*old_i != &vec.back()) {
-				for (auto i = old_i;;) {
-					auto p = i;
-					++i;
-					if (i == vec.end()) break;
-					if (new_value <= i->value) break;
-					std::swap(p->u, i->u);
-					std::swap(p->value, i->value);
-				}
-			}
-		} else {
-			old_i->value = new_value;
-			if (&*old_i != &vec.front()) {
-				for (auto i = old_i;;) {
-					auto n = i;
-					--i;
-					if (new_value >= i->value) break;
-					std::swap(n->u, i->u);
-					std::swap(n->value, i->value);
-					if (i == vec.begin()) break;
-				}
-			}
-		}
-	}
-
-	void unit_finder_dump() {
-		for (size_t i = 0; i != st.unit_finder_groups.size(); ++i) {
-			auto& v = st.unit_finder_groups[i];
-			if (v.empty()) continue;
-			log("group %d:", i);
-			for (auto& v2 : v) {
-				log(" (%p, %d)", v2.u, v2.value);
-			}
-			log("\n");
-		}
-	}
-
-	void unit_finder_remove(size_t index, unit_t* u, int value) {
-
-		log("remove index %d u %p value %d\n", index, u, value);
-
-		auto& vec = st.unit_finder_groups[index];
-		if (vec.size() == 1) {
-			st.unit_finder_list.remove(vec.back());
-			vec.pop_back();
-			return;
-		}
-		auto rm_i = std::lower_bound(vec.begin(), vec.end(), value, [](auto& a, int value) {
-			return a.value < value;
-		});
-		if (rm_i == vec.end()) xcept("waa");
-		while (rm_i->u != u) {
-			if (rm_i == vec.end()) xcept("wuu waa");
-			++rm_i;
-		}
-		for (auto i = rm_i;;) {
-			unit_t*& u = i->u;
-			int& value = i->value;
-			++i;
-			if (i == vec.end()) break;
-			u = i->u;
-			value = i->value;
-		}
-		st.unit_finder_list.remove(vec.back());
-		vec.pop_back();
-
-		//log("post remove\n");
-		//unit_finder_dump();
-	}
-
-	void unit_finder_insert(size_t index, unit_t* u, int value) {
-		auto& vec = st.unit_finder_groups[index];
-		auto insert_i = std::lower_bound(vec.begin(), vec.end(), value, [](auto& a, int value) {
-			return a.value < value;
-		});
-
-		log("insert index %d u %p value %d\n", index, u, value);
-
-		size_t new_size = vec.size() + 1;
-		if (new_size <= vec.capacity()) {
-			if (vec.empty() || insert_i == vec.end()) {
-				vec.push_back({ u, value });
-				auto next_i = unit_finder_next_entry_iterator(index);
-				st.unit_finder_list.insert(next_i, vec.back());
-			} else {
-				auto next_i = ++st.unit_finder_list.iterator_to(vec.back());
-				vec.push_back(vec.back());
-				st.unit_finder_list.insert(next_i, vec.back());
-				for (auto i = --vec.end(); i != insert_i;) {
-					unit_t*& i_u = i->u;
-					int& i_value = i->value;
-					--i;
-					i_u = i->u;
-					i_value = i->value;
-				}
-				insert_i->u = u;
-				insert_i->value = value;
-			}
-		} else {
-			if (insert_i == vec.end()) {
-				vec.push_back({ u, value });
-				auto next_i = unit_finder_next_entry_iterator(index);
-				st.unit_finder_list.insert(next_i, vec.back());
-			} else {
-				auto next_i = ++st.unit_finder_list.iterator_to(vec.back());
-				for (auto& v : vec) st.unit_finder_list.remove(v);
-				vec.insert(insert_i, { u, value });
-				for (auto& v : vec) st.unit_finder_list.insert(next_i, v);
-			}
-		}
-
-		//log("post insert\n");
-		//unit_finder_dump();
-	}
-
-	size_t unit_finder_group_index(int x) const {
-		size_t index = (size_t)x / state::unit_finder_group_size;
-		if (index >= st.unit_finder_groups.size()) {
-			xcept("unit_finder: bad index %d, unit is outside map?");
-			if (x < 0) index = 0;
-			else index = st.unit_finder_groups.size() - 1;
-		}
-		return index;
+		unit_finder_reinsert(u, bb);
 	}
 
 	void unit_finder_insert(unit_t* u, rect bb) {
-
+		auto insert = [&](auto& vec, int from_value, int to_value) {
+			auto cmp_l = [&](auto& a, int b) {
+				return a.value < b;
+			};
+			auto from_i = std::lower_bound(vec.begin(), vec.end(), from_value, cmp_l);
+			vec.insert(from_i, {u, from_value});
+			auto to_i = std::lower_bound(vec.begin(), vec.end(), to_value, cmp_l);
+			vec.insert(to_i, {u, to_value});
+		};
+		insert(st.unit_finder_x, bb.from.x, bb.to.x);
+		insert(st.unit_finder_y, bb.from.y, bb.to.y);
 		u->unit_finder_bounding_box = bb;
-
-		size_t index_from = unit_finder_group_index(bb.from.x);
-		size_t index_to = unit_finder_group_index(bb.to.x);
-		u->unit_finder_index_from = index_from;
-		u->unit_finder_index_to = index_to;
-
-		log("insert, index_from is %d, index_to is %d\n", index_from, index_to);
-
-		unit_finder_insert(index_from, u, bb.from.x);
-		unit_finder_insert(index_to, u, bb.to.x);
-
 	}
 
+	void unit_finder_reinsert(unit_t* u, rect bb) {
+		auto reinsert = [&](auto& vec, int old_value, int new_value) {
+			if (old_value == new_value) return;
+			auto cmp_l = [&](auto& a, int b) {
+				return a.value < b;
+			};
+			auto i = std::lower_bound(vec.begin(), vec.end(), old_value, cmp_l);
+			while (i->u != u) ++i;
+			if (new_value > old_value) {
+				auto ni = std::next(i);
+				while (ni != vec.end() && ni->value < new_value) {
+					*i = *ni;
+					++i;
+					++ni;
+				}
+				*i = {u, new_value};
+			} else {
+				while (i != vec.begin()) {
+					auto ni = i;
+					--i;
+					if (i->value <= new_value) break;
+					*ni = *i;
+				}
+				*i = {u, new_value};
+			}
+		};
+		reinsert(st.unit_finder_x, u->unit_finder_bounding_box.from.x, bb.from.x);
+		reinsert(st.unit_finder_x, u->unit_finder_bounding_box.to.x, bb.to.x);
+		reinsert(st.unit_finder_y, u->unit_finder_bounding_box.from.y, bb.from.y);
+		reinsert(st.unit_finder_y, u->unit_finder_bounding_box.to.y, bb.to.y);
+		u->unit_finder_bounding_box = bb;
+	}
 
 
 	struct unit_finder_search {
@@ -6096,19 +6107,17 @@ struct state_functions {
 			using value_type = unit_t*;
 			using iterator_category = std::forward_iterator_tag;
 		private:
-			state::unit_finder_list_iterator i;
-			state::unit_finder_list_iterator end_i;
-			unit_finder_search& search;
-			friend state_functions;
-			iterator(state::unit_finder_list_iterator i, unit_finder_search& search) : i(i), search(search) {}
+			a_vector<state::unit_finder_entry>::iterator i;
+			const unit_finder_search* search;
+			friend unit_finder_search;
+			iterator(const unit_finder_search* search, a_vector<state::unit_finder_entry>::iterator i) : search(search), i(i) {}
 			bool in_bounds() {
 				unit_t* u = i->u;
-				if (u->unit_finder_bounding_box.from.x > search.bb.to.x) return false;
-				if (u->unit_finder_bounding_box.to.y < search.bb.from.y) return false;
-				if (u->unit_finder_bounding_box.from.y > search.bb.to.y) return false;
+				if (u->unit_finder_bounding_box.from.x >= search->area.to.x) return false;
+				if (u->unit_finder_bounding_box.from.y >= search->area.to.y) return false;
+				if (u->unit_finder_bounding_box.to.y <= search->area.from.y) return false;
 				return true;
-			};
-
+			}
 		public:
 
 			unit_t* operator*() const {
@@ -6122,7 +6131,8 @@ struct state_functions {
 			iterator& operator++() {
 				do {
 					++i;
-				} while (i != search.i_end && (!in_bounds() || i->u->unit_finder_visited));
+					if (i == search->i_end) return *this;
+				} while (!in_bounds() || i->u->unit_finder_visited);
 				i->u->unit_finder_visited = true;
 				return *this;
 			}
@@ -6144,66 +6154,47 @@ struct state_functions {
 	private:
 		friend state_functions;
 		const state_functions& funcs;
-		state::unit_finder_list_iterator i_begin;
-		state::unit_finder_list_iterator i_end;
-		rect bb;
-		unit_finder_search(const state_functions& funcs) : funcs(funcs) {
+		a_vector<state::unit_finder_entry>::iterator i_begin;
+		a_vector<state::unit_finder_entry>::iterator i_end;
+		rect area;
+		unit_finder_search(const state_functions& funcs, rect area) : funcs(funcs), area(area) {
 			if (funcs.unit_finder_search_active) xcept("recursive unit_finder_search is not supported");
 			funcs.unit_finder_search_active = true;
+
+			auto cmp_l = [&](auto& a, int b) {
+				return a.value < b;
+			};
+			int begin_x = area.from.x;
+			int end_x = area.to.x;
+			if (end_x - begin_x <= funcs.game_st.max_unit_width) {
+				end_x = begin_x + funcs.game_st.max_unit_width + 1;
+			}
+			i_begin = std::lower_bound(funcs.st.unit_finder_x.begin(), funcs.st.unit_finder_x.end(), begin_x, cmp_l);
+			i_end = std::lower_bound(funcs.st.unit_finder_x.begin(), funcs.st.unit_finder_x.end(), end_x, cmp_l);
 		}
 	public:
 		~unit_finder_search() {
 			funcs.unit_finder_search_active = false;
+			for (auto i = i_begin; i != i_end; ++i) {
+				i->u->unit_finder_visited = false;
+			}
 		}
 
 		iterator begin() {
-			return iterator(i_begin, *this);
+			auto r = iterator(this, i_begin);
+			if (i_begin != i_end) {
+				if (r.in_bounds()) r->unit_finder_visited = true;
+				else ++r;
+			}
+			return r;
 		}
 		iterator end() {
-			return iterator(i_end, *this);
+			return iterator(this, i_end);
 		}
 	};
 
 	unit_finder_search find_units(rect area) const {
-		unit_finder_search r(*this);
-
-		int index_from_x = area.from.x;
-		int index_to_x = area.to.x;
-		if (area.to.x - area.from.x + 1 < game_st.max_unit_width) {
-			index_to_x = area.from.x + game_st.max_unit_width - 1;
-		} else ++area.to.x;
-		if (area.to.y - area.from.y + 1 < game_st.max_unit_height) {
-		} else ++area.to.y;
-
-		size_t index_from = (size_t)index_from_x / state::unit_finder_group_size;
-		size_t index_to = (size_t)index_to_x / state::unit_finder_group_size;
-		if (index_from >= st.unit_finder_groups.size()) {
-			if (index_from_x <= 0) index_from = 0;
-			else index_from = st.unit_finder_groups.size() - 1;
-		}
-		if (index_to >= st.unit_finder_groups.size()) {
-			if (index_to_x <= 0) index_to = 0;
-			else index_to = st.unit_finder_groups.size() - 1;
-		}
-
-		r.bb = area;
-
-		auto& vec_from = st.unit_finder_groups[index_from];
-		if (!vec_from.empty()) {
-			auto i = std::lower_bound(vec_from.begin(), vec_from.end(), area.from.x, [](auto& a, int value) {
-				return a.value < value;
-			});
-			if (i == vec_from.end()) r.i_begin = unit_finder_next_entry_iterator(index_from);
-			else r.i_begin = st.unit_finder_list.iterator_to(*i);
-		} else r.i_begin = unit_finder_next_entry_iterator(index_from);
-		r.i_end = unit_finder_next_entry_iterator(index_to);
-
-		for (auto i = r.i_begin; i != r.i_end; ++i) {
-			i->u->unit_finder_visited = false;
-		}
-		if (r.i_begin != r.i_end) r.i_begin->u->unit_finder_visited = true;
-
-		return r;
+		return unit_finder_search(*this, area);
 	}
 
 	template<typename F>
@@ -6548,7 +6539,7 @@ struct state_functions {
 	}
 
 	bool place_initial_unit(unit_t* u) {
-		if (u->sprite->flags & SpriteFlags::Hidden) {
+		if (us_hidden(u)) {
 			// implement me
 		}
 		return true;
@@ -6781,10 +6772,6 @@ struct state_functions {
 		}
 	}
 
-	void reset_unit_path(unit_t* u) {
-		if (u->path) xcept("reset_unit_path: fixme");
-	}
-
 	size_t repulse_index(xy pos) {
 		size_t ux = pos.x;
 		size_t uy = pos.y;
@@ -6832,13 +6819,19 @@ struct state_functions {
 		if (u_flying(u)) {
 			increment_repulse_field(u);
 		}
-		reset_unit_path(u);
+		if (u->path) {
+			free_path(u->path);
+			u->path = nullptr;
+		}
 
 		u->movement_state = 0;
 		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
 		else u->pathing_flags &= ~1;
 		if (u->subunit && !ut_turret(u)) {
-			reset_unit_path(u->subunit);
+			if (u->subunit->path) {
+				free_path(u->subunit->path);
+				u->subunit->path = nullptr;
+			}
 			u->subunit->movement_state = 0;
 			if (u->subunit->sprite->elevation_level < 12) u->subunit->pathing_flags |= 1;
 			else u->subunit->pathing_flags &= ~1;
@@ -7165,12 +7158,6 @@ struct game_load_functions : state_functions {
 
 		game_st.is_replay = false;
 		game_st.local_player = 0;
-
-		size_t unit_finder_groups_size = (game_st.map_width + state::unit_finder_group_size - 1) / state::unit_finder_group_size;
-		st.unit_finder_groups.resize(unit_finder_groups_size);
-		for (auto& v : st.unit_finder_groups) {
-			v.reserve(0x100);
-		}
 
 		int max_unit_width = 0;
 		int max_unit_height = 0;
@@ -7950,10 +7937,10 @@ struct game_load_functions : state_functions {
 					} else if (cur_dir == 2) {
 						uint8_t flags = flags1 & 3 | 4 * (flags0 & 3 | 4 * (next_walkable | 2 * lut1val));
 						game_st.regions.contours[cur_dir].push_back({ { cy, nx, cx}, cur_dir, flags });
-					} else if (cur_dir == 3) {
+					} else {
 						uint8_t flags = flags1 & 3 | 4 * (flags0 & 3 | 4 * (next_walkable | 2 * lut1val));
 						game_st.regions.contours[cur_dir].push_back({ { cx, ny, cy}, cur_dir, flags });
-					} else xcept("unreachable");
+					}
 
 					if (!next_walkable) cur_dir = next_dir;
 					else {
@@ -7977,9 +7964,7 @@ struct game_load_functions : state_functions {
 			for (auto& v : game_st.regions.contours) {
 				std::sort(v.begin(), v.end(), [&](auto& a, auto& b) {
 					if (a.v[0] != b.v[0]) return a.v[0] < b.v[0];
-					if (a.v[1] != b.v[1]) return a.v[1] < b.v[1];
-					xcept("unreachable: two equal contours");
-					return false;
+					return a.v[1] < b.v[1];
 				});
 			}
 
@@ -9332,17 +9317,10 @@ void init() {
 		if (true) {
 			for (unit_t* u : ptr(st.visible_units)) {
 				//if (frame == 50) order_move(u - &st.units.front(), 68 * 32, 60 * 32);
-				if (frame == 67) order_move(u - &st.units.front(), 2049, 1772);
-				if (frame == 79) order_move(u - &st.units.front(), 2006, 1775);
-				if (frame == 88) order_move(u - &st.units.front(), 2001, 1784);
-				if (frame == 98) order_move(u - &st.units.front(), 2079, 1822);
-				if (frame == 110) order_move(u - &st.units.front(), 2211, 1800);
-				if (frame == 120) order_move(u - &st.units.front(), 2218, 1708);
-				if (frame == 129) order_move(u - &st.units.front(), 2109, 1636);
-				if (frame == 138) order_move(u - &st.units.front(), 2003, 1658);
-				if (frame == 155) order_move(u - &st.units.front(), 1964, 1734);
-				if (frame == 190) order_move(u - &st.units.front(), 2027, 1790);
-				if (frame == 112) xcept("stop");
+				//if (random() % 30 == 0) order_move(u - &st.units.front(), random() % 4096, random() % 4096);
+				if (frame == 50) order_move(u - &st.units.front(), 329, 1248);
+				if (frame == 183) xcept("stop");
+				if (frame == 151) xcept("stop");
 			}
 		}
 	};

@@ -524,7 +524,7 @@ struct unit_t: flingy_t {
 	int pathing_flags;
 	int unused_0x106;
 	bool is_being_healed;
-	rect contour_bounds;
+	rect terrain_no_collision_bounds;
 
 	int remove_timer;
 	int defensive_matrix_hp;
