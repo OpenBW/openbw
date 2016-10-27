@@ -241,49 +241,9 @@ namespace UnitTypes {
 	};
 }
 
-namespace StatusFlags
-{
-	enum Enum
-	{
-		Completed = 0x00000001,
-		GroundedBuilding = 0x00000002, // a building that is on the ground
-		InAir = 0x00000004,
-		Disabled = 0x00000008,  /**< Protoss Unpowered */
-		Burrowed = 0x00000010,
-		InBuilding = 0x00000020,
-		InTransport = 0x00000040,
-		UNKNOWN1 = 0x00000080,  /**< @todo Unknown */ // EDIT: found in target acquisition
-		RequiresDetection = 0x00000100,
-		Cloaked = 0x00000200,
-		DoodadStatesThing = 0x00000400,  /**< @todo Unknown */
-		CloakingForFree = 0x00000800,  /**< Requires no energy to cloak */
-		CanNotReceiveOrders = 0x00001000,
-		NoBrkCodeStart = 0x00002000,  /**< Unbreakable code section in iscript */
-		UNKNOWN2 = 0x00004000,  /**< @todo Unknown */
-		CanNotAttack = 0x00008000,  /**< @todo Unknown */
-		IsAUnit = 0x00010000,  // canAttack? /**< @todo Unknown */
-		IsABuilding = 0x00020000,
-		IgnoreTileCollision = 0x00040000,
-		Unmovable = 0x00080000,
-		IsNormal = 0x00100000,  /**< 1 for "normal" units, 0 for hallucinated units */
-		NoCollide = 0x00200000,
-		UNKNOWN5 = 0x00400000,
-		IsGathering = 0x00800000,
-		UNKNOWN6 = 0x01000000,
-		UNKNOWN7 = 0x02000000, // Turret related
-		Invincible = 0x04000000,
-		HoldingPosition = 0x08000000, // Set if the unit is currently holding position
-		SpeedUpgrade = 0x10000000,
-		CooldownUpgrade = 0x20000000,
-		IsHallucination = 0x40000000,  /**< 1 for hallucinated units, 0 for "normal" units */
-		IsSelfDestructing = 0x80000000  // Set for when the unit is self-destructing (scarab, scourge, infested terran)
-	};
-};
-
 namespace WeaponTypes
 {
-		/// Enumeration of weapon types
-	enum Enum
+	enum
 	{
 		Gauss_Rifle = 0,
 		Gauss_Rifle_Jim_Raynor = 1,
@@ -403,62 +363,11 @@ namespace WeaponTypes
 	};
 }
 
-namespace UnitPrototypeFlags
-{
-	enum Enum
-	{
-		Building = 0x00000001,
-		Addon = 0x00000002,
-		Flyer = 0x00000004,
-		Worker = 0x00000008,
-		Subunit = 0x00000010,
-		FlyingBuilding = 0x00000020,
-		Hero = 0x00000040,
-		RegeneratesHP = 0x00000080,
-		AnimatedIdle = 0x00000100,
-		Cloakable = 0x00000200,
-		TwoUnitsIn1Egg = 0x00000400,
-		NeutralAccessories = 0x00000800,
-		ResourceDepot = 0x00001000,
-		ResourceContainer = 0x00002000,
-		RoboticUnit = 0x00004000,
-		Detector = 0x00008000,
-		OrganicUnit = 0x00010000,
-		CreepBuilding = 0x00020000,
-		Unused = 0x00040000,
-		RequiresPsi = 0x00080000,
-		Burrowable = 0x00100000,
-		Spellcaster = 0x00200000,
-		PermanentCloak = 0x00400000,
-		NPCOrAccessories = 0x00800000,
-		MorphFromOtherUnit = 0x01000000,
-		LargeUnit = 0x02000000,
-		HugeUnit = 0x04000000,
-		AutoAttackAndMove = 0x08000000,
-		Attack = 0x10000000, /**< Can attack */
-		Invincible = 0x20000000,
-		Mechanical = 0x40000000,
-		ProducesUnits = 0x80000000 /**< It can produce units directly (making buildings doesn't count) */
-	};
-}
-
-namespace SpriteFlags {
-	enum {
-		DrawSelection = 0x1,
-
-		Selected = 0x8,
-
-		Hidden = 0x20,
-		Burrowed = 0x40,
-		UnbreakableCode = 0x80
-	};
-}
-
 #include "idenums.h"
 
 
 namespace Orders {
-	enum Enum
+	enum
 	{
 		Die,
 		Stop,
@@ -657,7 +566,7 @@ namespace Orders {
 
 namespace GroupFlags
 {
-	enum Enum
+	enum
 	{
 		Zerg = 1 << 0,
 		Terran = 1 << 1,
@@ -673,7 +582,7 @@ namespace GroupFlags
 
 namespace UpgradeTypes
 {
-	enum Enum
+	enum
 	{
 		Terran_Infantry_Armor = 0,
 		Terran_Vehicle_Plating = 1,
@@ -739,7 +648,7 @@ namespace UpgradeTypes
 
 namespace TechTypes
 {
-	enum Enum
+	enum
 	{
 		Stim_Packs = 0,
 		Lockdown,
@@ -824,23 +733,6 @@ namespace movement_states {
 		UM_TerrainSlide
 	};
 }
-
-namespace MovementFlags
-{
-	enum Enum
-	{
-		OrderedAtLeastOnce = 0x01, /**< @todo investigate more.
-								   * It get's to 0 after the first move-involved command - sometimes get's to 1 again
-								   */
-		Accelerating = 0x02, /**< Unit is accelerating  */
-		Braking = 0x04, /**< Not when unit reaches destination, just when you hit stop, or building is finished */
-		StartingAttack = 0x08, /** Always 1 for a moment when the unit is starting new attack cycle*/
-		Moving = 0x10, /**< Still moving, but not accelerating */
-		Lifted = 0x20, /**< Lifted cc has this on (just before it moves) */
-		unknown1 = 0x40, /**< The value is unknown, but it has something to do with changing direction& accelerating */
-		_alwaysZero1 = 0x80
-	};
-};
 
 namespace MiniTileFlags
 {
