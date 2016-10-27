@@ -337,6 +337,8 @@ struct path_t: link_base {
 	xy next;
 
 	unit_id last_collision_unit;
+	fp8 last_collision_speed;
+	direction_t slide_free_direction;
 
 };
 
@@ -520,7 +522,7 @@ struct unit_t: flingy_t {
 	};
 
 	path_t* path;
-	unsigned int pathing_collision_interval;
+	int pathing_collision_counter;
 	int pathing_flags;
 	int unused_0x106;
 	bool is_being_healed;
