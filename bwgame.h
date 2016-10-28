@@ -1386,6 +1386,12 @@ struct state_functions {
 		}
 	}
 
+	void order_Nothing(unit_t* u) {
+		if (!u->order_queue.empty()) {
+			activate_next_order(u);
+		}
+	}
+
 	bool execute_main_order(unit_t* u) {
 
 		switch (u->order_type->id) {
@@ -1572,8 +1578,14 @@ struct state_functions {
 		case Orders::VultureMine:
 			xcept("VultureMine");
 			break;
+		case Orders::StayInRange:
+			xcept("StayInRange");
+			break;
 		case Orders::TurretAttack:
 			xcept("TurretAttack");
+			break;
+		case Orders::Nothing:
+			order_Nothing(u);
 			break;
 		case Orders::Unused_24:
 			xcept("Unused_24");
@@ -2044,6 +2056,7 @@ struct state_functions {
 		int largest_unit_area = 0;
 		unit_t* largest_unit = nullptr;
 		for (unit_t* nu : find_units(bounds)) {
+			// fixme: 42dee0
 			if (nu != u && nu->pathing_flags & 1 && !u_no_collide(nu) && unit_finder_unit_in_bounds(nu, bounds)) {
 				rect n_bb = unit_type_bounding_box(nu->unit_type);
 				int p = (n_bb.to.x - n_bb.from.x) * (n_bb.to.y - n_bb.from.y);
@@ -2060,7 +2073,7 @@ struct state_functions {
 		if (!is_in_map_bounds(bounds)) return std::make_pair(false, nullptr);
 		unit_t* largest_unit = get_largest_blocking_unit(u, bounds);
 		if (!largest_unit) return std::make_pair(!unit_type_can_fit_at(u->unit_type, pos), nullptr);
-		return std::make_pair(false, largest_unit);
+		return std::make_pair(true, largest_unit);
 	}
 
 	void set_flingy_move_target(flingy_t* u, xy move_target) {
@@ -4175,7 +4188,7 @@ struct state_functions {
 			path->state_flags = 0;
 			path->long_path = std::move(pf.long_path);
 			path->full_long_path_size = pf.full_long_path_size;
-			path->current_long_path_index = pf.current_long_path_index;
+			path->current_long_path_index = std::min(pf.current_long_path_index, path->long_path.size());
 			path->short_path = std::move(pf.short_path);
 			path->current_short_path_index = 0;
 
@@ -4304,8 +4317,14 @@ struct state_functions {
 		if (go_to_next_waypoint()) {
 			going_to_next_waypoint = true;
 			update_unit_movement_values(u, ems);
-			// fixme: collision stuff
-			finish_unit_movement(u, ems);
+			if ((u_ground_unit(u) && check_unit_movement_unit_collision(u, ems)) || check_unit_movement_terrain_collision(u, ems)) {
+				set_current_speed(u, fp8::zero());
+				finish_flingy_movement(u, ems);
+				set_flingy_move_target(u, u->sprite->position);
+				stop_unit(u);
+			} else {
+				finish_unit_movement(u, ems);
+			}
 		}
 		if (u_collision(u) && u_ground_unit(u)) {
 			u->movement_state = movement_states::UM_CheckIllegal;
@@ -4685,6 +4704,28 @@ struct state_functions {
 		return false;
 	}
 
+	bool movement_UM_InitSeq(unit_t* u, execute_movement_struct& ems) {
+		if (u_status_flag(u, unit_t::status_flag_iscript_nobrk)) return false;
+		u->movement_state = movement_states::UM_Init;
+		return true;
+	}
+
+	bool movement_UM_ForceMoveFree(unit_t* u, execute_movement_struct& ems) {
+		if (u->pathing_collision_counter < 255) ++u->pathing_collision_counter;
+		if (unit_is_at_move_target(u)) {
+			u->movement_state = movement_states::UM_AtMoveTarget;
+			return false;
+		}
+		u->next_speed = fp8::zero();
+		set_current_speed(u, u->next_speed);
+		if (u->path) {
+			free_path(u->path);
+			u->path = nullptr;
+		}
+		u->movement_state = movement_states::UM_TurnAndStart;
+		return true;
+	}
+
 	bool execute_movement(unit_t* u) {
 
 		execute_movement_struct ems;
@@ -4696,6 +4737,9 @@ struct state_functions {
 			switch (u->movement_state) {
 			case movement_states::UM_Init:
 				cont = movement_UM_Init(u, ems);
+				break;
+			case movement_states::UM_InitSeq:
+				cont = movement_UM_InitSeq(u, ems);
 				break;
 
 			case movement_states::UM_Turret:
@@ -4715,7 +4759,6 @@ struct state_functions {
 			case movement_states::UM_AtMoveTarget:
 				cont = movement_UM_AtMoveTarget(u, ems);
 				break;
-
 			case movement_states::UM_CheckIllegal:
 				cont = movement_UM_CheckIllegal(u, ems);
 				break;
@@ -4756,6 +4799,9 @@ struct state_functions {
 				cont = movement_UM_ScoutPath(u, ems);
 				break;
 
+			case movement_states::UM_ForceMoveFree:
+				cont = movement_UM_ForceMoveFree(u, ems);
+				break;
 			case movement_states::UM_FixTerrain:
 				cont = movement_UM_FixTerrain(u, ems);
 				break;
@@ -5861,7 +5907,7 @@ struct state_functions {
 				if (no_side_effects) break;
 				u_unset_status_flag(iscript_unit, unit_t::status_flag_iscript_nobrk);
 				iscript_unit->sprite->flags &= ~sprite_t::flag_iscript_nobrk;
-				if (iscript_unit->order_queue.empty() && iscript_unit->user_action_flags & 1) {
+				if (!iscript_unit->order_queue.empty() && iscript_unit->user_action_flags & 1) {
 					iscript_run_to_idle(iscript_unit);
 					activate_next_order(iscript_unit);
 				}
@@ -6572,8 +6618,8 @@ struct state_functions {
 				u->wireframe_randomizer = lcg_rand(15);
 				if (ut_turret(u)) u->hp = fp8::integer(1) / 256;
 				else u->hp = u->unit_type->hitpoints / 10;
-				if (u_grounded_building(u)) u->order_type = get_order_type(Orders::Nothing);
-				else u->order_type = u->unit_type->human_ai_idle;
+				if (u_grounded_building(u)) u->order_type = u->unit_type->human_ai_idle;
+				else u->order_type = get_order_type(Orders::Nothing);
 				// secondary_order_id is uninitialized
 				if (!u->secondary_order_type || u->secondary_order_type->id != Orders::Nothing) {
 					u->secondary_order_type = get_order_type(Orders::Nothing);
@@ -6879,14 +6925,15 @@ struct state_functions {
 	void activate_next_order(unit_t* u) {
 		if (u->order_queue.empty()) return;
 		if (u->ai) xcept("ai stuff");
-		if ((u_in_building(u) || u_burrowed(u)) && u->order_queue.front().order_type->id != Orders::Die) return;
+		if ((u_order_not_interruptible(u) || u_iscript_nobrk(u)) && u->order_queue.front().order_type->id != Orders::Die) return;
 		const order_type_t* order_type = u->order_queue.front().order_type;
 		order_target target = u->order_queue.front().target;
 		remove_queued_order(u, &u->order_queue.front());
 
 		u->user_action_flags &= ~1;
-		u->status_flags &= ~(unit_t::status_flag_8 | unit_t::status_flag_order_not_interruptible | unit_t::status_flag_holding_position);
-		if (!order_type->can_be_interrupted) u->status_flags |= unit_t::status_flag_order_not_interruptible;
+		u_unset_status_flag(u, unit_t::status_flag_8);
+		u_unset_status_flag(u, unit_t::status_flag_holding_position);
+		u_set_status_flag(u, unit_t::status_flag_order_not_interruptible, !order_type->can_be_interrupted);
 		u->order_queue_timer = 0;
 		u->recent_order_timer = 0;
 
@@ -9530,12 +9577,14 @@ void init() {
 		return (random_state >> 16) & 0x7fff;
 	};
 
+
 	auto tick = [&]() {
 		int frame = st.current_frame + 1;
 		if (true) {
 			for (unit_t* u : ptr(st.visible_units)) {
 				//if (frame == 50) order_move(u - &st.units.front(), 68 * 32, 60 * 32);
-				if (random() % 30 == 0) order_move(u - &st.units.front(), random() % 4096, random() % 4096);
+				//if (random() % 60 == 0) order_move(u - &st.units.front(), random() % 4096, random() % 4096);
+				if (random() % 60 == 0) order_move(u - &st.units.front(), u->position.x - 256 + random() % 512, u->position.y - 256 + random() % 512);
 			}
 		}
 	};
