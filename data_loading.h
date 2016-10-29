@@ -122,7 +122,19 @@ struct data_type_cast_helper<direction_t, int8_t> {
 template<>
 struct data_type_cast_helper<fp8, int8_t> {
 	fp8 operator()(int8_t v) {
-		return ufp8::from_raw(v).as_signed();
+		return fp8::from_raw(v);
+	}
+};
+template<>
+struct data_type_cast_helper<fp8, uint8_t> {
+	fp8 operator()(uint8_t v) {
+		return fp8::from_raw(v);
+	}
+};
+template<>
+struct data_type_cast_helper<fp8, int16_t> {
+	fp8 operator()(int16_t v) {
+		return fp8::from_raw(v);
 	}
 };
 
@@ -159,16 +171,15 @@ struct read_data<load_T, rect> {
 	}
 };
 
-template<typename load_T, typename field_T, typename reader_T, typename arr_T>
-void read_array(reader_T& r, arr_T&arr, size_t num, size_t offset) {
-	static_assert(!std::is_reference<field_T>::value, "field_T can not be a reference");
-	if (offset&(alignof(field_T)-1)) xcept("offset of %d for %s is not aligned to %d bytes", typeid(field_T).name(), offset, alignof(field_T));
+template<typename load_T, typename reader_T, typename ptr_F>
+void read_array(reader_T& r, size_t num, ptr_F&& ptr_f) {
 	for (size_t i = 0; i < num; ++i) {
-		*(field_T*)((uint8_t*)&arr[i] + offset) = read_data<load_T, field_T>::read(r);
+		auto* field = ptr_f(i);
+		*field = read_data<load_T, std::remove_reference<decltype(*field)>::type>::read(r);
 	}
 }
 
-#define rawr(load_type, name, num) read_array<load_type, decltype(arr[0].name)>(r, arr, num, offsetof(std::remove_reference<decltype(arr[0])>::type, name))
+#define rawr(load_type, name, num) read_array<load_type>(r, num, [&](size_t index) {return &arr[index].name;})
 
 unit_types_t load_units_dat(a_string fn) {
 	static const size_t total_count = 228;
@@ -284,7 +295,7 @@ weapon_types_t load_weapons_dat(a_string fn) {
 	rawr(uint16_t, damage_bonus, count);
 	rawr(uint8_t, cooldown, count);
 	rawr(uint8_t, damage_factor, count);
-	rawr(int8_t, attack_angle, count);
+	rawr(uint8_t, attack_angle, count);
 	rawr(uint8_t, launch_spin, count);
 	rawr(int8_t, forward_offset, count);
 	rawr(int8_t, upward_offset, count);
@@ -378,9 +389,9 @@ flingy_types_t load_flingy_dat(a_string fn) {
 	auto& arr = flingy_types.vec;
 
 	rawr(uint16_t, sprite, count);
-	rawr(uint32_t, top_speed, count);
-	rawr(uint16_t, acceleration, count);
-	rawr(uint32_t, halt_distance, count);
+	rawr(int32_t, top_speed, count);
+	rawr(int16_t, acceleration, count);
+	rawr(int32_t, halt_distance, count);
 	rawr(uint8_t, turn_rate, count);
 	rawr(uint8_t, unused, count);
 	rawr(uint8_t, movement_type, count);

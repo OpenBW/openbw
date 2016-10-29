@@ -176,10 +176,10 @@ struct flingy_type_t {
 	int id;
 
 	sprite_type_t* sprite;
-	int top_speed;
-	int acceleration;
-	int halt_distance;
-	int turn_rate;
+	fp8 top_speed;
+	fp8 acceleration;
+	fp8 halt_distance;
+	fp8 turn_rate;
 	int unused;
 	int movement_type;
 };
