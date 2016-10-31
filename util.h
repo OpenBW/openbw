@@ -231,26 +231,34 @@ auto reverse(range_T&& r) {
 	return make_iterators_range(std::make_reverse_iterator(r.end()), std::make_reverse_iterator(r.begin()));
 }
 
-template<typename cont_T, typename score_F>
-auto get_best_score(cont_T&& cont, score_F&& score) {
-	typename std::remove_const<typename std::remove_reference<typename std::result_of<score_F(typename std::remove_reference<cont_T>::type::value_type)>::type>::type>::type best_score {};
-	typename std::remove_reference<cont_T>::type::value_type best {};
-	if (cont.empty()) return best;
-	auto i = cont.begin();
-	auto e = cont.end();
-	auto& front = *i;
-	best = front;
-	best_score = score(front);
+
+struct identity {
+	template<typename T>
+	decltype(auto) operator()(T&& v) const {
+		return std::forward<T>(v);
+	}
+};
+
+template<typename iterator_T, typename score_F>
+auto get_best_score(iterator_T begin, iterator_T end, score_F&& score) {
+	if (begin == end) return end;
+	auto i = begin;
+	auto best = i;
+	auto best_score = score(*i);
 	++i;
-	for (; i != e; ++i) {
-		auto& v = *i;
-		auto s = score(v);
+	for (; i != end; ++i) {
+		auto s = score(*i);
 		if (s < best_score) {
-			best = v;
+			best = i;
 			best_score = s;
 		}
 	}
 	return best;
+}
+
+template<typename cont_T, typename score_F>
+auto get_best_score(cont_T&& cont, score_F&& score) {
+	return get_best_score(cont.begin(), cont.end(), std::forward<score_F>(score));
 }
 
 

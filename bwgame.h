@@ -474,6 +474,11 @@ struct state_functions {
 		return u;
 	}
 
+	unit_id get_unit_id(const unit_t* u) const {
+		if (!u) return unit_id{};
+		return unit_id(u - st.units.data() + 1, u->unit_id_generation);
+	}
+
 	bool is_in_map_bounds(const unit_type_t* unit_type, xy pos) const {
 		if (pos.x - unit_type->dimensions.from.x < 0) return false;
 		if (pos.y - unit_type->dimensions.from.y < 0) return false;
@@ -508,6 +513,17 @@ struct state_functions {
 
 	rect unit_sprite_bounding_box(const unit_t* u) const {
 		return {u->sprite->position - u->unit_type->dimensions.from, u->sprite->position + u->unit_type->dimensions.to + xy(1, 1)};
+	}
+
+	rect unit_type_inner_bounding_box(const unit_type_t* unit_type, xy origin) const {
+		return {origin - unit_type->dimensions.from, origin + unit_type->dimensions.to};
+	}
+	rect unit_inner_bounding_box(const unit_t* u, xy origin) const {
+		return unit_type_inner_bounding_box(u->unit_type, origin);
+	}
+
+	rect unit_sprite_inner_bounding_box(const unit_t* u) const {
+		return {u->sprite->position - u->unit_type->dimensions.from, u->sprite->position + u->unit_type->dimensions.to};
 	}
 
 	rect map_bounds() const {
@@ -1014,6 +1030,26 @@ struct state_functions {
 		return false;
 	}
 
+	bool unit_can_collide_with(const unit_t* u, const unit_t* target) const {
+		if (target == u) return false;
+		if (~target->pathing_flags & 1) return false;
+		if (u_no_collide(target)) return false;
+		if (u_status_flag(target, unit_t::status_flag_400000)) {
+			if (unit_target_is_enemy(u, target)) return false;
+		}
+		if (u_gathering(u) && !u_grounded_building(target)) {
+			if (!u_gathering(target)) return false;
+			if (u->order_type->id == Orders::ReturnGas) return false;
+			if (target->order_type->id != Orders::WaitForGas) return false;
+		}
+		if (u->unit_type->id == UnitTypes::Zerg_Larva) {
+			if (!u_grounded_building(target)) return false;
+		} else if (target->unit_type->id == UnitTypes::Zerg_Larva) {
+			return false;
+		}
+		return true;
+	}
+
 	xy rect_difference(rect a, rect b) const {
 		int x, y;
 		if (a.from.x > b.to.x) x = a.from.x - b.to.x;
@@ -1084,21 +1120,21 @@ struct state_functions {
 		return r;
 	}
 
-	xy_fp8 direction_xy(direction_t dir, fp8 length) {
+	xy_fp8 direction_xy(direction_t dir, fp8 length) const {
 		return global_st.direction_table[direction_index(dir)] * length;
 	}
 
-	xy_fp8 direction_xy(direction_t dir) {
+	xy_fp8 direction_xy(direction_t dir) const {
 		return global_st.direction_table[direction_index(dir)];
 	}
 
-	size_t direction_index(direction_t dir) {
+	size_t direction_index(direction_t dir) const {
 		auto v = dir.fractional_part();
 		if (v < 0) return 256 + v;
 		else return v;
 	}
 
-	direction_t direction_from_index(size_t index) {
+	direction_t direction_from_index(size_t index) const {
 		int v = index;
 		if (v >= 128) v = -(256 - v);
 		return direction_t::from_raw(v);
@@ -1278,7 +1314,7 @@ struct state_functions {
 		auto targets = get_default_priority_targets(u, min_distance, max_distance);
 		for (auto& v : targets) {
 			if (v.empty()) continue;
-			return get_best_score(v, [&](const unit_t* target) {
+			return *get_best_score(v, [&](const unit_t* target) {
 				return xy_length(target->sprite->position - u->sprite->position);
 			});
 		}
@@ -1368,7 +1404,6 @@ struct state_functions {
 	}
 
 	void order_Move(unit_t* u) {
-		log("move: order_state is %d\n", u->order_state);
 		if (u->order_state == 0) {
 			if (u->order_target.unit) {
 				xcept("fixme move to unit");
@@ -2044,20 +2079,11 @@ struct state_functions {
 		return st.alliances[u->owner][target->owner] == 0;
 	}
 
-// 	bool some_alliance(unit_t* a, unit_t* b) {
-// 		if (b->status_flags & (unit_t::status_flags_t)0x400000) {
-// 			int owner = b->owner;
-// 			if (owner == 11) owner = b->sprite->owner;
-// 			if (!st.player_a)
-// 		}
-// 	}
-
-	unit_t* get_largest_blocking_unit(unit_t* u, rect bounds) const {
+	unit_t* get_largest_blocking_unit(const unit_t* u, rect bounds) const {
 		int largest_unit_area = 0;
 		unit_t* largest_unit = nullptr;
 		for (unit_t* nu : find_units(bounds)) {
-			// fixme: 42dee0
-			if (nu != u && nu->pathing_flags & 1 && !u_no_collide(nu) && unit_finder_unit_in_bounds(nu, bounds)) {
+			if (unit_can_collide_with(u, nu) && unit_finder_unit_in_bounds(nu, bounds)) {
 				rect n_bb = unit_type_bounding_box(nu->unit_type);
 				int p = (n_bb.to.x - n_bb.from.x) * (n_bb.to.y - n_bb.from.y);
 				if (p > largest_unit_area) {
@@ -2068,9 +2094,9 @@ struct state_functions {
 		}
 		return largest_unit;
 	}
-	std::pair<bool, unit_t*> is_blocked(unit_t* u, xy pos) const {
+	std::pair<bool, unit_t*> is_blocked(const unit_t* u, xy pos) const {
 		rect bounds = unit_bounding_box(u, pos);
-		if (!is_in_map_bounds(bounds)) return std::make_pair(false, nullptr);
+		if (!is_in_map_bounds(bounds)) return std::make_pair(true, nullptr);
 		unit_t* largest_unit = get_largest_blocking_unit(u, bounds);
 		if (!largest_unit) return std::make_pair(!unit_type_can_fit_at(u->unit_type, pos), nullptr);
 		return std::make_pair(true, largest_unit);
@@ -2112,6 +2138,11 @@ struct state_functions {
 		if (u->current_speed == current_speed) return;
 		u->current_speed = current_speed;
 		u->velocity = direction_xy(u->current_velocity_direction, u->current_speed);
+	}
+
+	void set_next_speed(flingy_t* u, fp8 next_speed) {
+		u->next_speed = next_speed;
+		set_current_speed(u, next_speed);
 	}
 
 	direction_t unit_turn_rate(const flingy_t* u, direction_t desired_turn) const {
@@ -2276,6 +2307,7 @@ struct state_functions {
 			if (u->current_speed >= remaining_d) {
 				ems.position = u->next_movement_waypoint;
 				ems.exact_position = to_xy_fp8(ems.position);
+				ems.speed = remaining_d;
 			} else {
 				ems.exact_position = u->exact_position + u->velocity;
 				ems.position = to_xy(ems.exact_position);
@@ -2481,7 +2513,73 @@ struct state_functions {
 	}
 
 	unit_t* check_unit_movement_unit_collision(unit_t* u, execute_movement_struct& ems) {
+		if (us_hidden(u)) return nullptr;
+		xy movement = ems.position - u->sprite->position;
+
+		auto cmp_u = [&](int a, auto& b) {
+			return a < b.value;
+		};
+		auto cmp_l = [&](auto& a, int b) {
+			return a.value < b;
+		};
+
+		auto new_bb = u->unit_finder_bounding_box;
+		new_bb.from += movement;
+		new_bb.to += movement;
+
+		if (movement.x < 0) {
+			auto& arr = st.unit_finder_x;
+			for (auto i = std::upper_bound(arr.begin(), arr.end(), u->unit_finder_bounding_box.from.x, cmp_u); i != arr.begin();) {
+				--i;
+				if (i->value < new_bb.from.x) break;
+				if (i->u->unit_finder_bounding_box.from.y <= new_bb.to.y && i->u->unit_finder_bounding_box.to.y >= new_bb.from.y) {
+					if (unit_can_collide_with(u, i->u) && u_ground_unit(i->u)) {
+						return i->u;
+					}
+				}
+			}
+		} else if (movement.x > 0) {
+			auto& arr = st.unit_finder_x;
+			for (auto i = std::lower_bound(arr.begin(), arr.end(), u->unit_finder_bounding_box.to.x, cmp_l); i != arr.end(); ++i) {
+				if (i->value > new_bb.to.x) break;
+				if (i->u->unit_finder_bounding_box.from.y <= new_bb.to.y && i->u->unit_finder_bounding_box.to.y >= new_bb.from.y) {
+					if (unit_can_collide_with(u, i->u) && u_ground_unit(i->u)) {
+						return i->u;
+					}
+				}
+			}
+		}
+		if (movement.y < 0) {
+			auto& arr = st.unit_finder_y;
+			for (auto i = std::upper_bound(arr.begin(), arr.end(), u->unit_finder_bounding_box.from.y, cmp_u); i != arr.begin();) {
+				--i;
+				if (i->value < new_bb.from.y) break;
+				if (i->u->unit_finder_bounding_box.from.x <= new_bb.to.x && i->u->unit_finder_bounding_box.to.x >= new_bb.from.x) {
+					if (unit_can_collide_with(u, i->u) && u_ground_unit(i->u)) {
+						return i->u;
+					}
+				}
+			}
+		} else if (movement.y > 0) {
+			auto& arr = st.unit_finder_y;
+			for (auto i = std::lower_bound(arr.begin(), arr.end(), u->unit_finder_bounding_box.to.y, cmp_l); i != arr.end(); ++i) {
+				if (i->value > new_bb.to.y) break;
+				if (i->u->unit_finder_bounding_box.from.x <= new_bb.to.x && i->u->unit_finder_bounding_box.to.x >= new_bb.from.x) {
+					if (unit_can_collide_with(u, i->u) && u_ground_unit(i->u)) {
+						return i->u;
+					}
+				}
+			}
+		}
 		return nullptr;
+	}
+
+	unit_t* check_ground_unit_movement_unit_collision(unit_t* u, execute_movement_struct& ems) {
+		if (u_ground_unit(u)) {
+			return check_unit_movement_unit_collision(u, ems);
+		} else {
+			return false;
+		}
 	}
 
 	void update_repulse_direction(unit_t* u) {
@@ -2586,10 +2684,6 @@ struct state_functions {
 		return false;
 	}
 
-	void create_single_segment_path(unit_t* u, xy to) {
-		xcept("create_single_step_path fixme");
-	}
-
 	struct pathfinder {
 		unit_t* u = nullptr;
 		unit_t* target_unit = nullptr;
@@ -2613,16 +2707,15 @@ struct state_functions {
 		size_t long_all_nodes_size = 0;
 
 		bool destination_reached = false;
+		bool is_stuck = false;
 
-		int field_1c = 0;
-		int field_1d = 0;
-		int field_1f = 0;
+		const unit_t* consider_collision_with_unit = nullptr;
+		bool consider_collision_with_moving_units = false;
 	};
 
 	bool pathfinder_find_long_path(pathfinder& pf) {
 		log("find long path from %d %d to %d %d, region %d to %d\n", pf.source.x, pf.source.y, pf.destination.x, pf.destination.y, pf.source_region->index, pf.destination_region->index);
 		if (pf.source_region == pf.destination_region) return false;
-		pf.field_1c = 0;
 
 		struct node_t {
 			node_t* prev = nullptr;
@@ -2740,7 +2833,6 @@ struct state_functions {
 			}
 
 			if (!goal_node) {
-				pf.field_1c = 1;
 				start_node->estimated_remaining_cost = xy_length(to_pos - start_node->region->center);
 				fp8 best_cost = start_node->estimated_remaining_cost;
 				node_t* best_node = start_node;
@@ -2841,9 +2933,18 @@ struct state_functions {
 		}
 	}
 
-	void pathfinder_find_short_path(pathfinder& pf, xy target, const regions_t::region* target_region) {
+	bool pathfinder_unit_can_collide_with(const pathfinder& pf, const unit_t* target) {
+		if (target != pf.consider_collision_with_unit && !pf.consider_collision_with_moving_units) {
+			if (!unit_is_at_move_target(target)) return false;
+		}
+		if (target->unit_type->id == UnitTypes::Special_Upper_Level_Door) return false;
+		if (target->unit_type->id == UnitTypes::Special_Right_Upper_Level_Door) return false;
+		if (target->unit_type->id == UnitTypes::Special_Pit_Door) return false;
+		if (target->unit_type->id == UnitTypes::Special_Right_Pit_Door) return false;
+		return unit_can_collide_with(pf.u, target);
+	}
 
-		compare_str("short path find target %d %d destination %d %d region %d\n", target.x, target.y, pf.destination.x, pf.destination.y, target_region ? target_region->index : 0x1ffe);
+	void pathfinder_find_short_path(pathfinder& pf, xy target, const regions_t::region* target_region) {
 
 		bool target_is_destination = target == pf.destination;
 		bool target_region_walkable = target_region && target_region->walkable();
@@ -2873,7 +2974,7 @@ struct state_functions {
 
 			std::array<a_vector<regions_t::contour>, 4> local_edges;
 
-			std::array<const regions_t::contour*, 4> box_neighbors;
+			std::array<const regions_t::contour*, 4> nearest_edge;
 
 			struct neighbor_t {
 				xy pos;
@@ -2943,7 +3044,6 @@ struct state_functions {
 		pf_area_visited.push_back({(int)game_st.map_width, {}});
 
 		auto pf_remove_visited_flags = [&](xy pos, int flags) {
-			compare_str("remove flags %02x -> ", (uint8_t)flags);
 			auto cur = std::upper_bound(pf_area_visited.begin(), pf_area_visited.end(), pos.x, [&](int a, auto& b) {
 				return a < b.x;
 			});
@@ -2953,10 +3053,7 @@ struct state_functions {
 			for (;i != cur->y.end(); ++i) {
 				if (pos.y <= i->second) break;
 			}
-			if (i == cur->y.end()) {
-				compare_str("%02x\n", flags);
-				return flags;
-			}
+			if (i == cur->y.end()) return flags;
 			int mask = 0;
 			if (pos.y <= i->first) mask |= 0x19;
 			if (pos.y >= i->second) mask |= 0x46;
@@ -2992,61 +3089,70 @@ struct state_functions {
 					}
 				}
 			}
-			compare_str("%02x\n", flags & mask);
 			return flags & mask;
+		};
+
+		auto merge_local_edge = [&](auto i, const auto& c) {
+			if (c.v[1] + w.inner[c.flags & 3] <= i->v[2] + w.inner[(i->flags >> 2) & 3]) {
+				if (c.v[2] + w.inner[(c.flags >> 2) & 3] >= i->v[1] + w.inner[i->flags & 3] - 1) {
+					if (c.v[1] < i->v[1]) i->v[1] = c.v[1];
+					if (c.v[2] > i->v[2]) i->v[2] = c.v[2];
+					return true;
+				}
+			}
+			return false;
 		};
 
 		auto pf_add_local_edge = [&](int n, const regions_t::contour& c) {
 			auto& local_edges = w.local_edges[n];
-			auto i = local_edges.begin();
-			for (;i != local_edges.end(); ++i) {
-				if (i->v[0] > c.v[0]) break;
-				if (i->v[0] == c.v[0]) {
-					if (c.v[1] + w.inner[c.flags & 3] <= i->v[2] + w.inner[(i->flags >> 2) & 3] + 1) {
-						if (c.v[2] + w.inner[(c.flags >> 2) & 3] >= i->v[1] + w.inner[i->flags & 3] - 1) {
-							if (c.v[1] < i->v[1]) i->v[1] = c.v[1];
-							if (c.v[2] > i->v[2]) i->v[2] = c.v[2];
-							return;
-						}
-					}
-				}
+			auto cmp_l = [&](auto& a, int b) {
+				return a.v[0] < b;
+			};
+			auto i = std::lower_bound(local_edges.begin(), local_edges.end(), c.v[0], cmp_l);
+			while (i != local_edges.end() && i->v[0] == c.v[0]) {
+				if (merge_local_edge(i, c)) return;
+				if (c.v[1] + w.inner[c.flags & 3] <= i->v[2] + w.inner[(i->flags >> 2) & 3]) break;
+				++i;
 			}
 			local_edges.insert(i, c);
 		};
 
-		auto pf_add_local_terrain = [&]() {
+		auto pf_push_back_local_edge = [&](int n, const regions_t::contour& c) {
+			auto& local_edges = w.local_edges[n];
+			if (!local_edges.empty() && local_edges.back().v[0] == c.v[0]) {
+				if (merge_local_edge(std::prev(local_edges.end()), c)) return;
+			}
+			local_edges.push_back(c);
+		};
 
-			auto cmp_u = [&](int v, const regions_t::contour& c) {
-				return v < c.v[0];
-			};
+		auto pf_add_local_terrain = [&]() {
 			auto cmp_l = [&](const regions_t::contour& c, int v) {
 				return c.v[0] < v;
 			};
-
 			auto& c0 = game_st.regions.contours[0];
 			for (auto i = std::lower_bound(c0.begin(), c0.end(), w.cur_pos_min.y - w.inner[0] - 1, cmp_l); i != c0.end(); ++i) {
 				if (i->v[0] > w.cur_pos.y - w.inner[0] - 1) break;
 				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.x) {
 					if (i->v[2] + w.inner[(i->flags >> 2) & 3] >= w.cur_pos_min.x) {
-						pf_add_local_edge(0, *i);
+						pf_push_back_local_edge(0, *i);
 					}
 				}
 			}
 			auto& c1 = game_st.regions.contours[1];
-			for (auto i = std::lower_bound(c1.begin(), c1.end(), w.cur_pos.x - w.inner[1], cmp_l); i != c1.end(); ++i) {
+			for (auto i = std::lower_bound(c1.begin(), c1.end(), w.cur_pos.x - w.inner[1] + 1, cmp_l); i != c1.end(); ++i) {
 				if (i->v[0] > w.cur_pos_max.x - w.inner[1] + 1) break;
 				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.y) {
 					if (i->v[2] + w.inner[(i->flags >> 2) & 3] >= w.cur_pos_min.y) {
-						pf_add_local_edge(1, *i);
+						pf_push_back_local_edge(1, *i);
 					}
 				}
 			}
 			auto& c2 = game_st.regions.contours[2];
-			for (auto i = std::lower_bound(c2.begin(), c2.end(), w.cur_pos.y - w.inner[2], cmp_l); i != c2.end(); ++i) {
+			for (auto i = std::lower_bound(c2.begin(), c2.end(), w.cur_pos.y - w.inner[2] + 1, cmp_l); i != c2.end(); ++i) {
 				if (i->v[0] > w.cur_pos_max.y - w.inner[2] + 1) break;
 				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.x) {
 					if (i->v[2] + w.inner[(i->flags >> 2) & 3] >= w.cur_pos_min.x) {
-						pf_add_local_edge(2, *i);
+						pf_push_back_local_edge(2, *i);
 					}
 				}
 			}
@@ -3055,15 +3161,84 @@ struct state_functions {
 				if (i->v[0] > w.cur_pos.x - w.inner[3] - 1) break;
 				if (i->v[1] + w.inner[i->flags & 3] <= w.cur_pos_max.y) {
 					if (i->v[2] + w.inner[(i->flags >> 2) & 3] >= w.cur_pos_min.y) {
-						pf_add_local_edge(3, *i);
+						pf_push_back_local_edge(3, *i);
 					}
 				}
 			}
-
 		};
 
-		auto pf_box_units = [&]() {
-			// FIXME: this function needs to be implemented for pathfinding around units
+		auto pf_add_local_units = [&]() {
+			auto cmp_l = [&](auto& a, int b) {
+				return a.value < b;
+			};
+			for (auto i = std::lower_bound(st.unit_finder_y.begin(), st.unit_finder_y.end(), w.cur_pos_min.y - w.inner[0] - 1, cmp_l); i != st.unit_finder_y.end(); ++i) {
+				auto& bb = i->u->unit_finder_bounding_box;
+				if (i->value >= w.cur_pos.y - w.inner[0]) break;
+				if (i->value == bb.to.y) {
+					regions_t::contour c;
+					c.v[0] = bb.to.y;
+					c.v[1] = bb.from.x;
+					c.v[2] = bb.to.x;
+					c.dir = 0;
+					c.flags = 0x3d;
+					if (c.v[1] + w.inner[1] <= w.cur_pos_max.x && c.v[2] + w.inner[3] >= w.cur_pos_min.x) {
+						if (i->u == w.target_unit || pathfinder_unit_can_collide_with(pf, i->u)) {
+							pf_add_local_edge(0, c);
+						}
+					}
+				}
+			}
+			for (auto i = std::lower_bound(st.unit_finder_x.begin(), st.unit_finder_x.end(), w.cur_pos.x - w.inner[1], cmp_l); i != st.unit_finder_x.end(); ++i) {
+				auto& bb = i->u->unit_finder_bounding_box;
+				if (i->value > w.cur_pos_max.x - w.inner[1] + 1) break;
+				if (i->value == bb.from.x) {
+					regions_t::contour c;
+					c.v[0] = bb.from.x;
+					c.v[1] = bb.from.y;
+					c.v[2] = bb.to.y;
+					c.dir = 1;
+					c.flags = 0x32;
+					if (c.v[1] + w.inner[2] <= w.cur_pos_max.y && c.v[2] + w.inner[0] >= w.cur_pos_min.y) {
+						if (i->u == w.target_unit || pathfinder_unit_can_collide_with(pf, i->u)) {
+							pf_add_local_edge(1, c);
+						}
+					}
+				}
+			}
+			for (auto i = std::lower_bound(st.unit_finder_y.begin(), st.unit_finder_y.end(), w.cur_pos.y - w.inner[2], cmp_l); i != st.unit_finder_y.end(); ++i) {
+				auto& bb = i->u->unit_finder_bounding_box;
+				if (i->value > w.cur_pos_max.y - w.inner[2] + 1) break;
+				if (i->value == bb.from.y) {
+					regions_t::contour c;
+					c.v[0] = bb.from.y;
+					c.v[1] = bb.from.x;
+					c.v[2] = bb.to.x;
+					c.dir = 2;
+					c.flags = 0x3d;
+					if (c.v[1] + w.inner[1] <= w.cur_pos_max.x && c.v[2] + w.inner[3] >= w.cur_pos_min.x) {
+						if (i->u == w.target_unit || pathfinder_unit_can_collide_with(pf, i->u)) {
+							pf_add_local_edge(2, c);
+						}
+					}
+				}
+			}
+			for (auto i = std::lower_bound(st.unit_finder_x.begin(), st.unit_finder_x.end(), w.cur_pos_min.x - w.inner[3] - 1, cmp_l); i != st.unit_finder_x.end(); ++i) {
+				auto& bb = i->u->unit_finder_bounding_box;
+				if (i->value >= w.cur_pos.x - w.inner[3]) break;
+				if (i->value == bb.to.x) {
+					regions_t::contour c;
+					c.v[0] = bb.to.x;
+					c.v[1] = bb.from.y;
+					c.v[2] = bb.to.y;
+					c.dir = 3;
+					c.flags = 0x32;
+					if (c.v[1] + w.inner[2] <= w.cur_pos_max.y && c.v[2] + w.inner[0] >= w.cur_pos_min.y) {
+						if (i->u == w.target_unit || pathfinder_unit_can_collide_with(pf, i->u)) {
+							pf_add_local_edge(3, c);
+						}
+					}
+				}
+			}
 		};
 
 		auto pf_local_edges_find = [&](int dir, int v, int v0, int v1, int v2) -> const regions_t::contour* {
@@ -3106,7 +3281,6 @@ struct state_functions {
 		};
 
 		auto pf_add_neighbor = [&](xy pos, int flags) {
-			compare_str("add neighbor %d %d %02x\n", pos.x, pos.y, (uint8_t)flags);
 			if (pos == w.cur_pos) return;
 			bool is_goal = false;
 			if (w.target_unit) {
@@ -3156,7 +3330,6 @@ struct state_functions {
 			xy pos = w.cur_pos;
 			xy pos_max = w.cur_pos_max;
 			xy pos_min = w.cur_pos_min;
-			compare_str("add neighbors %d pos %d %d min %d %d max %d %d\n", n, pos.x, pos.y, pos_min.x, pos_min.y, pos_max.x, pos_max.y);
 			auto expand_inner = [&](regions_t::contour c) {
 				c.v[0] += w.inner[c.dir];
 				c.v[1] += w.inner[c.flags & 3];
@@ -3173,11 +3346,11 @@ struct state_functions {
 				if (pos.x < pos_max.x) {
 					int xval = pos_max.x;
 					int yval = pos_min.y;
-					int box_y = pos_min.y;
-					if (w.box_neighbors[1]) {
-						auto* i = w.box_neighbors[1];
-						box_y = i->v[1] + w.inner[i->flags & 3] - 1;
-						if (box_y > yval) yval = box_y;
+					int edge_y = pos_min.y;
+					if (w.nearest_edge[1]) {
+						auto* i = w.nearest_edge[1];
+						edge_y = i->v[1] + w.inner[i->flags & 3] - 1;
+						if (edge_y > yval) yval = edge_y;
 					}
 					int flags = 0x3b;
 					auto* i = pf_local_edges_find(0, pos.y - 1, pos.x, xval, yval - 1);
@@ -3191,9 +3364,9 @@ struct state_functions {
 							flags = 0x22;
 						}
 					}
-					if (w.box_neighbors[1]) {
+					if (w.nearest_edge[1]) {
 						flags &= 0xfd;
-						if (box_y < yval) flags &= 0xde;
+						if (edge_y < yval) flags &= 0xde;
 					}
 					if (yval >= pos.y) {
 						flags |= 0x44;
@@ -3225,11 +3398,11 @@ struct state_functions {
 				if (pos.y > pos_min.y) {
 					int xval = pos_max.x;
 					int yval = pos_min.y;
-					int box_x = pos_min.y;
-					if (w.box_neighbors[0]) {
-						auto* i = w.box_neighbors[0];
-						box_x = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
-						if (box_x < xval) xval = box_x;
+					int edge_x = pos_min.y;
+					if (w.nearest_edge[0]) {
+						auto* i = w.nearest_edge[0];
+						edge_x = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
+						if (edge_x < xval) xval = edge_x;
 					}
 					int flags = 0x3b;
 					auto* i = pf_local_edges_find(1, pos.x + 1, yval, pos.y, xval + 1);
@@ -3243,9 +3416,9 @@ struct state_functions {
 							flags = 0x18;
 						}
 					}
-					if (w.box_neighbors[0]) {
+					if (w.nearest_edge[0]) {
 						flags &= 0xf7;
-						if (box_x > xval) flags &= 0xde;
+						if (edge_x > xval) flags &= 0xde;
 					}
 					if (xval <= pos.x) {
 						flags |= 0x84;
@@ -3275,11 +3448,11 @@ struct state_functions {
 				if (pos.x < pos_max.x) {
 					int xval = pos_max.x;
 					int yval = pos_max.y;
-					int box_y = pos_max.y;
-					if (w.box_neighbors[1]) {
-						auto* i = w.box_neighbors[1];
-						box_y = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
-						if (box_y < yval) yval = box_y;
+					int edge_y = pos_max.y;
+					if (w.nearest_edge[1]) {
+						auto* i = w.nearest_edge[1];
+						edge_y = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
+						if (edge_y < yval) yval = edge_y;
 					}
 					int flags = 0x67;
 					auto* i = pf_local_edges_find(2, pos.y + 1, pos.x, xval, yval + 1);
@@ -3305,9 +3478,9 @@ struct state_functions {
 							flags = 0x21;
 						}
 					}
-					if (w.box_neighbors[1]) {
+					if (w.nearest_edge[1]) {
 						flags &= 0xfe;
-						if (box_y > yval) flags &= 0xdd;
+						if (edge_y > yval) flags &= 0xdd;
 					}
 					if (yval <= pos.y) {
 						flags |= 0x18;
@@ -3322,11 +3495,11 @@ struct state_functions {
 				if (pos.y < pos_max.y) {
 					int xval = pos_max.x;
 					int yval = pos_max.y;
-					int box_x = pos_max.x;
-					if (w.box_neighbors[2]) {
-						auto* i = w.box_neighbors[2];
-						box_x = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
-						if (box_x < xval) xval = box_x;
+					int edge_x = pos_max.x;
+					if (w.nearest_edge[2]) {
+						auto* i = w.nearest_edge[2];
+						edge_x = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
+						if (edge_x < xval) xval = edge_x;
 					}
 					int flags = 0x67;
 					auto* i = pf_local_edges_find(1, pos.x + 1, pos.y, yval, xval + 1);
@@ -3352,9 +3525,9 @@ struct state_functions {
 							flags = 0x44;
 						}
 					}
-					if (w.box_neighbors[2]) {
+					if (w.nearest_edge[2]) {
 						flags &= 0xfb;
-						if (box_x > xval) flags &= 0xbd;
+						if (edge_x > xval) flags &= 0xbd;
 					}
 					if (xval <= pos.x) {
 						flags |= 0x88;
@@ -3369,11 +3542,11 @@ struct state_functions {
 				if (pos.x > pos_min.x) {
 					int xval = pos_min.x;
 					int yval = pos_max.y;
-					int box_y = pos_max.y;
-					if (w.box_neighbors[3]) {
-						auto* i = w.box_neighbors[3];
-						box_y = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
-						if (box_y < yval) yval = box_y;
+					int edge_y = pos_max.y;
+					if (w.nearest_edge[3]) {
+						auto* i = w.nearest_edge[3];
+						edge_y = i->v[2] + w.inner[(i->flags >> 2) & 3] + 1;
+						if (edge_y < yval) yval = edge_y;
 					}
 					int flags = 0xce;
 					auto* i = pf_local_edges_find(2, pos.y + 1, xval, pos.x, yval + 1);
@@ -3387,9 +3560,9 @@ struct state_functions {
 							flags = 0x88;
 						}
 					}
-					if (w.box_neighbors[3]) {
+					if (w.nearest_edge[3]) {
 						flags &= 0xf7;
-						if (box_y > yval) flags &= 0x7b;
+						if (edge_y > yval) flags &= 0x7b;
 					}
 					if (yval <= pos.y) {
 						flags |= 0x11;
@@ -3422,11 +3595,11 @@ struct state_functions {
 				if (pos.y < pos_max.y) {
 					int xval = pos_min.x;
 					int yval = pos_max.y;
-					int box_x = pos_min.y;
-					if (w.box_neighbors[2]) {
-						auto* i = w.box_neighbors[2];
-						box_x = i->v[1] + w.inner[i->flags & 3] - 1;
-						if (box_x > xval) xval = box_x;
+					int edge_x = pos_min.y;
+					if (w.nearest_edge[2]) {
+						auto* i = w.nearest_edge[2];
+						edge_x = i->v[1] + w.inner[i->flags & 3] - 1;
+						if (edge_x > xval) xval = edge_x;
 					}
 					int flags = 0xce;
 					auto* i = pf_local_edges_find(3, pos.x - 1, pos.y, yval, xval - 1);
@@ -3440,9 +3613,9 @@ struct state_functions {
 							flags = 0x42;
 						}
 					}
-					if (w.box_neighbors[2]) {
+					if (w.nearest_edge[2]) {
 						flags &= 0xfd;
-						if (box_x < xval) flags &= 0xbb;
+						if (edge_x < xval) flags &= 0xbb;
 					}
 					if (xval >= pos.x) {
 						flags |= 0x22;
@@ -3472,11 +3645,11 @@ struct state_functions {
 				if (pos.x > pos_min.x) {
 					int xval = pos_min.x;
 					int yval = pos_min.y;
-					int box_y = pos_min.y;
-					if (w.box_neighbors[3]) {
-						auto* i = w.box_neighbors[3];
-						box_y = i->v[1] + w.inner[i->flags & 3] - 1;
-						if (box_y > yval) yval = box_y;
+					int edge_y = pos_min.y;
+					if (w.nearest_edge[3]) {
+						auto* i = w.nearest_edge[3];
+						edge_y = i->v[1] + w.inner[i->flags & 3] - 1;
+						if (edge_y > yval) yval = edge_y;
 					}
 					int flags = 0x9d;
 					auto* i = pf_local_edges_find(0, pos.y - 1, xval, pos.x, yval - 1);
@@ -3506,9 +3679,9 @@ struct state_functions {
 							flags = 0x84;
 						}
 					}
-					if (w.box_neighbors[3]) {
+					if (w.nearest_edge[3]) {
 						flags &= 0xfb;
-						if (box_y < yval) flags &= 0x77;
+						if (edge_y < yval) flags &= 0x77;
 					}
 					if (yval >= pos.y) {
 						flags |= 0x44;
@@ -3523,11 +3696,11 @@ struct state_functions {
 				if (pos.y > pos_min.y) {
 					int xval = pos_min.x;
 					int yval = pos_min.y;
-					int box_x = pos_min.x;
-					if (w.box_neighbors[0]) {
-						auto* i = w.box_neighbors[0];
-						box_x = i->v[1] + w.inner[i->flags & 3] - 1;
-						if (box_x > xval) xval = box_x;
+					int edge_x = pos_min.x;
+					if (w.nearest_edge[0]) {
+						auto* i = w.nearest_edge[0];
+						edge_x = i->v[1] + w.inner[i->flags & 3] - 1;
+						if (edge_x > xval) xval = edge_x;
 					}
 					int flags = 0x9d;
 					auto* i = pf_local_edges_find(3, pos.x - 1, yval, pos.y, xval - 1);
@@ -3553,9 +3726,9 @@ struct state_functions {
 							flags = 0x11;
 						}
 					}
-					if (w.box_neighbors[0]) {
+					if (w.nearest_edge[0]) {
 						flags &= 0xfe;
-						if (box_x < xval) flags &= 0xe7;
+						if (edge_x < xval) flags &= 0xe7;
 					}
 					if (xval >= pos.x) {
 						flags |= 0x21;
@@ -3616,13 +3789,6 @@ struct state_functions {
 		};
 
 		auto pf_generate_neighbors  = [&](xy pos, int flags) {
-			compare_str("generate neighbors %d %d %02x\n", pos.x, pos.y, (uint8_t)flags);
-
-			compare_str("heap: ");
-			for (auto& v : open) {
-				compare_str("%d %d %g\n", v->pos.x, v->pos.y, v->estimated_final_cost.raw_value / 256.0);
-			}
-
 			w.has_found_goal = false;
 			w.neighbors.clear();
 			w.visited_areas.clear();
@@ -3642,16 +3808,16 @@ struct state_functions {
 			for (auto& v : w.local_edges) v.clear();
 
 			pf_add_local_terrain();
-			pf_box_units();
+			pf_add_local_units();
 
-			w.box_neighbors[0] = pf_local_edges_find(0, pos.y, pos.x, pos.x, w.cur_pos_min.y - 1);
-			if (w.box_neighbors[0]) w.cur_pos_min.y = w.box_neighbors[0]->v[0] + w.inner[0] + 1;
-			w.box_neighbors[1] = pf_local_edges_find(1, pos.x, pos.y, pos.y, w.cur_pos_max.x + 1);
-			if (w.box_neighbors[1]) w.cur_pos_max.x = w.box_neighbors[1]->v[0] + w.inner[1] - 1;
-			w.box_neighbors[2] = pf_local_edges_find(2, pos.y, pos.x, pos.x, w.cur_pos_max.y + 1);
-			if (w.box_neighbors[2]) w.cur_pos_max.y = w.box_neighbors[2]->v[0] + w.inner[2] - 1;
-			w.box_neighbors[3] = pf_local_edges_find(3, pos.x, pos.y, pos.y, w.cur_pos_min.x - 1);
-			if (w.box_neighbors[3]) w.cur_pos_min.x = w.box_neighbors[3]->v[0] + w.inner[3] + 1;
+			w.nearest_edge[0] = pf_local_edges_find(0, pos.y, pos.x, pos.x, w.cur_pos_min.y - 1);
+			if (w.nearest_edge[0]) w.cur_pos_min.y = w.nearest_edge[0]->v[0] + w.inner[0] + 1;
+			w.nearest_edge[1] = pf_local_edges_find(1, pos.x, pos.y, pos.y, w.cur_pos_max.x + 1);
+			if (w.nearest_edge[1]) w.cur_pos_max.x = w.nearest_edge[1]->v[0] + w.inner[1] - 1;
+			w.nearest_edge[2] = pf_local_edges_find(2, pos.y, pos.x, pos.x, w.cur_pos_max.y + 1);
+			if (w.nearest_edge[2]) w.cur_pos_max.y = w.nearest_edge[2]->v[0] + w.inner[2] - 1;
+			w.nearest_edge[3] = pf_local_edges_find(3, pos.x, pos.y, pos.y, w.cur_pos_min.x - 1);
+			if (w.nearest_edge[3]) w.cur_pos_min.x = w.nearest_edge[3]->v[0] + w.inner[3] + 1;
 
 			if (w.cur_pos_min.y == pos.y && w.cur_pos_max.x == pos.x) flags &= ~1;
 			if (w.cur_pos_max.y == pos.y) {
@@ -3668,19 +3834,19 @@ struct state_functions {
 
 			if (flags & 0x10) {
 				flags |= 9;
-				pf_add_neighbor({pos.x, w.cur_pos_min.y}, w.box_neighbors[0] ? 0xa6 : 0xbf);
+				pf_add_neighbor({pos.x, w.cur_pos_min.y}, w.nearest_edge[0] ? 0xa6 : 0xbf);
 			}
 			if (flags & 0x20) {
 				flags |= 3;
-				pf_add_neighbor({w.cur_pos_max.x, pos.y}, w.box_neighbors[1] ? 0x5c : 0x7f);
+				pf_add_neighbor({w.cur_pos_max.x, pos.y}, w.nearest_edge[1] ? 0x5c : 0x7f);
 			}
 			if (flags & 0x40) {
 				flags |= 6;
-				pf_add_neighbor({pos.x, w.cur_pos_max.y}, w.box_neighbors[2] ? 0xa9 : 0xef);
+				pf_add_neighbor({pos.x, w.cur_pos_max.y}, w.nearest_edge[2] ? 0xa9 : 0xef);
 			}
 			if (flags & 0x80) {
 				flags |= 0xc;
-				pf_add_neighbor({w.cur_pos_min.x, pos.y}, w.box_neighbors[3] ? 0x53 : 0xdf);
+				pf_add_neighbor({w.cur_pos_min.x, pos.y}, w.nearest_edge[3] ? 0x53 : 0xdf);
 			}
 
 			for (int dir = 0; dir != 4; ++dir) {
@@ -3691,13 +3857,6 @@ struct state_functions {
 
 			for (auto& v : w.visited_areas) {
 				pf_mark_visited(v);
-				for (auto& v2 : pf_area_visited) {
-					if (&v2 == &pf_area_visited.back()) break;
-					compare_str("x %d\n", v2.x);
-					for (auto& v3 : v2.y) {
-						compare_str("  y %d %d\n", v3.first, v3.second);
-					}
-				}
 			}
 
 		};
@@ -3713,12 +3872,6 @@ struct state_functions {
 			node_t* cur = open.front();
 			std::swap(open.front(), open.back());
 			open.pop_back();
-			compare_str("pop %d %d %g %d %d %d %02x %d\n", cur->pos.x, cur->pos.y, cur->estimated_final_cost.raw_value / 256.0, cur->is_neighbor_region, cur->is_target_region, cur->is_goal, (uint8_t)cur->directional_flags, cur->depth);
-			compare_str("down heap\n");
-			compare_str("heap: ");
-			for (auto& v : open) {
-				compare_str("%d %d %g\n", v->pos.x, v->pos.y, v->estimated_final_cost.raw_value / 256.0);
-			}
 			binary_heap_down(open.begin(), open.begin(), open.end(), cmp_node());
 			if (cur->is_goal) {
 				goal_node = cur;
@@ -3817,22 +3970,11 @@ struct state_functions {
 							n->is_goal = v.is_goal;
 							open.push_back(n);
 							binary_heap_up(std::prev(open.end()), open.begin(), open.end(), cmp_node());
-							compare_str("up heap\n");
-							compare_str("heap: ");
-							for (auto& v : open) {
-								compare_str("%d %d %g\n", v->pos.x, v->pos.y, v->estimated_final_cost.raw_value / 256.0);
-							}
 							if (n->is_target_region) ++n_open_nodes_in_target_region;
 							if (n->is_neighbor_region) ++n_open_nodes_in_neighbor_region;
 						} else {
-							if (estimated_final_cost >= n->estimated_final_cost) xcept("unreachable; cost did not decrease");
 							n->estimated_final_cost = estimated_final_cost;
 							binary_heap_up(std::find(open.begin(), open.end(), n), open.begin(), open.end(), cmp_node());
-							compare_str("up heap\n");
-							compare_str("heap: ");
-							for (auto& v : open) {
-								compare_str("%d %d %g\n", v->pos.x, v->pos.y, v->estimated_final_cost.raw_value / 256.0);
-							}
 						}
 						if (open.size() == 150) break;
 					} else if (!n->visited) n->directional_flags &= v.flags;
@@ -3850,7 +3992,6 @@ struct state_functions {
 		}
 
 		if (!goal_node) {
-			pf.field_1d = 1;
 
 			int n_unvisited_nodes = 0;
 			int n_unvisited_destination_region_nodes = 0;
@@ -3898,7 +4039,7 @@ struct state_functions {
 				}
 				goal_node = best_node;
 				pf.destination_reached = true;
-				pf.field_1f = 1;
+				pf.is_stuck = true;
 			} else {
 				fp8 best_cost = fp8::integer(128 * 128);
 				node_t* best_node = start_node;
@@ -4019,7 +4160,7 @@ struct state_functions {
 		} else {
 			if (source_region != pf.destination_region) {
 				pf.destination = pathfinder_adjust_destination(source_region, pf.destination);
-				pf.field_1f = 1;
+				pf.is_stuck = true;
 				is_near_destination = true;
 				target_region = nullptr;
 			}
@@ -4028,14 +4169,14 @@ struct state_functions {
 			pf.target_unit = pf.u->move_target.unit;
 			if (!pf.target_unit) {
 				auto unit_bb = unit_bounding_box(pf.u, pf.destination);
-				for (unit_t* u : find_units({pf.destination, pf.destination})) {
+				auto add = xy(game_st.max_unit_width / 2 + 1, game_st.max_unit_height / 2 + 1);
+				rect search_bb = {pf.destination - add, pf.destination + add};
+				for (unit_t* u : find_units(search_bb)) {
 					if (is_intersecting(unit_bb, unit_sprite_bounding_box(u))) {
-						// fixme
-						//xcept("pathfinder_find_short_path fixme units_can_collide");
-//						if (units_can_collide(pf.u, u)) {
-//							pf.target_unit = u;
-//							break;
-//						}
+						if (pathfinder_unit_can_collide_with(pf, u)) {
+							pf.target_unit = u;
+							break;
+						}
 					}
 				}
 			}
@@ -4046,7 +4187,28 @@ struct state_functions {
 				}
 			}
 			if (pf.target_unit) {
-				xcept("pathfinder_find_short_path fixme target_unit");
+				pf.target_unit_bb = unit_sprite_inner_bounding_box(pf.target_unit);
+				pf.target_unit_bb.from -= pf.u->unit_type->dimensions.to + xy(1, 1);
+				pf.target_unit_bb.to += pf.u->unit_type->dimensions.from + xy(1, 1);
+				bool is_goal = false;
+				if (pf.source.x == pf.target_unit_bb.from.x || pf.source.x == pf.target_unit_bb.to.x) {
+					if (pf.source.y >= pf.target_unit_bb.from.y && pf.source.y <= pf.target_unit_bb.to.y) {
+						is_goal = true;
+					}
+				}
+				if (pf.source.y == pf.target_unit_bb.from.y || pf.source.y == pf.target_unit_bb.to.y) {
+					if (pf.source.x >= pf.target_unit_bb.from.x && pf.source.x <= pf.target_unit_bb.to.x) {
+						is_goal = true;
+					}
+				}
+				if (is_goal) {
+					pf.short_path = { pf.source };
+					pf.destination = pf.source;
+					pf.current_short_path_index = 0;
+					pf.destination_reached = true;
+					pf.is_stuck = false;
+					return true;
+				}
 			} else {
 				pf.target_unit_bb = {{-32000, -32000}, {-32000, -32000}};
 				xy adjusted_target = pathfinder_adjust_target_pos(pf, target);
@@ -4067,7 +4229,7 @@ struct state_functions {
 				if (!target_region) {
 					pf.destination = last_path_pos;
 					pf.destination_reached = true;
-					pf.field_1f = 1;
+					pf.is_stuck = true;
 				}
 			}
 			return true;
@@ -4083,9 +4245,7 @@ struct state_functions {
 		pf.long_all_nodes_size = 0;
 		pf.long_highest_open_size = 0;
 		pf.destination_reached = false;
-		pf.field_1c = 0;
-		pf.field_1d = 0;
-		pf.field_1f = 0;
+		pf.is_stuck = false;
 		if (short_path_only) return pathfinder_find_next_short_path(pf);
 		if (pf.source_region == pf.destination_region) {
 			pf.long_path = { pf.source_region };
@@ -4114,10 +4274,12 @@ struct state_functions {
 		st.free_paths.push_front(*path);
 	}
 
-	bool path_progress(unit_t* u, xy to, const unit_t* consider_collision_with_unit = nullptr) {
+	bool path_progress(unit_t* u, xy to, const unit_t* consider_collision_with_unit = nullptr, bool consider_collision_with_moving_units = false) {
 		u_unset_movement_flag(u, 0x40);
 		u_set_movement_flag(u, 0x10);
 		pathfinder pf;
+		pf.consider_collision_with_unit = consider_collision_with_unit;
+		pf.consider_collision_with_moving_units = consider_collision_with_moving_units;
 		bool find_new_path = true;
 		if (u->path) {
 			++u->path->current_short_path_index;
@@ -4152,24 +4314,21 @@ struct state_functions {
 			pathfinder_find(pf);
 			if (pf.long_path.empty() || pf.short_path.empty()) return false;
 		}
-		auto update_move_target = [&]() {
-			xy move_target = to;
-			auto* move_target_unit = u->move_target.unit;
-			if (move_target_unit && u_movement_flag(move_target_unit, 2)) {
-				fp8 halt_distance = unit_halt_distance(move_target_unit);
-				xy pos = to_xy(direction_xy(move_target_unit->next_velocity_direction, halt_distance * 3));
-				if (is_in_map_bounds(pos)) move_target = pos;
-			}
-			set_flingy_move_target(u, move_target);
-			u->move_target.unit = move_target_unit;
-		};
 		path_t* path = u->path;
 		if (!path) {
 			if (pf.destination_reached) {
 				if (to != pf.destination) {
 					to = pf.destination;
-					update_move_target();
-					if (pf.field_1f) u_set_status_flag(u, unit_t::status_flag_immovable);
+					xy move_target = to;
+					auto* move_target_unit = u->move_target.unit;
+					if (move_target_unit && u_movement_flag(move_target_unit, 2)) {
+						fp8 halt_distance = unit_halt_distance(move_target_unit);
+						xy pos = to_xy(direction_xy(move_target_unit->next_velocity_direction, halt_distance * 3));
+						if (is_in_map_bounds(pos)) move_target = pos;
+					}
+					set_flingy_move_target(u, move_target);
+					u->move_target.unit = move_target_unit;
+					u_set_status_flag(u, unit_t::status_flag_immovable, pf.is_stuck);
 				}
 			}
 
@@ -4203,18 +4362,34 @@ struct state_functions {
 		return true;
 	}
 
-	bool unit_path_to(unit_t* u, xy to, const unit_t* consider_collision_with_unit = nullptr) {
+	bool unit_path_to(unit_t* u, xy to, const unit_t* consider_collision_with_unit = nullptr, bool consider_collision_with_moving_units = false) {
 		if (is_moving_along_path(u)) return true;
 		if (!u_ground_unit(u)) {
 			set_unit_move_target(u, to);
-			create_single_segment_path(u, to);
+			// Not sure if this can trigger. If it can, then BroodWar has a potential null pointer
+			// dereference in UM_FollowPath since from here this function returns true even if
+			// path allocation fails.
+			// Flying units don't do pathfinding though, so this should be unreachable.
+			xcept("unit_path_to called for flying unit");
+//			path_t* path = new_path();
+//			if (!path) return false;
+//			path->delay = 0;
+//			// creation_frame is not set here :(
+//			path->state_flags = 0;
+//			path->long_path = {??};
+//			path->full_long_path_size = 1;
+//			path->current_long_path_index = 0;
+//			path->short_path = {to};
+//			path->current_short_path_index = 0;
+
+//			path->source = u->sprite->position;
+//			path->destination = to;
 			return true;
 		}
-		if (path_progress(u, to, consider_collision_with_unit)) to = u->path->next;
-		else if (!u->path) return false;
-		if (u->next_target_waypoint != to) u->next_target_waypoint = to;
-		if (u->next_movement_waypoint != to) {
-			u->next_movement_waypoint = to;
+		if (!path_progress(u, to, consider_collision_with_unit, consider_collision_with_moving_units)) return false;
+		if (u->next_target_waypoint != u->path->next) u->next_target_waypoint = u->path->next;
+		if (u->next_movement_waypoint != u->path->next) {
+			u->next_movement_waypoint = u->path->next;
 			u_set_movement_flag(u, 1);
 		}
 		return true;
@@ -4246,8 +4421,7 @@ struct state_functions {
 	}
 
 	void set_unit_immovable(unit_t* u) {
-		u->next_speed = fp8::zero();
-		set_current_speed(u, u->next_speed);
+		set_next_speed(u, fp8::zero());
 		stop_unit(u);
 		set_unit_move_target(u, u->sprite->position);
 		u_set_status_flag(u, unit_t::status_flag_immovable);
@@ -4261,6 +4435,79 @@ struct state_functions {
 		if (u_iscript_nobrk(u)) return;
 		u->movement_flags &= ~2;
 		sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
+	}
+
+
+	int cardinal_direction_from_to(const unit_t* from_u, const unit_t* to_u) const {
+		auto a_bb = unit_sprite_inner_bounding_box(to_u);
+		auto b_bb = unit_sprite_inner_bounding_box(from_u);
+		if (a_bb.to.x < b_bb.from.x) return 3;
+		if (a_bb.from.x > b_bb.to.x) return 1;
+		if (a_bb.to.y < b_bb.from.y) return 0;
+		if (a_bb.from.y > b_bb.to.y) return 2;
+		int up_distance = std::abs(a_bb.to.y - b_bb.from.y);
+		int right_distance = std::abs(a_bb.from.x - b_bb.to.x);
+		int down_distance = std::abs(a_bb.from.y - b_bb.to.y);
+		int left_distance = std::abs(a_bb.to.x - b_bb.from.x);
+		std::array<int, 4> distances = {right_distance, left_distance, down_distance, up_distance};
+		std::array<int, 4> r = {1, 3, 2, 0};
+		return r[get_best_score(distances, identity()) - distances.begin()];
+	}
+
+	bool collision_get_slide_free_direction(const unit_t* u, const unit_t* collision_unit, direction_t& slide_free_direction) const {
+		if (us_hidden(collision_unit)) return false;
+		auto target_dir = xy_direction(u->next_movement_waypoint - u->sprite->position);
+		auto target_dir_quadrant = direction_index(target_dir) / 64;
+		auto dir_err = fp8::extend(target_dir - u->current_velocity_direction).abs();
+		if (dir_err >= fp8::from_raw(80)) return false;
+		int left_x = collision_unit->unit_finder_bounding_box.from.x - u->unit_type->dimensions.to.x - 1;
+		int right_x = collision_unit->unit_finder_bounding_box.to.x + u->unit_type->dimensions.from.x + 1;
+		int up_y = collision_unit->unit_finder_bounding_box.from.y - u->unit_type->dimensions.to.y - 1;
+		int down_y = collision_unit->unit_finder_bounding_box.to.y + u->unit_type->dimensions.from.y + 1;
+		xy target_pos;
+		switch (cardinal_direction_from_to(u, collision_unit)) {
+		case 0:
+			target_pos.y = down_y;
+			if (target_dir_quadrant == 3) slide_free_direction = direction_t::from_raw(-64);
+			else if (target_dir_quadrant == 0) slide_free_direction = direction_t::from_raw(64);
+			break;
+		case 1:
+			target_pos.x = left_x;
+			if (target_dir_quadrant == 0) slide_free_direction = direction_t::from_raw(0);
+			else if (target_dir_quadrant == 1) slide_free_direction = direction_t::from_raw(-128);
+			break;
+		case 2:
+			target_pos.y = up_y;
+			if (target_dir_quadrant == 1) slide_free_direction = direction_t::from_raw(64);
+			else if (target_dir_quadrant == 2) slide_free_direction = direction_t::from_raw(-64);
+			break;
+		case 3:
+			target_pos.x = right_x;
+			if (target_dir_quadrant == 2) slide_free_direction = direction_t::from_raw(-128);
+			else if (target_dir_quadrant == 3) slide_free_direction = direction_t::from_raw(0);
+			break;
+		}
+		for (int i = 0; i != 2; ++i) {
+			if (slide_free_direction == direction_t::from_raw(0)) {
+				target_pos.y = up_y;
+				if (!is_blocked(u, target_pos).first) return true;
+				slide_free_direction = direction_t::from_raw(-128);
+			} else if (slide_free_direction == direction_t::from_raw(-128)) {
+				target_pos.y = down_y;
+				if (!is_blocked(u, target_pos).first) return true;
+				slide_free_direction = direction_t::from_raw(0);
+			} else if (slide_free_direction == direction_t::from_raw(64)) {
+				target_pos.x = right_x;
+				if (!is_blocked(u, target_pos).first) return true;
+				slide_free_direction = direction_t::from_raw(-64);
+			} else if (slide_free_direction == direction_t::from_raw(-64)) {
+				target_pos.x = left_x;
+				if (!is_blocked(u, target_pos).first) return true;
+				slide_free_direction = direction_t::from_raw(64);
+			}
+		}
+
+		return false;
 	}
 
 	bool movement_UM_Init(unit_t* u, execute_movement_struct& ems) {
@@ -4317,7 +4564,7 @@ struct state_functions {
 		if (go_to_next_waypoint()) {
 			going_to_next_waypoint = true;
 			update_unit_movement_values(u, ems);
-			if ((u_ground_unit(u) && check_unit_movement_unit_collision(u, ems)) || check_unit_movement_terrain_collision(u, ems)) {
+			if (check_ground_unit_movement_unit_collision(u, ems) || check_unit_movement_terrain_collision(u, ems)) {
 				set_current_speed(u, fp8::zero());
 				finish_flingy_movement(u, ems);
 				set_flingy_move_target(u, u->sprite->position);
@@ -4483,11 +4730,40 @@ struct state_functions {
 		fp8 speed = u->next_speed;
 		update_unit_movement_values(u, ems);
 		if (u->flingy_movement_type == 0) speed = u->current_speed;
-		// fixme: unit collision stuff
-		if (check_unit_movement_terrain_collision(u, ems)) {
-			u->path->last_collision_speed = speed;
-			u->movement_state = movement_states::UM_FixTerrain;
-			return true;
+		const unit_t* collision_unit = nullptr;
+		collision_unit = check_ground_unit_movement_unit_collision(u, ems);
+		if (collision_unit) {
+			bool fix_collision = false;
+			if (check_unit_movement_terrain_collision(u, ems)) fix_collision = true;
+			else if (u->velocity.x < fp8::from_raw(32) && u->velocity.y < fp8::from_raw(32)) fix_collision = true;
+			else if (ems.speed != u->current_speed) fix_collision = true;
+			else {
+				auto pos = ems.position;
+				auto exact_pos = ems.exact_position;
+				ems.exact_position = u->exact_position + u->velocity / 2;
+				ems.position = to_xy(ems.exact_position);
+				if (check_unit_movement_unit_collision(u, ems)) {
+					ems.exact_position = u->exact_position + u->velocity / 4;
+					ems.position = to_xy(ems.exact_position);
+					if (check_unit_movement_unit_collision(u, ems)) {
+						ems.position = pos;
+						ems.exact_position = exact_pos;
+						fix_collision = true;
+					}
+				}
+			}
+			if (fix_collision) {
+				u->path->last_collision_unit = get_unit_id(collision_unit);
+				u->path->last_collision_speed = speed;
+				u->movement_state = movement_states::UM_FixCollision;
+				return true;
+			}
+		} else {
+			if (check_unit_movement_terrain_collision(u, ems)) {
+				u->path->last_collision_speed = speed;
+				u->movement_state = movement_states::UM_FixTerrain;
+				return true;
+			}
 		}
 		if (u->sprite->position != ems.position) {
 			if (u->pathing_collision_counter) {
@@ -4512,7 +4788,7 @@ struct state_functions {
 
 	bool movement_UM_ScoutPath(unit_t* u, execute_movement_struct& ems) {
 		if (unit_update_path_movement_state(u, true)) return true;
-		// fixme: collision stuff
+
 		u->movement_state = movement_states::UM_FollowPath;
 		return true;
 	}
@@ -4568,31 +4844,29 @@ struct state_functions {
 	bool movement_UM_FixTerrain(unit_t* u, execute_movement_struct& ems) {
 		if (u->pathing_collision_counter < 255) ++u->pathing_collision_counter;
 		if (unit_update_path_movement_state(u, true)) return true;
-		u->next_speed = u->path->last_collision_speed;
-		set_current_speed(u, u->next_speed);
+		set_next_speed(u, u->path->last_collision_speed);
 		update_unit_movement_values(u, ems);
 		if (check_unit_movement_terrain_collision(u, ems) || check_unit_movement_unit_collision(u, ems)) {
 			update_unit_pathing_collision(u);
 			if (u->next_velocity_direction == xy_direction(u->next_movement_waypoint - u->sprite->position)) {
-
 				direction_t slide_free_direction = direction_t::from_raw(-1);
 				xy movement = ems.position - u->sprite->position;
-				int desired_movement_direction = direction_index(u->current_velocity_direction) / 64;
+				int desired_quadrant = direction_index(u->current_velocity_direction) / 64;
 				if (ems.position.x != u->sprite->position.x && (ems.position.y == u->sprite->position.y || check_unit_movement_terrain_collision(u, {movement.x, 0}))) {
 					if (movement.x >= 0) {
-						if (desired_movement_direction == 0) slide_free_direction = direction_t::from_raw(0);
-						if (desired_movement_direction == 1) slide_free_direction = direction_t::from_raw(-128);
+						if (desired_quadrant == 0) slide_free_direction = direction_t::from_raw(0);
+						if (desired_quadrant == 1) slide_free_direction = direction_t::from_raw(-128);
 					} else {
-						if (desired_movement_direction == 3) slide_free_direction = direction_t::from_raw(0);
-						if (desired_movement_direction == 2) slide_free_direction = direction_t::from_raw(-128);
+						if (desired_quadrant == 3) slide_free_direction = direction_t::from_raw(0);
+						if (desired_quadrant == 2) slide_free_direction = direction_t::from_raw(-128);
 					}
 				} else {
 					if (movement.y < 0) {
-						if (desired_movement_direction == 0) slide_free_direction = direction_t::from_raw(64);
-						if (desired_movement_direction == 3) slide_free_direction = direction_t::from_raw(-64);
+						if (desired_quadrant == 0) slide_free_direction = direction_t::from_raw(64);
+						if (desired_quadrant == 3) slide_free_direction = direction_t::from_raw(-64);
 					} else {
-						if (desired_movement_direction == 1) slide_free_direction = direction_t::from_raw(64);
-						if (desired_movement_direction == 2) slide_free_direction = direction_t::from_raw(-64);
+						if (desired_quadrant == 1) slide_free_direction = direction_t::from_raw(64);
+						if (desired_quadrant == 2) slide_free_direction = direction_t::from_raw(-64);
 					}
 				}
 				u->path->slide_free_direction = slide_free_direction;
@@ -4634,16 +4908,14 @@ struct state_functions {
 		u->movement_flags |= 1;
 		u->next_velocity_direction = next_velocity_direction;
 		set_desired_velocity_direction(u, u->path->slide_free_direction);
-		if (check_unit_movement_terrain_collision(u, ems) || check_unit_movement_unit_collision(u, ems)) {
+		if (check_unit_movement_unit_collision(u, ems) || check_unit_movement_terrain_collision(u, ems)) {
 			u->movement_state = movement_states::UM_ForceMoveFree;
 		} else {
 			finish_unit_movement(u, ems);
 			auto next_speed = u->next_speed;
-			u->next_speed = u->path->last_collision_speed;
-			set_current_speed(u, u->next_speed);
+			set_next_speed(u, u->path->last_collision_speed);
 			move(xy_direction(u->next_movement_waypoint - u->sprite->position));
-			u->next_speed = next_speed;
-			set_current_speed(u, u->next_speed);
+			set_next_speed(u, next_speed);
 			if (!check_unit_movement_terrain_collision(u, ems)) {
 				u->movement_flags |= 1;
 				u->movement_state = movement_states::UM_FollowPath;
@@ -4716,8 +4988,7 @@ struct state_functions {
 			u->movement_state = movement_states::UM_AtMoveTarget;
 			return false;
 		}
-		u->next_speed = fp8::zero();
-		set_current_speed(u, u->next_speed);
+		set_next_speed(u, fp8::zero());
 		if (u->path) {
 			free_path(u->path);
 			u->path = nullptr;
@@ -4726,13 +4997,259 @@ struct state_functions {
 		return true;
 	}
 
-	bool execute_movement(unit_t* u) {
+	bool movement_UM_FixCollision(unit_t* u, execute_movement_struct& ems) {
+		if (unit_update_path_movement_state(u, false)) return true;
+		if (u->pathing_collision_counter < 255) ++u->pathing_collision_counter;
+		const unit_t* collision_unit = get_unit(u->path->last_collision_unit);
+		if (!collision_unit || us_flag(collision_unit, sprite_t::flag_hidden) || !unit_can_collide_with(u, collision_unit)) {
+			u->movement_state = movement_states::UM_FollowPath;
+			return false;
+		}
+		direction_t slide_free_direction;
+		int state = 1;
+		if (!u->move_target.unit || !is_intersecting(unit_sprite_bounding_box(unit_main_unit(u)), unit_sprite_bounding_box(u->move_target.unit))) {
+			if (is_intersecting(unit_sprite_inner_bounding_box(collision_unit), unit_inner_bounding_box(u, u->move_target.pos))) {
+				if (collision_unit->pathing_collision_counter >= 30) state = u->move_target.unit ? 3 : 2;
+				else if (is_intersecting(unit_inner_bounding_box(collision_unit, collision_unit->move_target.pos), unit_inner_bounding_box(u, u->move_target.pos))) {
+					state = u->move_target.unit ? 3 : 2;
+				}
+			} else {
+				if (!is_intersecting(unit_sprite_inner_bounding_box(collision_unit), unit_inner_bounding_box(u, u->next_movement_waypoint))) {
+					if (u_movement_flag(collision_unit, 2)) {
+						auto index = direction_index(collision_unit->next_velocity_direction);
+						switch (cardinal_direction_from_to(u, collision_unit)) {
+						case 0:
+							if (index <= 64 || index >= 192) state = 6;
+							break;
+						case 1:
+							if (index <= 128) state = 6;
+							break;
+						case 2:
+							if (index >= 64 && index <= 192) state = 6;
+							break;
+						case 3:
+							if (index == 0 || index >= 128) state = 6;
+							break;
+						}
+						if (state == 1) {
+							if (collision_unit->pathing_collision_counter <= 2) {
+								if (!unit_is_at_move_target(collision_unit)) {
+									if (collision_unit->movement_state == movement_states::UM_FollowPath || collision_unit->movement_state == movement_states::UM_ScoutPath) {
+										state = 6;
+									} else if (collision_unit->movement_state != movement_states::UM_WaitFree) {
+										state = 4;
+									}
+								}
+							}
+						}
+					}
+					if (state == 1) {
+						if (collision_get_slide_free_direction(u, collision_unit, slide_free_direction)) state = 7;
+						else state = 5;
+					}
+				}
+				if (state == 1) {
+					if (collision_unit->pathing_collision_counter >= 30) state = 3;
+					else if (is_intersecting(unit_inner_bounding_box(collision_unit, collision_unit->move_target.pos), unit_inner_bounding_box(u, u->next_movement_waypoint))) {
+						state = 3;
+					}
+				}
+			}
+			if (state == 1) {
+				direction_t collision_dir = xy_direction(collision_unit->sprite->position - u->sprite->position);
+				direction_t cmp_dir = direction_t::zero();
+				auto index = direction_index(collision_unit->next_velocity_direction);
+				if (index < 32) cmp_dir = direction_t::from_raw(0);
+				else if (index < 96) cmp_dir = direction_t::from_raw(64);
+				else if (index < 160) cmp_dir = direction_t::from_raw(-128);
+				else if (index < 224) cmp_dir = direction_t::from_raw(-64);
+				if (fp8::extend(cmp_dir - collision_dir).abs() > fp8::from_raw(64)) {
+					state = 4;
+				} else {
+					state = 6;
+				}
+			}
+		}
+		if (current_frame - u->path->creation_frame >= 7 || state < 3 || state > 5) {
+			switch (state) {
+			case 1:
+				set_unit_immovable(u);
+				u_unset_status_flag(u, unit_t::status_flag_immovable);
+				u->movement_state = movement_states::UM_AtMoveTarget;
+				break;
+			case 2:
+				set_unit_immovable(u);
+				u->movement_state = movement_states::UM_AtMoveTarget;
+				break;
+			case 3:
+				u->movement_state = movement_states::UM_Repath;
+				break;
+			case 4:
+				u->movement_state = movement_states::UM_RepathMovers;
+				break;
+			case 5:
+				u->movement_state = movement_states::UM_TurnAndStart;
+				set_next_speed(u, fp8::zero());
+				break;
+			case 6:
+				u->movement_state = movement_states::UM_WaitFree;
+				break;
+			case 7:
+				u->path->slide_free_direction = slide_free_direction;
+				u->movement_state = movement_states::UM_SlidePrep;
+				break;
+			case 8:
+				u->movement_state = movement_states::UM_GetFree;
+				break;
+			}
+		} else {
+			update_unit_pathing_collision(u);
+		}
+		return false;
+	}
 
+	bool movement_UM_WaitFree(unit_t* u, execute_movement_struct& ems) {
+		if (u->pathing_collision_counter < 255) ++u->pathing_collision_counter;
+		if (unit_update_path_movement_state(u, true)) return true;
+		set_next_speed(u, u->path->last_collision_speed);
+		update_unit_movement_values(u, ems);
+		if (check_unit_movement_unit_collision(u, ems)) {
+			update_unit_pathing_collision(u);
+			set_next_speed(u, fp8::zero());
+			if (u->next_velocity_direction != xy_direction(u->next_movement_waypoint - u->sprite->position)) {
+				update_unit_heading(u, u->current_velocity_direction);
+			}
+			if (u->pathing_collision_counter >= 25) {
+				if (lcg_rand(51) < 0x7fff / 2) {
+					u->movement_state = movement_states::UM_ForceMoveFree;
+				} else {
+					u->movement_state = movement_states::UM_RepathMovers;
+				}
+			}
+		} else {
+			if (check_unit_movement_terrain_collision(u, ems)) {
+				u->movement_state = movement_states::UM_Repath;
+			} else {
+				finish_unit_movement(u, ems);
+				u->movement_state = movement_states::UM_FollowPath;
+			}
+		}
+		return false;
+	}
+
+	bool movement_UM_SlidePrep(unit_t* u, execute_movement_struct& ems) {
+		if (unit_update_path_movement_state(u, true)) return true;
+		if (u->flingy_movement_type == 0) {
+			if (u->path->last_collision_speed >= fp8::integer(2)) u->path->last_collision_speed /= 2;
+			else if (u->path->last_collision_speed > fp8::integer(1)) u->path->last_collision_speed = fp8::integer(1);
+		}
+		set_current_velocity_direction(u, u->next_velocity_direction);
+		set_next_speed(u, u->path->last_collision_speed);
+		u->movement_state = movement_states::UM_SlideFree;
+		return true;
+	}
+
+	bool movement_UM_SlideFree(unit_t* u, execute_movement_struct& ems) {
+		if (u->pathing_collision_counter < 255) ++u->pathing_collision_counter;
+		if (unit_update_path_movement_state(u, true)) return true;
+		u->movement_flags |= 1;
+		set_desired_velocity_direction(u, u->path->slide_free_direction);
+		update_unit_heading(u, u->current_velocity_direction);
+		if (u->flingy_movement_type == 2) u->current_speed = u->flingy_top_speed;
+		else update_current_speed_towards_waypoint(u);
+
+		auto move = [&]() {
+			ems.pre_movement_flags = u->movement_flags;
+			set_movement_flags(u, ems);
+			set_movement_values(u, ems);
+			ems.post_movement_flags = u->movement_flags;
+			u->movement_flags = ems.pre_movement_flags;
+		};
+
+		fp8 original_speed = u->current_speed;
+		auto original_velocity_direction = u->next_velocity_direction;
+		const unit_t* collision_unit = get_unit(u->path->last_collision_unit);
+		const unit_t* next_collision_unit = nullptr;
+		bool force_move_free = false;
+		for (fp8 speed = original_speed; speed > fp8::zero(); speed -= fp8::integer(1)) {
+			u_unset_movement_flag(u, 1);
+			set_current_velocity_direction(u, u->path->slide_free_direction);
+			set_next_speed(u, std::min(speed, fp8::integer(1)));
+			move();
+			if (check_unit_movement_unit_collision(u, ems) || check_unit_movement_terrain_collision(u, ems)) {
+				force_move_free = true;
+				break;
+			}
+			finish_unit_movement(u, ems);
+			u->next_velocity_direction = original_velocity_direction;
+			update_current_velocity_direction_towards_waypoint(u);
+			set_next_speed(u, original_speed);
+			move();
+			next_collision_unit = check_unit_movement_unit_collision(u, ems);
+			if (next_collision_unit != collision_unit) break;
+		}
+		u->next_velocity_direction = original_velocity_direction;
+		set_current_velocity_direction(u, u->next_velocity_direction);
+		set_next_speed(u, original_speed);
+		if (force_move_free) {
+			u->movement_state = movement_states::UM_ForceMoveFree;
+			return false;
+		}
+		if (!next_collision_unit) {
+			u_set_movement_flag(u, 1);
+			if (current_frame - u->path->creation_frame < 150) {
+				u->movement_state = movement_states::UM_FollowPath;
+			} else {
+				u->movement_state = movement_states::UM_TurnAndStart;
+			}
+		}
+		return false;
+	}
+
+	bool movement_UM_RepathMovers(unit_t* u, execute_movement_struct& ems) {
+		if (u->path) {
+			free_path(u->path);
+			u->path = nullptr;
+		}
+		auto move_target = u->move_target;
+		if (!unit_path_to(u, move_target.pos, nullptr, true) || u_immovable(u)) {
+			u->move_target = move_target;
+			u->movement_state = movement_states::UM_TurnAndStart;
+			return false;
+		} else {
+			u->movement_state = movement_states::UM_FaceTarget;
+			return true;
+		}
+	}
+
+	bool movement_UM_GetFree(unit_t* u, execute_movement_struct& ems) {
+		if (u->pathing_collision_counter < 255) ++u->pathing_collision_counter;
+		if (unit_update_path_movement_state(u, true)) return true;
+		set_next_speed(u, u->path->last_collision_speed);
+		update_unit_movement_values(u, ems);
+		const unit_t* collision_unit = check_unit_movement_unit_collision(u, ems);
+		if (collision_unit) {
+			if (u->next_velocity_direction == xy_direction(u->next_movement_waypoint - u->sprite->position)) {
+				free_path(u->path);
+				u->path = nullptr;
+			}
+		} else {
+			if (check_unit_movement_terrain_collision(u, ems)) {
+				u->movement_state = movement_states::UM_Repath;
+			} else {
+				finish_unit_movement(u, ems);
+				u->movement_state = movement_states::UM_FollowPath;
+			}
+		}
+		return false;
+	}
+
+	bool execute_movement(unit_t* u) {
 		execute_movement_struct ems;
 		ems.refresh_vision = update_tiles;
 
 		while (true) {
-			log("unit at %d %d - movement_state %d\n", u->sprite->position.x, u->sprite->position.y, u->movement_state);
+			log("unit %d at %d %d - movement_state %d\n", u - st.units.data(), u->sprite->position.x, u->sprite->position.y, u->movement_state);
 			bool cont = false;
 			switch (u->movement_state) {
 			case movement_states::UM_Init:
@@ -4769,7 +5286,6 @@ struct state_functions {
 			case movement_states::UM_RetryPath:
 				cont = movement_UM_RetryPath(u, ems);
 				break;
-
 			case movement_states::UM_StartPath:
 				cont = movement_UM_StartPath(u, ems);
 				break;
@@ -4791,14 +5307,33 @@ struct state_functions {
 			case movement_states::UM_Repath:
 				cont = movement_UM_Repath(u, ems);
 				break;
-
+			case movement_states::UM_RepathMovers:
+				cont = movement_UM_RepathMovers(u, ems);
+				break;
 			case movement_states::UM_FollowPath:
 				cont = movement_UM_FollowPath(u, ems);
 				break;
 			case movement_states::UM_ScoutPath:
 				cont = movement_UM_ScoutPath(u, ems);
 				break;
-
+			case movement_states::UM_ScoutFree:
+				// unused
+				break;
+			case movement_states::UM_FixCollision:
+				cont = movement_UM_FixCollision(u, ems);
+				break;
+			case movement_states::UM_WaitFree:
+				cont = movement_UM_WaitFree(u, ems);
+				break;
+			case movement_states::UM_GetFree:
+				cont = movement_UM_GetFree(u, ems);
+				break;
+			case movement_states::UM_SlidePrep:
+				cont = movement_UM_SlidePrep(u, ems);
+				break;
+			case movement_states::UM_SlideFree:
+				cont = movement_UM_SlideFree(u, ems);
+				break;
 			case movement_states::UM_ForceMoveFree:
 				cont = movement_UM_ForceMoveFree(u, ems);
 				break;
@@ -4814,7 +5349,7 @@ struct state_functions {
 			}
 			if (!cont) break;
 		}
-		log("post movement - unit at %d %d movement_state %d speed %d\n", u->sprite->position.x, u->sprite->position.y, u->movement_state, u->current_speed.raw_value);
+		log("post movement - unit %d at %d %d movement_state %d speed %d\n", u - st.units.data(), u->sprite->position.x, u->sprite->position.y, u->movement_state, u->current_speed.raw_value);
 		return ems.refresh_vision;
 	}
 
@@ -5655,8 +6190,8 @@ struct state_functions {
 		ufp8 speed = u->next_speed.as_unsigned();
 		if (speed == ufp8::zero()) return fp8::zero();
 		if (u->flingy_movement_type != 0) return fp8::zero();
-		if (speed.raw_value == u->flingy_type->top_speed && u->flingy_acceleration.raw_value == u->flingy_type->acceleration) {
-			return fp8::from_raw(u->flingy_type->halt_distance);
+		if (speed == u->flingy_type->top_speed.as_unsigned() && u->flingy_acceleration == u->flingy_type->acceleration) {
+			return u->flingy_type->halt_distance;
 		} else {
 			return (ufp8::multiply_divide(speed, speed, u->flingy_acceleration.as_unsigned()) / 2u).as_signed();
 		}
@@ -5881,8 +6416,7 @@ struct state_functions {
 					*distance_moved = get_modified_unit_speed(iscript_unit, fp8::integer(a));
 				}
 				if (no_side_effects) break;
-				iscript_unit->next_speed = get_modified_unit_speed(iscript_unit, fp8::integer(a));
-				set_current_speed(iscript_unit, iscript_unit->next_speed);
+				set_next_speed(iscript_unit, get_modified_unit_speed(iscript_unit, fp8::integer(a)));
 				break;
 
 			case opc_engframe:
@@ -6146,9 +6680,9 @@ struct state_functions {
 		f->flingy_type = flingy_type;
 		f->movement_flags = 0;
 		f->next_speed = fp8::zero();
-		f->flingy_top_speed = fp8::from_raw(flingy_type->top_speed);
-		f->flingy_acceleration = fp8::from_raw(flingy_type->acceleration);
-		f->flingy_turn_rate = fp8::from_raw(flingy_type->turn_rate);
+		f->flingy_top_speed = flingy_type->top_speed;
+		f->flingy_acceleration = flingy_type->acceleration;
+		f->flingy_turn_rate = flingy_type->turn_rate;
 		f->flingy_movement_type = flingy_type->movement_type;
 
 		f->position = pos;
@@ -6215,43 +6749,40 @@ struct state_functions {
 		}
 	}
 
-	void update_unit_speed(unit_t*u) {
+	void update_unit_speed(unit_t* u) {
 
-		int movement_type = u->unit_type->flingy->movement_type;
-		if (movement_type != 0 && movement_type != 1) {
-			if (u->flingy_movement_type == 2) {
-				image_t* image = u->sprite->main_image;
-				if (!image) xcept("null image");
-				auto* script = image->iscript_state.current_script;
-				auto& anims_pc = script->animation_pc;
-				int anim = iscript_anims::Walking;
-				// BW just returns if the animation doesn't exist,
-				// so this could be changed to a return statement if it throws
-				if ((size_t)anim >= anims_pc.size()) xcept("script %d does not have animation %d", script->id, anim);
-				iscript_unit_setter ius(this, u);
-				iscript_state_t st;
-				st.current_script = script;
-				st.animation = anim;
-				st.program_counter = anims_pc[anim];
-				st.return_address = 0;
-				st.wait = 0;
-				fp8 total_distance_moved {};
-				for (int i = 0; i < 32; ++i) {
-					fp8 distance_moved {};
-					iscript_execute(image, st, true, &distance_moved);
-					// This get_modified_unit_acceleration is very out of place, and
-					// it makes the stored flingy_top_speed value wrong. But BroodWar does it.
-					// It's probably a bug, but the value might not be used for anything
-					// significant.
-					total_distance_moved += get_modified_unit_acceleration(u, distance_moved);
-				}
-				auto avg_distance_moved = total_distance_moved / 32;
-				u->flingy_top_speed = avg_distance_moved;
+		if (u->flingy_movement_type == 2) {
+			image_t* image = u->sprite->main_image;
+			if (!image) xcept("null image");
+			auto* script = image->iscript_state.current_script;
+			auto& anims_pc = script->animation_pc;
+			int anim = iscript_anims::Walking;
+			// BW just returns if the animation doesn't exist,
+			// so this could be changed to a return statement if it throws
+			if ((size_t)anim >= anims_pc.size()) xcept("script %d does not have animation %d", script->id, anim);
+			iscript_unit_setter ius(this, u);
+			iscript_state_t st;
+			st.current_script = script;
+			st.animation = anim;
+			st.program_counter = anims_pc[anim];
+			st.return_address = 0;
+			st.wait = 0;
+			fp8 total_distance_moved {};
+			for (int i = 0; i < 32; ++i) {
+				fp8 distance_moved {};
+				iscript_execute(image, st, true, &distance_moved);
+				// This get_modified_unit_acceleration is very out of place, and
+				// it makes the stored flingy_top_speed value wrong. But BroodWar does it.
+				// It's probably a bug, but the value might not be used for anything
+				// significant.
+				total_distance_moved += get_modified_unit_acceleration(u, distance_moved);
 			}
+			auto avg_distance_moved = total_distance_moved / 32;
+			u->flingy_top_speed = avg_distance_moved;
 		} else {
-			u->flingy_top_speed = get_modified_unit_speed(u, fp8::from_raw(u->unit_type->flingy->top_speed));
-			u->flingy_acceleration = get_modified_unit_acceleration(u, fp8::from_raw(u->unit_type->flingy->acceleration));
-			u->flingy_turn_rate = get_modified_unit_turn_rate(u, fp8::from_raw(u->unit_type->flingy->turn_rate));
+			u->flingy_top_speed = get_modified_unit_speed(u, u->flingy_type->top_speed);
+			u->flingy_acceleration = get_modified_unit_acceleration(u, u->flingy_type->acceleration);
+			u->flingy_turn_rate = get_modified_unit_turn_rate(u, u->flingy_type->turn_rate);
 		}
 
 	}
@@ -6290,13 +6821,13 @@ struct state_functions {
 	void unit_finder_insert(unit_t* u) {
 		if (ut_turret(u)) return;
 
-		rect bb = unit_sprite_bounding_box(u);
+		rect bb = unit_sprite_inner_bounding_box(u);
 		unit_finder_insert(u, bb);
 	}
 
 	void unit_finder_reinsert(unit_t* u) {
 		if (u->unit_finder_bounding_box.from.x == -1) return;
-		rect bb = unit_sprite_bounding_box(u);
+		rect bb = unit_sprite_inner_bounding_box(u);
 		unit_finder_reinsert(u, bb);
 	}
 
@@ -6314,7 +6845,6 @@ struct state_functions {
 		insert(st.unit_finder_y, bb.from.y, bb.to.y);
 		u->unit_finder_bounding_box = bb;
 	}
-
 	void unit_finder_reinsert(unit_t* u, rect bb) {
 		auto reinsert = [&](auto& vec, int old_value, int new_value) {
 			if (old_value == new_value) return;
@@ -6335,7 +6865,10 @@ struct state_functions {
 				while (i != vec.begin()) {
 					auto ni = i;
 					--i;
-					if (i->value <= new_value) break;
+					if (i->value <= new_value) {
+						++i;
+						break;
+					}
 					*ni = *i;
 				}
 				*i = {u, new_value};
@@ -6364,7 +6897,7 @@ struct state_functions {
 				unit_t* u = i->u;
 				if (u->unit_finder_bounding_box.from.x >= search->area.to.x) return false;
 				if (u->unit_finder_bounding_box.from.y >= search->area.to.y) return false;
-				if (u->unit_finder_bounding_box.to.y <= search->area.from.y) return false;
+				if (u->unit_finder_bounding_box.to.y < search->area.from.y) return false;
 				return true;
 			}
 		public:
@@ -9543,61 +10076,6 @@ struct game_player {
 		funcs.next_frame();
 	}
 };
-
-void init() {
-
-//	global_state global_st;
-//	game_state game_st;
-//	state st;
-//	st.global = &global_st;
-//	st.game = &game_st;
-
-//	global_init(global_st);
-
-//	game_load_functions game_load_funcs(st);
-//	game_load_funcs.load_map_file(R"(X:\Starcraft\StarCraft\maps\testone.scm)");
-	game_player player;
-	player.load_map_file(R"(X:\Starcraft\StarCraft\maps\testone.scm)");
-
-	state& st = *player.st;
-
-	auto order_move = [&](int unit_id, int x, int y) {
-		state_functions funcs(st);
-		funcs.set_unit_order(&st.units[unit_id], funcs.get_order_type(Orders::Move), xy(x, y));
-	};
-	auto order_stop = [&](int unit_id) {
-		state_functions funcs(st);
-		funcs.set_unit_order(&st.units[unit_id], funcs.get_order_type(Orders::Stop), nullptr);
-	};
-
-	uint32_t random_state = 42;
-
-	auto random = [&]() -> int {
-		random_state = random_state * 22695477 + 1;
-		return (random_state >> 16) & 0x7fff;
-	};
-
-
-	auto tick = [&]() {
-		int frame = st.current_frame + 1;
-		if (true) {
-			for (unit_t* u : ptr(st.visible_units)) {
-				//if (frame == 50) order_move(u - &st.units.front(), 68 * 32, 60 * 32);
-				//if (random() % 60 == 0) order_move(u - &st.units.front(), random() % 4096, random() % 4096);
-				if (random() % 60 == 0) order_move(u - &st.units.front(), u->position.x - 256 + random() % 512, u->position.y - 256 + random() % 512);
-			}
-		}
-	};
-
-	while (true) {
-		::current_frame = st.current_frame + 1;
-		log("frame %d\n", st.current_frame + 1);
-		tick();
-		player.next_frame();
-	}
-
-
-}
 
 }
 
