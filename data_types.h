@@ -1,3 +1,10 @@
+#ifndef BWGAME_DATA_TYPES_H
+#define BWGAME_DATA_TYPES_H
+
+#include "util.h"
+#include "containers.h"
+
+namespace bwgame {
 
 struct unit_type_t;
 struct weapon_type_t;
@@ -372,3 +379,6 @@ struct grp_t {
 	a_vector<frame_t> frames;
 };
 
+}
+
+#endif

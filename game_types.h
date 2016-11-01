@@ -1,3 +1,11 @@
+#ifndef BWGAME_GAME_TYPES_H
+#define BWGAME_GAME_TYPES_H
+
+#include "util.h"
+#include "data_types.h"
+#include "containers.h"
+
+namespace bwgame {
 
 struct image_t;
 struct sprite_t;
@@ -40,7 +48,6 @@ struct sight_values_t {
 		// prev_count will be 1 if prev and prev2 are equal, otherwise it is 2
 		int8_t prev_count;
 	};
-	static_assert(sizeof(maskdat_node_t) == 20, "maskdat_node_t: wrong size");
 
 	int max_width, max_height;
 	int min_width, min_height;
@@ -195,7 +202,7 @@ struct link_base {
 
 struct default_link_f {
 	template<typename T>
-	auto*  operator()(T*ptr) {
+	auto* operator()(T*ptr) {
 		return (std::pair<T*, T*>*)&ptr->link;
 	}
 };
@@ -562,3 +569,6 @@ struct unit_t: flingy_t {
 	size_t unit_finder_index_to;
 };
 
+}
+
+#endif

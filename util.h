@@ -1,3 +1,11 @@
+#ifndef BWGAME_UTIL_H
+#define BWGAME_UTIL_H
+
+#include <cstdint>
+#include <iterator>
+#include <limits>
+
+namespace bwgame {
 
 template<typename utype>
 struct xy_t {
@@ -88,8 +96,6 @@ struct xy_t {
 	}
 };
 
-using xy = xy_t<int>;
-
 template<typename T>
 struct rect_t {
 	T from;
@@ -104,8 +110,6 @@ struct rect_t {
 		return { from + n.from, to + n.to };
 	}
 };
-
-using rect = rect_t<xy>;
 
 template<typename iter_T>
 struct iterators_range {
@@ -133,7 +137,7 @@ iterators_range<iter_T> make_iterators_range(iter_T begin, iter_T end) {
 }
 
 template<typename cont_T>
-auto make_reverse_range(cont_T&&cont) {
+auto make_reverse_range(cont_T&& cont) {
 	return make_iterators_range(cont.rbegin(), cont.rend());
 }
 
@@ -496,3 +500,16 @@ struct fixed_point {
 	}
 
 };
+
+using fp8 = fixed_point<24, 8, true>;
+using ufp8 = fixed_point<24, 8, false>;
+using direction_t = fixed_point<0, 8, true, true>;
+
+using xy = xy_t<int>;
+using xy_fp8 = xy_t<fp8>;
+
+using rect = rect_t<xy>;
+
+}
+
+#endif

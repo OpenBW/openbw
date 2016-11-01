@@ -1,7 +1,16 @@
+#ifndef BWGAME_DATA_LOADING_H
+#define BWGAME_DATA_LOADING_H
 
+#include "util.h"
+#include "containers.h"
+#include "data_types.h"
 
+#include <type_traits>
+#include <array>
+#include <cstring>
+
+namespace bwgame {
 namespace data_loading {
-;
 
 template<typename T>
 struct is_std_array : std::false_type {};
@@ -13,7 +22,7 @@ struct data_reader {
 	uint8_t*ptr = nullptr;
 	uint8_t*end = nullptr;
 	data_reader() = default;
-	data_reader(uint8_t*ptr, uint8_t*end) : ptr(ptr), end(end) {}
+	data_reader(uint8_t* ptr, uint8_t* end) : ptr(ptr), end(end) {}
 	template<typename T, bool little_endian, typename std::enable_if<is_std_array<T>::value>::type* = nullptr>
 	T value_at(uint8_t* ptr) {
 		T r;
@@ -28,7 +37,7 @@ struct data_reader {
 		static_assert(std::is_integral<T>::value, "can only read integers and arrays of integers");
 		T r = 0;
 		for (size_t i = 0; i < sizeof(T); ++i) {
-			r |= ptr[i] << ((little_endian ? i : sizeof(T) - 1 - i) * 8);
+			r |= (T)ptr[i] << ((little_endian ? i : sizeof(T) - 1 - i) * 8);
 		}
 		return r;
 	}
@@ -175,7 +184,7 @@ template<typename load_T, typename reader_T, typename ptr_F>
 void read_array(reader_T& r, size_t num, ptr_F&& ptr_f) {
 	for (size_t i = 0; i < num; ++i) {
 		auto* field = ptr_f(i);
-		*field = read_data<load_T, std::remove_reference<decltype(*field)>::type>::read(r);
+		*field = read_data<load_T, typename std::remove_reference<decltype(*field)>::type>::read(r);
 	}
 }
 
@@ -508,4 +517,6 @@ order_types_t load_orders_dat(a_string fn) {
 #undef rawr
 
 }
+}
 
+#endif
