@@ -53,6 +53,14 @@ struct global_state {
 
 	std::array<xy_fp8, 256> direction_table;
 	std::array<direction_t, 256> repulse_direction_table;
+
+	a_vector<uint8_t> units_dat;
+	a_vector<uint8_t> weapons_dat;
+	a_vector<uint8_t> upgrades_dat;
+	a_vector<uint8_t> techdata_dat;
+
+	std::array<a_vector<uint8_t>, 8> tileset_vf4;
+	std::array<a_vector<uint8_t>, 8> tileset_cv5;
 };
 
 struct game_state {
@@ -547,19 +555,19 @@ struct state_functions {
 	}
 
 	void tiles_flags_and(int offset_x, int offset_y, int width, int height, int flags) {
-		if ((size_t)(offset_x + width) > game_st.map_tile_width) xcept("attempt to mask tile out of bounds");
-		if ((size_t)(offset_y + height) > game_st.map_tile_height) xcept("attempt to mask tile out of bounds");
-		for (int y = offset_y; y < offset_y + height; ++y) {
-			for (int x = offset_x; x < offset_x + width; ++x) {
+		if (std::max((size_t)offset_x, (size_t)(offset_x + width)) > game_st.map_tile_width) xcept("attempt to mask tile out of bounds");
+		if (std::max((size_t)offset_y, (size_t)(offset_y + height)) > game_st.map_tile_height) xcept("attempt to mask tile out of bounds");
+		for (int y = offset_y; y != offset_y + height; ++y) {
+			for (int x = offset_x; x != offset_x + width; ++x) {
 				st.tiles[x + y * game_st.map_tile_width].flags &= flags;
 			}
 		}
 	}
 	void tiles_flags_or(int offset_x, int offset_y, int width, int height, int flags) {
-		if ((size_t)(offset_x + width) > game_st.map_tile_width) xcept("attempt to mask tile out of bounds");
-		if ((size_t)(offset_y + height) > game_st.map_tile_height) xcept("attempt to mask tile out of bounds");
-		for (int y = offset_y; y < offset_y + height; ++y) {
-			for (int x = offset_x; x < offset_x + width; ++x) {
+		if (std::max((size_t)offset_x, (size_t)(offset_x + width)) > game_st.map_tile_width) xcept("attempt to mask tile out of bounds");
+		if (std::max((size_t)offset_y, (size_t)(offset_y + height)) > game_st.map_tile_height) xcept("attempt to mask tile out of bounds");
+		for (int y = offset_y; y != offset_y + height; ++y) {
+			for (int x = offset_x; x != offset_x + width; ++x) {
 				st.tiles[x + y * game_st.map_tile_width].flags |= flags;
 			}
 		}
@@ -2705,7 +2713,7 @@ struct state_functions {
 	};
 
 	bool pathfinder_find_long_path(pathfinder& pf) {
-		log("find long path from %d %d to %d %d, region %d to %d\n", pf.source.x, pf.source.y, pf.destination.x, pf.destination.y, pf.source_region->index, pf.destination_region->index);
+		//log("find long path from %d %d to %d %d, region %d to %d\n", pf.source.x, pf.source.y, pf.destination.x, pf.destination.y, pf.source_region->index, pf.destination_region->index);
 		if (pf.source_region == pf.destination_region) return false;
 
 		struct node_t {
@@ -2736,7 +2744,7 @@ struct state_functions {
 
 		auto find = [&](const regions_t::region* from_region, const regions_t::region* to_region) {
 
-			log("find from region %d to region %d\n", from_region->index, to_region->index);
+			//log("find from region %d to region %d\n", from_region->index, to_region->index);
 
 			xy_fp8 to_pos = region_pos(to_region);
 
@@ -2887,7 +2895,7 @@ struct state_functions {
 		for (auto& v : all_nodes) {
 			v.region->pathfinder_node = nullptr;
 		}
-		log("found long path of %d size\n", pf.full_long_path_size);
+		//log("found long path of %d size\n", pf.full_long_path_size);
 		return true;
 	}
 
@@ -3011,9 +3019,9 @@ struct state_functions {
 				return a->estimated_final_cost < b->estimated_final_cost;
 			}
 		};
-		a_vector<node_t*> open;
+		static_vector<node_t*, 150> open;
 
-		a_list<node_t> all_nodes;
+		static_vector<node_t, 250> all_nodes;
 		all_nodes.emplace_back();
 		node_t* start_node = &all_nodes.back();
 		start_node->pos = pf.source;
@@ -5239,7 +5247,7 @@ struct state_functions {
 		ems.refresh_vision = update_tiles;
 
 		while (true) {
-			log("unit %d at %d %d - movement_state %d\n", u - st.units.data(), u->sprite->position.x, u->sprite->position.y, u->movement_state);
+			//log("unit %d at %d %d - movement_state %d\n", u - st.units.data(), u->sprite->position.x, u->sprite->position.y, u->movement_state);
 			bool cont = false;
 			switch (u->movement_state) {
 			case movement_states::UM_Init:
@@ -5339,7 +5347,7 @@ struct state_functions {
 			}
 			if (!cont) break;
 		}
-		log("post movement - unit %d at %d %d movement_state %d speed %d\n", u - st.units.data(), u->sprite->position.x, u->sprite->position.y, u->movement_state, u->current_speed.raw_value);
+		//log("post movement - unit %d at %d %d movement_state %d speed %d\n", u - st.units.data(), u->sprite->position.x, u->sprite->position.y, u->movement_state, u->current_speed.raw_value);
 		return ems.refresh_vision;
 	}
 
@@ -5891,7 +5899,7 @@ struct state_functions {
 		for (unit_t* u : ptr(st.visible_units)) {
 			iscript_order_unit = u;
 			iscript_unit = u;
-			log("move unit %d --\n", u - &st.units.front());
+			//log("move unit %d --\n", u - &st.units.front());
 			update_unit_movement(u);
 		}
 
@@ -6209,7 +6217,7 @@ struct state_functions {
 		};
 
 		auto add_image = [&](int image_id, xy offset, int order) {
-			log("add_image %d\n", image_id);
+			//log("add_image %d\n", image_id);
 			const image_type_t* image_type = get_image_type(image_id);
 			image_t* script_image = image;
 			image_t* image = create_image(image_type, script_image->sprite, offset, order, script_image);
@@ -6507,7 +6515,7 @@ struct state_functions {
 		image->iscript_state.program_counter = anims_pc[new_anim];
 		image->iscript_state.return_address = 0;
 		image->iscript_state.wait = 0;
-		log("image %d: iscript run anim %d pc %d\n", image - st.images.data(), new_anim, anims_pc[new_anim]);
+		//log("image %d: iscript run anim %d pc %d\n", image - st.images.data(), new_anim, anims_pc[new_anim]);
 		return iscript_execute(image, image->iscript_state);
 	}
 
@@ -6601,7 +6609,7 @@ struct state_functions {
 	}
 	image_t* create_image(const image_type_t* image_type, sprite_t* sprite, xy offset, int order, image_t*relimg = nullptr) {
 		if (!image_type)  xcept("attempt to create image of null type");
-		log("create image %d\n", image_type->id);
+		//log("create image %d\n", image_type->id);
 
 		if (st.free_images.empty()) return nullptr;
 		image_t* image = &st.free_images.front();
@@ -6631,7 +6639,7 @@ struct state_functions {
 
 	sprite_t* create_sprite(const sprite_type_t*sprite_type, xy pos, int owner) {
 		if (!sprite_type)  xcept("attempt to create sprite of null type");
-		log("create sprite %d\n", sprite_type->id);
+		//log("create sprite %d\n", sprite_type->id);
 
 		if (st.free_sprites.empty()) return nullptr;
 		sprite_t* sprite = &st.free_sprites.front();
@@ -7782,10 +7790,10 @@ struct game_load_functions : state_functions {
 
 	void reset() {
 
-		game_st.unit_types = data_loading::load_units_dat("arr\\units.dat");
-		game_st.weapon_types = data_loading::load_weapons_dat("arr\\weapons.dat");
-		game_st.upgrade_types = data_loading::load_upgrades_dat("arr\\upgrades.dat");
-		game_st.tech_types = data_loading::load_techdata_dat("arr\\techdata.dat");
+		game_st.unit_types = data_loading::load_units_dat(global_st.units_dat);
+		game_st.weapon_types = data_loading::load_weapons_dat(global_st.weapons_dat);
+		game_st.upgrade_types = data_loading::load_upgrades_dat(global_st.upgrades_dat);
+		game_st.tech_types = data_loading::load_techdata_dat(global_st.techdata_dat);
 
 		auto fixup_unit_type = [&](unit_type_t*& ptr) {
 			size_t index = (size_t)ptr;
@@ -9029,9 +9037,6 @@ struct game_load_functions : state_functions {
 	}
 
 	void load_tile_stuff() {
-		std::array<const char*, 8> tileset_names = {
-			"badlands", "platform", "install", "AshWorld", "Jungle", "Desert", "Ice", "Twilight"
-		};
 
 		auto set_mega_tile_flags = [&]() {
 			game_st.mega_tile_flags.resize(game_st.vf4.size());
@@ -9061,9 +9066,15 @@ struct game_load_functions : state_functions {
 
 		};
 
-		load_data_file(game_st.vf4, format("Tileset\\%s.vf4", tileset_names.at(game_st.tileset_index)));
+		// fixme: load this properly. the vf4/cv5_entry structures need to be refactored
+		auto& vf4_data = global_st.tileset_vf4.at(game_st.tileset_index);
+		game_st.vf4.resize(vf4_data.size() / sizeof(vf4_entry));
+		memcpy(game_st.vf4.data(), vf4_data.data(), vf4_data.size() / sizeof(vf4_entry) * sizeof(vf4_entry));
+		auto& cv5_data = global_st.tileset_cv5.at(game_st.tileset_index);
+		game_st.cv5.resize(cv5_data.size() / sizeof(cv5_entry));
+		memcpy(game_st.cv5.data(), cv5_data.data(), cv5_data.size() / sizeof(cv5_entry) * sizeof(cv5_entry));
+
 		set_mega_tile_flags();
-		load_data_file(game_st.cv5, format("Tileset\\%s.cv5", tileset_names.at(game_st.tileset_index)));
 	}
 
 	struct tag_t {
@@ -9086,7 +9097,7 @@ struct game_load_functions : state_functions {
 		log("load map file '%s'\n", filename);
 
 		a_vector<uint8_t> data;
-		load_data_file(data, filename, "staredit\\scenario.chk");
+		data_loading::load_data_file(data, filename, "staredit\\scenario.chk");
 
 		using data_loading::data_reader_le;
 
@@ -9104,7 +9115,7 @@ struct game_load_functions : state_functions {
 				tag_t tag = r.get<std::array<char, 4>>();
 				uint32_t len = r.get<uint32_t>();
 				//log("tag '%.4s' len %d\n", (char*)&tag, len);
-				uint8_t*chunk_data = r.ptr;
+				const uint8_t* chunk_data = r.ptr;
 				r.skip(len);
 				chunks[tag] = { chunk_data, r.ptr };
 			}
@@ -9440,7 +9451,7 @@ struct game_load_functions : state_functions {
 
 				const unit_type_t*unit_type = get_unit_type(unit_type_id);
 
-				log("create unit of type %d\n", unit_type->id);
+				//log("create unit of type %d\n", unit_type->id);
 
 				if (unit_type->id == UnitTypes::Special_Start_Location) {
 					game_st.start_locations[owner] = { x, y };
@@ -9495,7 +9506,7 @@ struct game_load_functions : state_functions {
 					if (u->remove_timer == 0 || timer < u->remove_timer) u->remove_timer = timer;
 				}
 
-				log("created initial unit %p with id %d\n", u, u - st.units.data());
+				//log("created initial unit %p with id %d\n", u, u - st.units.data());
 
 			}
 		};
@@ -9635,7 +9646,8 @@ struct game_load_functions : state_functions {
 	}
 };
 
-static void global_init(global_state& st) {
+template<typename load_data_file_F>
+void global_init(global_state& st, load_data_file_F&& load_data_file) {
 
 	auto get_sprite_type = [&](int id) {
 		if ((size_t)id >= 517) xcept("invalid sprite id %d", id);
@@ -9961,10 +9973,20 @@ static void global_init(global_state& st) {
 
 	};
 
-	st.flingy_types = data_loading::load_flingy_dat("arr\\flingy.dat");
-	st.sprite_types = data_loading::load_sprites_dat("arr\\sprites.dat");
-	st.image_types = data_loading::load_images_dat("arr\\images.dat");
-	st.order_types = data_loading::load_orders_dat("arr\\orders.dat");
+	load_data_file(st.units_dat, "arr/units.dat");
+	load_data_file(st.weapons_dat, "arr/weapons.dat");
+	load_data_file(st.upgrades_dat, "arr/upgrades.dat");
+	load_data_file(st.techdata_dat, "arr/techdata.dat");
+
+	a_vector<uint8_t> buf;
+	load_data_file(buf, "arr/flingy.dat");
+	st.flingy_types = data_loading::load_flingy_dat(buf);
+	load_data_file(buf, "arr/sprites.dat");
+	st.sprite_types = data_loading::load_sprites_dat(buf);
+	load_data_file(buf, "arr/images.dat");
+	st.image_types = data_loading::load_images_dat(buf);
+	load_data_file(buf, "arr/orders.dat");
+	st.order_types = data_loading::load_orders_dat(buf);
 
 	auto fixup_sprite_type = [&](sprite_type_t*&ptr) {
 		size_t index = (size_t)ptr;
@@ -9986,6 +10008,15 @@ static void global_init(global_state& st) {
 
 	load_iscript_bin();
 	load_images();
+
+	std::array<const char*, 8> tileset_names = {
+		"badlands", "platform", "install", "AshWorld", "Jungle", "Desert", "Ice", "Twilight"
+	};
+
+	for (size_t i = 0; i != 8; ++i) {
+		load_data_file(st.tileset_vf4[i], format("Tileset\\%s.vf4", tileset_names.at(i)));
+		load_data_file(st.tileset_cv5[i], format("Tileset\\%s.cv5", tileset_names.at(i)));
+	}
 
 	// This function returns (int)std::round(std::sin(PI / 128 * i) * 256) for i [0, 63]
 	// using only integer arithmetic.
@@ -10034,17 +10065,29 @@ struct game_player {
 	std::unique_ptr<global_state> uptr_global_st;
 	std::unique_ptr<game_state> uptr_game_st;
 	std::unique_ptr<state> uptr_st;
-	void init() {
+	game_player() = default;
+	template<typename T>
+	game_player(T&& init_arg) {
+		init(std::forward<T>(init_arg));
+	}
+	void init(const char* data_path) {
+		init(data_loading::data_files_directory(data_path));
+	}
+	void init(a_string data_path) {
+		init(data_loading::data_files_directory(std::move(data_path)));
+	}
+	template<typename load_data_file_F>
+	void init(load_data_file_F&& load_data_file) {
 		uptr_global_st = std::make_unique<global_state>();
 		uptr_game_st = std::make_unique<game_state>();
 		uptr_st = std::make_unique<state>();
 		st = uptr_st.get();
 		st->global = uptr_global_st.get();
 		st->game = uptr_game_st.get();
-		global_init(*uptr_global_st);
+		global_init(*uptr_global_st, std::forward<load_data_file_F>(load_data_file));
 	}
 	void load_map_file(const a_string& filename) {
-		if (!st) init();
+		if (!st) xcept("game_player: not initialized");
 		game_load_functions game_load_funcs(*st);
 		game_load_funcs.load_map_file(filename);
 		state_functions funcs(*st);
@@ -10052,6 +10095,7 @@ struct game_player {
 		funcs.process_frame();
 	}
 	void next_frame() {
+		if (!st) xcept("game_player: not initialized");
 		state_functions funcs(*st);
 		funcs.next_frame();
 	}
