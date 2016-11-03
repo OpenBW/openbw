@@ -172,8 +172,8 @@ struct static_vector {
 private:
 	std::array<std::aligned_storage_t<sizeof(T), alignof(T)>, max_elements> m_data;
 	pointer m_end = ptr_begin();
-	template<typename...T>
-	void m_resize(size_type count, T&&... args) {
+	template<typename... args_T>
+	void m_resize(size_type count, args_T&&... args) {
 		if (count > capacity()) throw std::length_error("static_vector resized beyond capacity");
 		pointer e = ptr_begin() + count;
 		if (e > ptr_end()) {
@@ -288,7 +288,7 @@ public:
 		if (r >= ptr_end()) throw std::out_of_range("static_vector subscript out of range");
 		return *r;
 	}
-	const reference at(size_type pos) const {
+	const_reference at(size_type pos) const {
 		pointer r = ptr_begin() + pos;
 		if (r >= ptr_end()) throw std::out_of_range("static_vector subscript out of range");
 		return *r;

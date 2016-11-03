@@ -162,10 +162,10 @@ public:
 		return iterator(ptr_begin());
 	}
 	const_iterator begin() const {
-		return iterator(ptr_begin());
+		return const_iterator(ptr_begin());
 	}
 	const_iterator cbegin() const {
-		return iterator(ptr_begin());
+		return const_iterator(ptr_begin());
 	}
 	iterator end() {
 		return iterator(ptr_end());
