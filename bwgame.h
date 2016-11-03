@@ -7,6 +7,8 @@
 
 #include <algorithm>
 #include <utility>
+#include <cstdlib>
+#include <cmath>
 
 namespace bwgame {
 
@@ -1359,7 +1361,6 @@ struct state_functions {
 	}
 
 	void order_Stop(unit_t* u) {
-		log("order_Stop()\n");
 		stop_unit(u);
 		if (u->move_target.pos != u->next_target_waypoint) {
 			u->next_target_waypoint = u->move_target.pos;
@@ -5567,7 +5568,7 @@ struct state_functions {
 			u->subunit->exact_position = u->exact_position;
 			u->subunit->position = to_xy(u->exact_position);
 			move_sprite(u->subunit->sprite, u->subunit->position);
-			update_image_special_offset(u->sprite->main_image);
+			set_image_offset(u->subunit->sprite->main_image, get_image_lo_offset(u->sprite->main_image, 2, 0));
 			iscript_unit_setter ius(this, u->subunit);
 			if (!u_movement_flag(u, 2)) {
 				if (u_status_flag(u->subunit, (unit_t::status_flags_t)0x1000000)) {
@@ -6074,7 +6075,7 @@ struct state_functions {
 	void set_image_heading(image_t* image, direction_t heading) {
 		if (image->flags & image_t::flag_uses_special_offset) update_image_special_offset(image);
 		if (image->flags & image_t::flag_has_directional_frames) {
-			size_t frame_index_offset = (direction_index(heading) + 4) / 32;
+			size_t frame_index_offset = (direction_index(heading) + 4) / 8;
 			bool flipped = false;
 			if (frame_index_offset > 16) {
 				frame_index_offset = 32 - frame_index_offset;
@@ -6100,35 +6101,17 @@ struct state_functions {
 		}
 	}
 
-	// this function doesn't even belong here, does it?
-	void update_image_position(image_t* image) {
-
+	xy get_image_map_position(const image_t* image) const {
 		xy map_pos = image->sprite->position + image->offset;
-		auto&frame = image->grp->frames[image->frame_index];
-		if (image->flags&image_t::flag_horizontally_flipped) {
-			map_pos.x += image->grp->width / 2 - (frame.right + frame.left);
+		auto& frame = image->grp->frames[image->frame_index];
+		if (image->flags & image_t::flag_horizontally_flipped) {
+			map_pos.x += image->grp->width / 2 - (frame.offset.x + frame.size.x);
 		} else {
-			map_pos.x += frame.left - image->grp->width / 2;
+			map_pos.x += frame.offset.x - image->grp->width / 2;
 		}
-		if (image->flags & image_t::flag_y_frozen) map_pos.y = image->map_position.y;
-		else map_pos.y += frame.top - image->grp->height / 2;
-		rect grp_bounds = { { 0, 0 },{ frame.right, frame.bottom } };
-		xy screen_pos = map_pos - st.viewport.from;
-		if (screen_pos.x < 0) {
-			grp_bounds.from.x -= screen_pos.x;
-			grp_bounds.to.x += screen_pos.x;
-		}
-		if (screen_pos.y < 0) {
-			grp_bounds.from.y -= screen_pos.y;
-			grp_bounds.to.y += screen_pos.y;
-		}
-		if (grp_bounds.to.x > st.viewport.to.x - map_pos.x) grp_bounds.to.x = st.viewport.to.x - map_pos.x;
-		if (grp_bounds.to.y > st.viewport.to.y - map_pos.y) grp_bounds.to.y = st.viewport.to.y - map_pos.y;
-
-		image->map_position = map_pos;
-		image->screen_position = screen_pos;
-		image->grp_bounds = grp_bounds;
-
+		if (image->flags & image_t::flag_y_frozen) map_pos.y = map_pos.y;
+		else map_pos.y += frame.offset.y - image->grp->height / 2;
+		return map_pos;
 	}
 
 	xy get_image_lo_offset(const image_t* image, int lo_index, int offset_index) const {
@@ -6363,11 +6346,11 @@ struct state_functions {
 			case opc_followmaingraphic:
 				if (move_only) break;
 				if (image_t* main_image = image->sprite->main_image) {
-					if (main_image->frame_index == image->frame_index && ((main_image->flags & image_t::flag_horizontally_flipped) == (image->flags & image_t::flag_horizontally_flipped))) {
+					auto frame_index = main_image->frame_index;
+					bool flipped = i_flag(main_image, image_t::flag_horizontally_flipped);
+					if (image->frame_index != frame_index  || i_flag(image, image_t::flag_horizontally_flipped) != flipped) {
 						image->frame_index_base = main_image->frame_index_base;
-						image->frame_index_offset = main_image->frame_index_offset;
-						if (main_image->flags & image_t::flag_horizontally_flipped) image->flags |= image_t::flag_horizontally_flipped;
-						else image->flags &= ~image_t::flag_horizontally_flipped;
+						set_image_frame_index_offset(image, main_image->frame_index_offset, flipped);
 					}
 				}
 				break;
@@ -6572,7 +6555,6 @@ struct state_functions {
 		image->frame_index = 0;
 		image->sprite = sprite;
 		image->offset = offset;
-		image->grp_bounds = {{0, 0}, {0, 0}};
 		image->modifier_data1 = 0;
 		image->modifier_data2 = 0;
 		image->iscript_state.current_script = nullptr;
@@ -6633,7 +6615,6 @@ struct state_functions {
 		else image->flags &= image_t::flag_has_iscript_animations;
 		iscript_set_script(image, image->image_type->iscript_id);
 		if (!iscript_run_anim(image, iscript_anims::Init)) xcept("iscript Init ended immediately (image is no longer valid, cannot continue)");
-		update_image_position(image);
 		return image;
 	}
 
@@ -6660,8 +6641,8 @@ struct state_functions {
 				set_sprite_visibility(sprite, 0);
 			}
 			if (!create_image(sprite_type->image, sprite, { 0,0 }, image_order_above)) return false;
-			sprite->width = std::min(sprite->main_image->grp->width, 0xff);
-			sprite->height = std::min(sprite->main_image->grp->width, 0xff);
+			sprite->width = std::min(sprite->main_image->grp->width, (size_t)0xff);
+			sprite->height = std::min(sprite->main_image->grp->width, (size_t)0xff);
 			return true;
 		};
 
@@ -7203,7 +7184,7 @@ struct state_functions {
 			}
 			u->subunit = su;
 			su->subunit = u;
-			set_image_offset(u->sprite->main_image, get_image_lo_offset(u->sprite->main_image, 2, 0));
+			set_image_offset(su->sprite->main_image, get_image_lo_offset(u->sprite->main_image, 2, 0));
 			if (ut_turret(u)) xcept("unit %d has a turret but is also flagged as a turret", u->unit_type->id);
 			if (!ut_turret(su)) xcept("unit %d was created as a turret but is not flagged as one", su->unit_type->id);
 		} else {
@@ -7929,6 +7910,7 @@ struct game_load_functions : state_functions {
 
 		clear_and_make_free(st.units, st.free_units);
 		clear_and_make_free(st.sprites, st.free_sprites);
+		for (size_t i = 0; i != 2500; ++i) st.sprites[i].index = i;
 		st.sprites_on_tile_line.clear();
 		st.sprites_on_tile_line.resize(game_st.map_tile_height);
 		clear_and_make_free(st.images, st.free_images);
@@ -8254,7 +8236,7 @@ struct game_load_functions : state_functions {
 
 				} else {
 					if (game_st.regions.regions.size() >= 5000) xcept("too many regions (nooks and crannies)");
-					log("created %d regions\n", game_st.regions.regions.size());
+					//log("created %d regions\n", game_st.regions.regions.size());
 					break;
 				}
 			}
@@ -8443,7 +8425,7 @@ struct game_load_functions : state_functions {
 				for (auto* r : ptr(game_st.regions.regions)) {
 					if (r->tile_count) ++n_non_empty_regions;
 				}
-				log("n_non_empty_regions is %d\n", n_non_empty_regions);
+				//log("n_non_empty_regions is %d\n", n_non_empty_regions);
 				if (n_non_empty_regions < 2500) break;
 			}
 
@@ -8467,7 +8449,7 @@ struct game_load_functions : state_functions {
 			}
 			game_st.regions.regions.resize(new_region_count);
 
-			log("new_region_count is %d\n", new_region_count);
+			//log("new_region_count is %d\n", new_region_count);
 
 			refresh_regions();
 
@@ -8602,7 +8584,7 @@ struct game_load_functions : state_functions {
 					}
 				}
 			}
-			log("created %d split regions\n", game_st.regions.split_regions.size());
+			//log("created %d split regions\n", game_st.regions.split_regions.size());
 
 			for (auto* r : ptr(game_st.regions.regions)) {
 				r->priority = 0;
@@ -8949,7 +8931,7 @@ struct game_load_functions : state_functions {
 			for (auto& v : base_mask) {
 				if (v.masked) ++masked_count;
 			}
-			log("%d %d - masked_count is %d\n", v.max_width, v.max_height, masked_count);
+//			log("%d %d - masked_count is %d\n", v.max_width, v.max_height, masked_count);
 
 			v.ext_masked_count = masked_count - v.min_mask_size;
 			v.maskdat.clear();
@@ -9094,7 +9076,7 @@ struct game_load_functions : state_functions {
 
 		// campaign stuff? see load_map_file
 
-		log("load map file '%s'\n", filename);
+		//log("load map file '%s'\n", filename);
 
 		a_vector<uint8_t> data;
 		data_loading::load_data_file(data, filename, "staredit\\scenario.chk");
@@ -9126,7 +9108,7 @@ struct game_load_functions : state_functions {
 					if (std::get<1>(v)) xcept("map is missing required chunk '%s'", tagstr(tag));
 				} else {
 					if (!tag_funcs[tag]) xcept("tag '%s' is missing a function", tagstr(tag));
-					log("loading tag '%s'...\n", tagstr(tag));
+					//log("loading tag '%s'...\n", tagstr(tag));
 					tag_funcs[tag](i->second);
 				}
 			}
@@ -9135,7 +9117,7 @@ struct game_load_functions : state_functions {
 		int version = 0;
 		tag_funcs["VER "] = [&](data_reader_le r) {
 			version = r.get<uint16_t>();
-			log("VER: version is %d\n", version);
+			//log("VER: version is %d\n", version);
 		};
 		tag_funcs["DIM "] = [&](data_reader_le r) {
 			game_st.map_tile_width = r.get<uint16_t>();
@@ -9144,11 +9126,11 @@ struct game_load_functions : state_functions {
 			game_st.map_height = game_st.map_tile_height * 32;
 			game_st.map_walk_width = game_st.map_tile_width * 4;
 			game_st.map_walk_height = game_st.map_tile_width * 4;
-			log("DIM: dimensions are %d %d\n", game_st.map_tile_width, game_st.map_tile_height);
+			//log("DIM: dimensions are %d %d\n", game_st.map_tile_width, game_st.map_tile_height);
 		};
 		tag_funcs["ERA "] = [&](data_reader_le r) {
 			game_st.tileset_index = r.get<uint16_t>() % 8;
-			log("ERA: tileset is %d\n", game_st.tileset_index);
+			//log("ERA: tileset is %d\n", game_st.tileset_index);
 		};
 		tag_funcs["OWNR"] = [&](data_reader_le r) {
 			for (size_t i = 0; i < 12; ++i) {
@@ -9180,7 +9162,7 @@ struct game_load_functions : state_functions {
 		tag_funcs["SPRP"] = [&](data_reader_le r) {
 			game_st.scenario_name = game_st.get_string(r.get<uint16_t>());
 			game_st.scenario_description = game_st.get_string(r.get<uint16_t>());
-			log("SPRP: scenario name: '%s',  description: '%s'\n", game_st.scenario_name, game_st.scenario_description);
+			//log("SPRP: scenario name: '%s',  description: '%s'\n", game_st.scenario_name, game_st.scenario_description);
 		};
 		tag_funcs["FORC"] = [&](data_reader_le r) {
 			for (size_t i = 0; i < 12; ++i) st.players[i].force = 0;
@@ -9878,19 +9860,50 @@ void global_init(global_state& st, load_data_file_F&& load_data_file) {
 		a_vector<a_vector<a_vector<xy>>> lo_offsets;
 
 		auto load_grp = [&](data_reader_le r) {
+			auto base_r = r;
 			grp_t grp;
 			size_t frame_count = r.get<uint16_t>();
 			grp.width = r.get<uint16_t>();
 			grp.height = r.get<uint16_t>();
 			grp.frames.resize(frame_count);
 			for (size_t i = 0; i < frame_count; ++i) {
-				auto&f = grp.frames[i];
-				f.left = r.get<int8_t>();
-				f.top = r.get<int8_t>();
-				f.right = r.get<int8_t>();
-				f.bottom = r.get<int8_t>();
+				auto& f = grp.frames[i];
+				f.offset.x = r.get<uint8_t>();
+				f.offset.y = r.get<uint8_t>();
+				f.size.x = r.get<uint8_t>();
+				f.size.y = r.get<uint8_t>();
 				size_t file_offset = r.get<uint32_t>();
-				(void)file_offset;
+				auto line_offset_r = base_r;
+				line_offset_r.skip(file_offset);
+				f.line_data_offset.reserve(f.size.y);
+				for (size_t y = 0; y != f.size.y; ++y) {
+					auto line_r = base_r;
+					line_r.skip(file_offset + line_offset_r.get<uint16_t>());
+					f.line_data_offset.push_back(f.data_container.size());
+					for (size_t x = 0; x != f.size.x;) {
+						auto v = line_r.get<uint8_t>();
+						if (v & 0x80) {
+							v &= 0x7f;
+							if (v > f.size.x - x) v = (uint8_t)(f.size.x - x);
+							f.data_container.push_back(0x80 | v);
+							x += v;
+						} else if (v & 0x40) {
+							v &= 0x3f;
+							if (v > f.size.x - x) v = (uint8_t)(f.size.x - x);
+							f.data_container.push_back(0x40 | v);
+							f.data_container.push_back(line_r.get<uint8_t>());
+							x += v;
+						} else {
+							if (v > f.size.x - x) v = (uint8_t)(f.size.x - x);
+							f.data_container.push_back(v);
+							for (size_t i = 0; i != v; ++i) {
+								f.data_container.push_back(line_r.get<uint8_t>());
+							}
+							x += v;
+						}
+					}
+				}
+				f.data_container.shrink_to_fit();
 			}
 			size_t index = grps.size();
 			grps.push_back(std::move(grp));

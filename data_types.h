@@ -369,13 +369,13 @@ struct iscript_t {
 
 struct grp_t {
 	struct frame_t {
-		int left;
-		int top;
-		int right;
-		int bottom;
+		xy_t<size_t> offset;
+		xy_t<size_t> size;
+		a_vector<size_t> line_data_offset;
+		a_vector<uint8_t> data_container;
 	};
-	int width;
-	int height;
+	size_t width;
+	size_t height;
 	a_vector<frame_t> frames;
 };
 

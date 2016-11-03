@@ -12,6 +12,8 @@
 namespace bwgame {
 namespace data_loading {
 
+static_assert(std::is_same<uint8_t, unsigned char>::value || std::is_same<uint8_t, char>::value, "uint8_t must be (unsigned) char (we use it for aliasing)");
+
 template<typename T>
 struct is_std_array : std::false_type {};
 template<typename T, size_t N>
@@ -20,6 +22,11 @@ struct is_std_array<std::array<T, N>> : std::true_type{};
 // todo: Nothing here should throw exceptions. We should instead have a type to report errors,
 //       and all functions should set it through a reference or similar (optional/variant?).
 //  (allocators can still throw exceptions if they want to)
+
+bool is_native_little_endian() {
+	union endian_t {uint32_t a; uint8_t b;};
+	return (endian_t{1}).b == 1;
+}
 
 template<bool default_little_endian = true, bool bounds_checking = true>
 struct data_reader {
@@ -279,7 +286,7 @@ struct encrypted_reader {
 
 	void next() {
 		pos += 4;
-		auto d = reader.get<std::array<uint8_t, 4>>();
+		auto d = reader.template get<std::array<uint8_t, 4>>();
 		add_n += crypt_table[(key&0xff) + 1024];
 		uint32_t xor_n = key + add_n;
 		data[0] = d[0] ^ xor_n;
@@ -357,7 +364,7 @@ struct bit_reader {
 	size_t bits_n = 0;
 	bit_reader(base_reader_T& r) : r(r) {}
 	void next() {
-		data = r.get<uint8_t>();
+		data = r.template get<uint8_t>();
 	}
 	template<size_t bits, bool little_endian = default_little_endian>
 	auto get_bits() {

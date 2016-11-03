@@ -75,14 +75,6 @@ struct vf4_entry {
 	std::array<uint16_t, 16> flags;
 };
 static_assert(sizeof(vf4_entry) == 32, "vf4_entry: wrong size");
-struct vx4_entry {
-	std::array<uint16_t, 16> images;
-};
-static_assert(sizeof(vx4_entry) == 32, "vx4_entry: wrong size");
-struct vr4_entry {
-	std::array<uint8_t, 64> bitmap;
-};
-static_assert(sizeof(vr4_entry) == 64, "vr4_entry: wrong size");
 
 struct tile_id {
 	uint16_t raw_value = 0;
@@ -240,9 +232,6 @@ struct image_t: link_base {
 	iscript_state_t iscript_state;
 	size_t frame_index_base;
 	size_t frame_index;
-	xy map_position;
-	xy screen_position;
-	rect grp_bounds;
 	grp_t* grp;
 	int modifier_data1;
 	int modifier_data2;
@@ -266,9 +255,9 @@ struct sprite_t: link_base {
 	int elevation_level;
 	int flags;
 	int selection_timer;
-	int index;
-	int width;
-	int height;
+	size_t index;
+	size_t width;
+	size_t height;
 	xy position;
 	image_t* main_image;
 	intrusive_list<image_t, default_link_f> images;
