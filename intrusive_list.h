@@ -42,7 +42,7 @@ public:
 			ptr = link_f()(ptr)->second;
 			return *this;
 		}
-		this_t& operator++(int) {
+		this_t operator++(int) {
 			auto r = *this;
 			ptr = link_f()(ptr)->second;
 			return r;
@@ -51,7 +51,7 @@ public:
 			ptr = link_f()(ptr)->first;
 			return *this;
 		}
-		this_t& operator--(int) {
+		this_t operator--(int) {
 			auto r = *this;
 			ptr = link_f()(ptr)->first;
 			return r;
@@ -97,7 +97,7 @@ public:
 			ptr = link_f()(ptr)->first;
 			return *this;
 		}
-		this_t& operator--(int) {
+		this_t operator--(int) {
 			auto r = *this;
 			ptr = link_f()(ptr)->first;
 			return r;

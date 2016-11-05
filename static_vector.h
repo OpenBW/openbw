@@ -36,7 +36,7 @@ struct static_vector {
 			++ptr;
 			return *this;
 		}
-		this_t& operator++(int) {
+		this_t operator++(int) {
 			auto r = *this;
 			++ptr;
 			return r;
@@ -45,7 +45,7 @@ struct static_vector {
 			--ptr;
 			return *this;
 		}
-		this_t& operator--(int) {
+		this_t operator--(int) {
 			auto r = *this;
 			--ptr;
 			return r;
