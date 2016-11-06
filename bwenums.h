@@ -736,17 +736,6 @@ namespace movement_states {
 	};
 }
 
-namespace MiniTileFlags
-{
-	enum Enum
-	{
-		Walkable = 1 << 0,
-		Middle = 1 << 1,
-		High = 1 << 2, /**< (Mid and High unchecked = Low) */
-		BlocksView = 1 << 3,
-		Ramp = 1 << 4, /**< Appears on the middle minitiles of most ramps/stairs. */
-	};
-}
 
 
 namespace idenums {
@@ -2276,38 +2265,6 @@ namespace idenums {
 		IMAGEID_Acid_Spores_6_9_Overlay_Large,
 		IMAGEID_Maelstorm_Hit,
 		IMAGEID_None
-	};
-
-	enum iscriptAnims
-	{
-		ISCRIPT_Anim_Init,
-		ISCRIPT_Anim_Death,
-		ISCRIPT_Anim_GndAttkInit,
-		ISCRIPT_Anim_AirAttkInit,
-		ISCRIPT_Anim_Unused1,
-		ISCRIPT_Anim_GndAttkRpt,
-		ISCRIPT_Anim_AirAttkRpt,
-		ISCRIPT_Anim_CastSpell,
-		ISCRIPT_Anim_GndAttkToIdle,
-		ISCRIPT_Anim_AirAttkToIdle,
-		ISCRIPT_Anim_Unused2,
-		ISCRIPT_Anim_Walking,
-		ISCRIPT_Anim_WalkingToIdle,
-		ISCRIPT_Anim_SpecialState1,
-		ISCRIPT_Anim_SpecialState2,
-		ISCRIPT_Anim_AlmostBuilt,
-		ISCRIPT_Anim_Built,
-		ISCRIPT_Anim_Landing,
-		ISCRIPT_Anim_LiftOff,
-		ISCRIPT_Anim_IsWorking,
-		ISCRIPT_Anim_WorkingToIdle,
-		ISCRIPT_Anim_WarpIn,
-		ISCRIPT_Anim_Unused3,
-		ISCRIPT_Anim_StarEditInit,
-		ISCRIPT_Anim_Disable,
-		ISCRIPT_Anim_Burrow,
-		ISCRIPT_Anim_UnBurrow,
-		ISCRIPT_Anim_Enable
 	};
 
 }
