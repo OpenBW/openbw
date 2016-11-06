@@ -217,6 +217,11 @@ struct state_base_copyable {
 
 	const unit_t* prev_bullet_source_unit;
 	bool prev_bullet_heading_offset_clockwise;
+
+	std::array<int, 12> current_minerals;
+	std::array<int, 12> current_gas;
+	std::array<int, 12> total_minerals_gathered;
+	std::array<int, 12> total_gas_gathered;
 };
 
 struct state_base_non_copyable {
@@ -455,6 +460,9 @@ struct state_functions {
 	bool ut_has_energy(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_has_energy);
 	}
+	bool ut_resource_depot(const unit_t* u) const {
+		return ut_flag(u, unit_type_t::flag_resource_depot);
+	}
 	bool ut_resource(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_resource);
 	}
@@ -523,7 +531,7 @@ struct state_functions {
 		return pos >= bounds.from && pos < bounds.to;
 	}
 
-	rect translate_rect(rect src, xy translation) {
+	rect translate_rect(rect src, xy translation) const {
 		return {src.from + translation, src.to + translation};
 	}
 
@@ -691,7 +699,7 @@ struct state_functions {
 	}
 
 	void set_unit_resources(unit_t* u, int resources) {
-		if (ut_resource(u)) return;
+		if (!ut_resource(u)) return;
 		u->building.resource.resource_count = resources;
 		if (is_mineral_field(u->unit_type)) {
 			int anim = iscript_anims::WorkingToIdle;
@@ -727,6 +735,11 @@ struct state_functions {
 		return nullptr;
 	}
 
+	void destroy_image_from_to(sprite_t* sprite, int first_id, int last_id) {
+		image_t* image = find_image(sprite, first_id, last_id);
+		if (image) destroy_image(image);
+	}
+
 	void disable_effect_end(unit_t* u, int first, int last) {
 		bool still_disabled = is_disabled(u);
 		if (u->subunit && !still_disabled) {
@@ -739,7 +752,7 @@ struct state_functions {
 		if (ut_worker(u) && !still_disabled) {
 			unit_t* target = u->worker.gather_target;
 			if (target && ut_resource(target)) {
-				if (u->worker.is_carrying_something) {
+				if (u->worker.is_gathering) {
 					if (target->building.resource.is_being_gathered) {
 						xcept("disable_effect_end fixme");
 					}
@@ -1000,6 +1013,13 @@ struct state_functions {
 
 	bool unit_is_queen(const unit_t* u) const {
 		return u->unit_type->id == UnitTypes::Zerg_Queen || u->unit_type->id == UnitTypes::Hero_Matriarch;
+	}
+
+	bool unit_is_hatchery(const unit_t* u) const {
+		if (u->unit_type->id == UnitTypes::Zerg_Hatchery) return true;
+		if (u->unit_type->id == UnitTypes::Zerg_Lair) return true;
+		if (u->unit_type->id == UnitTypes::Zerg_Hive) return true;
+		return false;
 	}
 
 	bool unit_target_is_undetected(const unit_t* u, const unit_t* target) const {
@@ -1471,7 +1491,7 @@ struct state_functions {
 		if (target->building.resource.is_being_gathered) return false;
 		target->building.resource.is_being_gathered = true;
 		u->worker.gather_target = target;
-		u->worker.is_carrying_something = true;
+		u->worker.is_gathering = true;
 		if (u->order_type->id == Orders::WaitForGas) {
 			queue_order_front(u, get_order_type(Orders::HarvestGas), order_target_t(target));
 		} else {
@@ -1499,6 +1519,155 @@ struct state_functions {
 		if (u->position == u->next_target_waypoint) return true;
 		if (u->heading == xy_direction(u->next_target_waypoint - u->sprite->position)) return true;
 		return false;
+	}
+
+	int unit_long_path_distance(const unit_t* u, xy from, xy to) const {
+		if (!u->pathing_flags & 1) return xy_length(to - from);
+		if (!is_reachable(from, to)) return 0x7fff;
+		pathfinder pf;
+		if (!pathfinder_find_long_path(pf, u, from, to)) return 0x7ffe;
+		if (pf.long_path.size() <= 2) return xy_length(to - from);
+		xy pos = to_xy(pf.long_path[0]->center);
+		int r = 0;
+		for (auto i = std::next(pf.long_path.begin()); i != pf.long_path.end(); ++i) {
+			xy next_pos = to_xy((*i)->center);
+			r += xy_length(next_pos - pos);
+			pos = next_pos;
+		}
+		return r;
+	}
+
+	void destroy_carrying_images(const unit_t* u) {
+		destroy_image_from_to(u->sprite, idenums::IMAGEID_Mineral_Chunk_Shadow, idenums::IMAGEID_Psi_Emitter_Shadow_Carried);
+		destroy_image_from_to(u->sprite, idenums::IMAGEID_Flag, idenums::IMAGEID_Terran_Gas_Tank_Type2);
+		destroy_image_from_to(u->sprite, idenums::IMAGEID_Uraj, idenums::IMAGEID_Khalis);
+	}
+
+	void unit_gather_resources_from(unit_t* u, unit_t* resource) {
+		const image_type_t* image_type = nullptr;
+		bool is_minerals = false;
+		switch (resource->unit_type->id) {
+		case UnitTypes::Terran_Refinery:
+			image_type = get_image_type(idenums::IMAGEID_Terran_Gas_Tank_Type1);
+			break;
+		case UnitTypes::Protoss_Assimilator:
+			image_type = get_image_type(idenums::IMAGEID_Protoss_Gas_Orb_Type1);
+			break;
+		case UnitTypes::Zerg_Extractor:
+			image_type = get_image_type(idenums::IMAGEID_Zerg_Gas_Sac_Type1);
+			break;
+		case UnitTypes::Resource_Mineral_Field:
+		case UnitTypes::Resource_Mineral_Field_Type_2:
+		case UnitTypes::Resource_Mineral_Field_Type_3:
+			image_type = get_image_type(idenums::IMAGEID_Mineral_Chunk_Type1);
+			is_minerals = true;
+			break;
+		}
+		if (!image_type) return;
+		int gathered = 0;
+		if (resource->building.resource.resource_count < 8) {
+			image_type = get_image_type(image_type->id + 1);
+			if (is_minerals) {
+				gathered = resource->building.resource.resource_count;
+				order_SelfDestructing(resource);
+			} else {
+				resource->building.resource.resource_count = 0;
+				gathered = 2;
+			}
+		} else {
+			set_unit_resources(resource, resource->building.resource.resource_count - 8);
+			gathered = 8;
+			if (is_minerals) {
+				if (resource->building.resource.resource_count == 0) {
+					order_SelfDestructing(resource);
+				}
+			} else {
+				if (resource->building.resource.resource_count < 8) {
+					// todo: out of gas error message/sound callback?
+				}
+			}
+		}
+		if (gathered) {
+			if (u->carrying_flags & 3) {
+				destroy_carrying_images(u);
+				u->carrying_flags = 0;
+			}
+			if (u->carrying_flags == 0) {
+				if (is_minerals) u->carrying_flags = 2;
+				else u->carrying_flags = 1;
+				u->worker.resources_carried = gathered;
+				image_t* image = create_image(image_type, u->sprite, {}, image_order_above);
+				if (image) {
+					if (!i_flag(image, image_t::flag_uses_special_offset)) {
+						i_set_flag(image, image_t::flag_uses_special_offset);
+						update_image_special_offset(image);
+					}
+				}
+			}
+		}
+	}
+
+	void gather_queue_next(unit_t* u, unit_t* resource) {
+		u->worker.is_gathering = false;
+		u->worker.gather_target = nullptr;
+		if (resource) {
+			resource->building.resource.is_being_gathered = false;
+			unit_t* next_unit = nullptr;
+			for (unit_t* queued_unit : reverse(ptr(resource->building.resource.gather_queue))) {
+				if (!is_disabled(queued_unit)) {
+					if (queued_unit->order_type->id == Orders::WaitForGas || queued_unit->order_type->id == Orders::WaitForMinerals) {
+						next_unit = queued_unit;
+						break;
+					}
+				}
+			}
+			if (next_unit) {
+				resource->building.resource.gather_queue.remove(*next_unit);
+				remove_one_order(next_unit, get_order_type(Orders::Harvest4));
+				try_gather_resource(next_unit, resource);
+			}
+		}
+	}
+
+	bool unit_is_active_resource_depot(const unit_t* u) const {
+		if (!u_grounded_building(u)) return false;
+		if (!ut_resource_depot(u)) return false;
+
+		if (u_completed(u)) return true;
+		if (u->unit_type->id == UnitTypes::Zerg_Hive) return true;
+		if (u->unit_type->id == UnitTypes::Zerg_Lair) return true;
+		if (u->unit_type->id == UnitTypes::Zerg_Hatchery && unit_is_morphing_building(u)) return true;
+		return false;
+	}
+
+	unit_t* find_nearest_active_resource_depot(const unit_t* u) const {
+		if (us_hidden(u)) {
+			return find_nearest_unit(u->sprite->position, map_bounds(), [&](const unit_t* target) {
+				if (!unit_is_active_resource_depot(target)) return false;
+				if (target->owner != u->owner) return false;
+				if (~u->pathing_flags & 1 || !is_reachable(u->sprite->position, target->sprite->position)) return false;
+				return true;
+			});
+		} else {
+			auto cmp_l = [&](auto& a, int b) {
+				return a.value < b;
+			};
+			auto get = [&](auto& vec, int value) {
+				auto i = std::lower_bound(vec.begin(), vec.end(), value, cmp_l);
+				while (i->u != u) ++i;
+				return i;
+			};
+			auto left_i = get(st.unit_finder_x, u->unit_finder_bounding_box.to.x);
+			auto up_i = get(st.unit_finder_y, u->unit_finder_bounding_box.to.y);
+			auto right_i = get(st.unit_finder_x, u->unit_finder_bounding_box.from.x);
+			auto down_i = get(st.unit_finder_y, u->unit_finder_bounding_box.from.y);
+			return find_nearest_unit(u->sprite->position, map_bounds(), left_i, up_i, right_i, down_i, [&](const unit_t* target) {
+				if (!unit_is_active_resource_depot(target)) return false;
+				if (target->owner != u->owner) return false;
+				if (~u->pathing_flags & 1 || !is_reachable(u->sprite->position, target->sprite->position)) return false;
+				return true;
+			});
+		}
 	}
 
 	void order_destroy(unit_t* u) {
@@ -1578,7 +1747,7 @@ struct state_functions {
 				if (!is_reachable(u->sprite->position, target->sprite->position)) return false;
 				if (get_ground_height_at(pos) != ground_height) return false;
 				if (!unit_position_is_visible(u, target->sprite->position)) return false;
-				if (target->pathing_flags & 1) xcept("find_mineral_field fixme");
+				if (unit_long_path_distance(target, target->sprite->position, u->sprite->position) > 2 * range) return false;
 				if (require_not_being_gathered && target->building.resource.is_being_gathered) return false;
 				return true;
 			});
@@ -1661,24 +1830,153 @@ struct state_functions {
 	}
 
 	void order_MiningMinerals(unit_t* u) {
+		if (!ut_worker(u)) xcept("MiningMinerals: unit is not a worker");
 		unit_t* target = u->order_target.unit;
 		if (target && is_mineral_field(target->unit_type)) {
 			set_unit_gathering(u);
 			if (u->order_state == 0) {
 				if (is_facing_next_target_waypoint(u)) {
 					u->order_target.pos = u->sprite->position + to_xy(direction_xy(u->heading, fp8::integer(20)));
-					u->order_state = 4;
 					sprite_run_anim(u->sprite, iscript_anims::AlmostBuilt);
 					u->main_order_timer = 75;
 					u->order_state = 5;
 				}
-			} else xcept("order_state %d", u->order_state);
+			} else if (u->order_state == 5) {
+				if (u->main_order_timer == 0) {
+					sprite_run_anim(u->sprite, iscript_anims::GndAttkToIdle);
+					unit_gather_resources_from(u, target);
+					gather_queue_next(u, target);
+					remove_one_order(u, get_order_type(Orders::Harvest3));
+					if (u->carrying_flags & 2) {
+						set_unit_order(u, get_order_type(Orders::ReturnMinerals));
+					} else {
+						set_unit_order(u, get_order_type(Orders::ReturnGas));
+					}
+				}
+			}
 		} else {
 			xcept("waa");
 		}
 	}
 
+	void order_SelfDestructing(unit_t* u) {
+		xcept("SelfDestructing");
+	}
+
+	void order_ResetHarvestCollision(unit_t* u) {
+		if (!u->order_queue.empty()) {
+			order_t* next_order = &u->order_queue.front();
+			int nid = next_order->order_type->id;
+			switch (nid) {
+			case Orders::Harvest1:
+			case Orders::MoveToGas:
+			case Orders::WaitForGas:
+			case Orders::HarvestGas:
+			case Orders::MoveToMinerals:
+			case Orders::WaitForMinerals:
+			case Orders::MiningMinerals:
+			case Orders::Harvest3:
+			case Orders::Harvest4:
+				while (u->order_queue.back().order_type->id == Orders::ResetHarvestCollision) {
+					remove_queued_order(u, &u->order_queue.back());
+				}
+				queue_order_back(u, get_order_type(Orders::ResetHarvestCollision), {});
+				u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+				idle(u);
+				return;
+			}
+		}
+		u_unset_status_flag(u, unit_t::status_flag_gathering);
+		u_unset_status_flag(u, unit_t::status_flag_no_collide);
+		check_unit_collision(u);
+		if (u->order_queue.empty()) set_queued_order(u, false, u->unit_type->return_to_idle, {});
+		if (u->path) {
+			free_path(u->path);
+			u->path = nullptr;
+		}
+		u->movement_state = 0;
+		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
+		else u->pathing_flags &= ~1;
+		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+		idle(u);
+	}
+
+	void order_ReturnGas(unit_t* u) {
+		order_ReturnMinerals(u);
+	}
+
+	void order_ReturnMinerals(unit_t* u) {
+		if ((u->carrying_flags & 3) == 0) {
+			stop_unit(u);
+			set_next_target_waypoint(u, u->move_target.pos);
+			idle(u);
+			return;
+		}
+		set_unit_gathering(u);
+		unit_t* target = u->order_target.unit;
+		if (!target || !unit_is_active_resource_depot(target)) {
+			u->order_state = 0;
+		}
+		if (u->order_state == 0) {
+			target = find_nearest_active_resource_depot(u);
+			if (target) {
+				u->order_target.unit = target;
+				move_to_target_reset(u, target);
+				u->order_state = 1;
+			} else {
+				u->order_queue_timer = 75;
+			}
+		} else if (u->order_state == 1) {
+			if (unit_is_at_move_target(u)) {
+				if (u_immovable(u)) {
+					u->order_target.unit = nullptr;
+					u->order_state = 0;
+				} else {
+					const order_type_t* next_order_type = nullptr;
+					if (u->carrying_flags & 1) next_order_type = get_order_type(Orders::MoveToGas);
+					else next_order_type = get_order_type(Orders::MoveToMinerals);
+					if (u->worker.target_resource_unit) {
+						queue_order_front(u, next_order_type, order_target_t(u->worker.target_resource_unit));
+					} else {
+						queue_order_front(u, next_order_type, {});
+					}
+					idle(u);
+					destroy_carrying_images(u);
+					if (u->carrying_flags & 2) {
+						st.current_minerals[u->owner] += u->worker.resources_carried;
+						st.total_minerals_gathered[u->owner] += u->worker.resources_carried;
+					} else if (u->carrying_flags & 1) {
+						st.current_gas[u->owner] += u->worker.resources_carried;
+						st.total_gas_gathered[u->owner] += u->worker.resources_carried;
+					}
+					u->carrying_flags = 0;
+					u->worker.resources_carried = 0;
+
+					if (unit_is_hatchery(target)) {
+						for (auto& v : target->building.hatchery.larva_spawn_side_values) {
+							if (v) --v;
+						}
+						auto bb = unit_sprite_inner_bounding_box(target);
+						int* val;
+						if (u->sprite->position.y < bb.from.y) {
+							val = &target->building.hatchery.larva_spawn_side_values[1];
+						} else if (u->sprite->position.y < bb.to.y) {
+							val = &target->building.hatchery.larva_spawn_side_values[3];
+						} else if (u->sprite->position.x < bb.from.x) {
+							val = &target->building.hatchery.larva_spawn_side_values[2];
+						} else {
+							val = &target->building.hatchery.larva_spawn_side_values[0];
+						}
+						if (*val < 100) *val += 25;
+					}
+				}
+			}
+		}
+	}
+
 	bool execute_main_order(unit_t* u) {
+
+		log("unit %d execute main order %d\n", u - st.units.data(), u->order_type->id);
 
 		switch (u->order_type->id) {
 		case Orders::Die:
@@ -1783,13 +2081,13 @@ struct state_functions {
 			xcept("ResetCollision");
 			break;
 		case Orders::ResetHarvestCollision:
-			xcept("ResetHarvestCollision");
+			order_ResetHarvestCollision(u);
 			break;
 		case Orders::CTFCOP2:
 			xcept("CTFCOP2");
 			break;
 		case Orders::SelfDestructing:
-			xcept("SelfDestructing");
+			order_SelfDestructing(u);
 			break;
 		case Orders::Critter:
 			xcept("Critter");
@@ -1982,7 +2280,7 @@ struct state_functions {
 			xcept("HarvestGas");
 			break;
 		case Orders::ReturnGas:
-			xcept("ReturnGas");
+			order_ReturnGas(u);
 			break;
 		case Orders::MoveToMinerals:
 			order_MoveToMinerals(u);
@@ -1998,6 +2296,9 @@ struct state_functions {
 			break;
 		case Orders::Harvest4:
 			xcept("Harvest4");
+			break;
+		case Orders::ReturnMinerals:
+			order_ReturnMinerals(u);
 			break;
 		case Orders::Interrupted:
 			xcept("Interrupted");
@@ -2953,7 +3254,7 @@ struct state_functions {
 	}
 
 	struct pathfinder {
-		unit_t* u = nullptr;
+		const unit_t* u = nullptr;
 		const unit_t* target_unit = nullptr;
 		xy source;
 		const regions_t::region* source_region = nullptr;
@@ -2981,7 +3282,7 @@ struct state_functions {
 		bool consider_collision_with_moving_units = false;
 	};
 
-	bool pathfinder_find_long_path(pathfinder& pf) {
+	bool pathfinder_find_long_path(pathfinder& pf) const {
 		//log("find long path from %d %d to %d %d, region %d to %d\n", pf.source.x, pf.source.y, pf.destination.x, pf.destination.y, pf.source_region->index, pf.destination_region->index);
 		if (pf.source_region == pf.destination_region) return false;
 
@@ -3201,7 +3502,7 @@ struct state_functions {
 		}
 	}
 
-	bool pathfinder_unit_can_collide_with(const pathfinder& pf, const unit_t* target) {
+	bool pathfinder_unit_can_collide_with(const pathfinder& pf, const unit_t* target) const {
 		if (target != pf.consider_collision_with_unit && !pf.consider_collision_with_moving_units) {
 			if (!unit_is_at_move_target(target)) return false;
 		}
@@ -3212,7 +3513,7 @@ struct state_functions {
 		return unit_can_collide_with(pf.u, target);
 	}
 
-	void pathfinder_find_short_path(pathfinder& pf, xy target, const regions_t::region* target_region) {
+	void pathfinder_find_short_path(pathfinder& pf, xy target, const regions_t::region* target_region) const {
 
 		bool target_is_destination = target == pf.destination;
 		bool target_region_walkable = target_region && target_region->walkable();
@@ -3228,7 +3529,7 @@ struct state_functions {
 		}
 
 		struct pf_search {
-			unit_t* u = nullptr;
+			const unit_t* u = nullptr;
 			const unit_t* target_unit = nullptr;
 			std::array<int, 4> inner;
 			std::array<int, 4> outer;
@@ -4348,7 +4649,7 @@ struct state_functions {
 		}
 	}
 
-	xy pathfinder_adjust_target_pos(const pathfinder& pf, xy target) {
+	xy pathfinder_adjust_target_pos(const pathfinder& pf, xy target) const {
 		xy pos = target;
 		auto unit_bb = pf.unit_bb;
 		for (size_t width = 1; width < 10; width += 2) {
@@ -4380,7 +4681,7 @@ struct state_functions {
 		return target;
 	}
 
-	xy pathfinder_adjust_destination(const regions_t::region* source_region, xy destination) {
+	xy pathfinder_adjust_destination(const regions_t::region* source_region, xy destination) const {
 		xy target = nearest_pos_in_rect(destination, source_region->area) / 32;
 		for (size_t width = 1; width < 16; width += 2) {
 			for (size_t dir = 0; dir != 4; ++dir) {
@@ -4405,7 +4706,7 @@ struct state_functions {
 		return to_xy(source_region->center);
 	}
 
-	bool pathfinder_find_next_short_path(pathfinder& pf) {
+	bool pathfinder_find_next_short_path(pathfinder& pf) const {
 		++pf.current_long_path_index;
 		if (pf.current_long_path_index >= pf.long_path.size()) return false;
 		const regions_t::region* source_region = pf.long_path[pf.current_long_path_index];
@@ -4500,6 +4801,26 @@ struct state_functions {
 			}
 			return true;
 		} else return false;
+	}
+
+	bool pathfinder_find_long_path(pathfinder& pf, const unit_t* u, xy from, xy to) const {
+		pf.u = u;
+		pf.source = from;
+		pf.destination = to;
+		pf.source_region = get_region_at(pf.source);
+		pf.destination_region = get_region_at(pf.destination);
+		pf.long_all_nodes_size = 0;
+		pf.long_highest_open_size = 0;
+		pf.destination_reached = false;
+		pf.is_stuck = false;
+		if (pf.source_region == pf.destination_region) {
+			pf.long_path = { pf.source_region };
+			pf.full_long_path_size = 1;
+			pf.current_long_path_index = (size_t)0 - 1;
+			return true;
+		} else {
+			return pathfinder_find_long_path(pf);
+		}
 	}
 
 	bool pathfinder_find(pathfinder& pf, bool short_path_only = false) {
@@ -5626,7 +5947,7 @@ struct state_functions {
 		return ems.refresh_vision;
 	}
 
-	bool is_transforming_zerg_building(const unit_t* u) const {
+	bool unit_is_morphing_building(const unit_t* u) const {
 		if (u_completed(u)) return false;
 		unit_type_t* t = u->build_queue[u->build_queue_slot];
 		if (!t) return false;
@@ -5635,8 +5956,8 @@ struct state_functions {
 	}
 
 
-	int unit_sight_range2(const unit_t* u, bool ignore_blindness) const {
-		if (u_grounded_building(u) && !u_completed(u) && !is_transforming_zerg_building(u)) return 4;
+	int unit_sight_range(const unit_t* u, bool ignore_blindness = false) const {
+		if (u_grounded_building(u) && !u_completed(u) && !unit_is_morphing_building(u)) return 4;
 		if (!ignore_blindness && u->is_blind) return 2;
 		if (u->unit_type->id == UnitTypes::Terran_Ghost && st.upgrade_levels[u->owner][UpgradeTypes::Ocular_Implants]) return 11;
 		if (u->unit_type->id == UnitTypes::Zerg_Overlord && st.upgrade_levels[u->owner][UpgradeTypes::Antennae]) return 11;
@@ -5644,11 +5965,8 @@ struct state_functions {
 		if (u->unit_type->id == UnitTypes::Protoss_Scout && st.upgrade_levels[u->owner][UpgradeTypes::Apial_Sensors]) return 11;
 		return u->unit_type->sight_range;
 	}
-	int unit_sight_range(const unit_t* u) const {
-		return unit_sight_range2(u, false);
-	}
 	int unit_sight_range_ignore_blindness(const unit_t* u) const {
-		return unit_sight_range2(u, true);
+		return unit_sight_range(u, true);
 	}
 
 	int unit_target_acquisition_range(const unit_t* u) const {
@@ -6066,8 +6384,8 @@ struct state_functions {
 		test(u->irradiated_by);
 		if (ut_worker(u)) {
 			test(u->worker.target_resource_unit);
-			if (u->worker.is_carrying_something) {
-				u->worker.is_carrying_something = false;
+			if (u->worker.is_gathering) {
+				u->worker.is_gathering = false;
 				test(u->worker.gather_target);
 			}
 		} else if (ut_flag(u, (unit_type_t::flags_t)2)) {
@@ -6223,7 +6541,8 @@ struct state_functions {
 
 	void update_bullets() {
 
-		for (bullet_t* b : ptr(st.active_bullets)) {
+		for (auto i = st.active_bullets.begin(); i != st.active_bullets.end();) {
+			bullet_t* b = &*i++;
 			iscript_bullet = b;
 			iscript_flingy = b;
 			if (b->sprite) {
@@ -6770,8 +7089,8 @@ struct state_functions {
 				a = *p++;
 				if (move_only) break;
 				if (image_t* new_image = add_image(a, xy(), opc == opc_imgolorig ? image_order_above : image_order_below)) {
-					if (~new_image->flags & image_t::flag_uses_special_offset) {
-						new_image->flags |= image_t::flag_uses_special_offset;
+					if (!i_flag(new_image, image_t::flag_uses_special_offset)) {
+						i_set_flag(new_image, image_t::flag_uses_special_offset);
 						update_image_special_offset(image);
 					}
 				}
@@ -6948,6 +7267,13 @@ struct state_functions {
 				p = program_data + state.return_address;
 				break;
 
+			case opc_pwrupcondjmp:
+				a = *p++;
+				if (image->sprite && image->sprite->main_image == image) {
+					p = program_data + a;
+				}
+				break;
+
 			case opc_imgulnextid:
 				a = *p++;
 				b = *p++;
@@ -7063,7 +7389,7 @@ struct state_functions {
 			// see 4BDE60
 			//image->coloring_data = 0; // fixme
 		}
-	};
+	}
 
 	void destroy_image(image_t* image) {
 		image->grp = nullptr;
@@ -7081,7 +7407,7 @@ struct state_functions {
 		if ((size_t)image_id >= 999) xcept("attempt to create image with invalid id %d", image_id);
 		return create_image(get_image_type(image_id), sprite, offset, order, relimg);
 	}
-	image_t* create_image(const image_type_t* image_type, sprite_t* sprite, xy offset, int order, image_t*relimg = nullptr) {
+	image_t* create_image(const image_type_t* image_type, sprite_t* sprite, xy offset, int order, image_t* relimg = nullptr) {
 		if (!image_type)  xcept("attempt to create image of null type");
 		//log("create image %d\n", image_type->id);
 
@@ -7456,24 +7782,13 @@ struct state_functions {
 		return nullptr;
 	}
 
-	template<typename F>
-	unit_t* find_nearest_unit(xy pos, rect search_area, F&& predicate) const {
-
-		auto cmp_l = [&](auto& a, int b) {
-			return a.value < b;
-		};
-		auto x_i = std::lower_bound(st.unit_finder_x.begin(), st.unit_finder_x.end(), pos.x, cmp_l);
-		auto y_i = std::lower_bound(st.unit_finder_y.begin(), st.unit_finder_y.end(), pos.y, cmp_l);
+	template<typename F, typename i_T>
+	unit_t* find_nearest_unit(xy pos, rect search_area, i_T left_i, i_T up_i, i_T right_i, i_T down_i, F&& predicate) const {
 
 		const auto x_begin = st.unit_finder_x.begin();
 		const auto y_begin = st.unit_finder_y.begin();
 		const auto x_end = st.unit_finder_x.end();
 		const auto y_end = st.unit_finder_y.end();
-
-		auto left_i = x_i;
-		auto up_i = y_i;
-		auto right_i = x_i;
-		auto down_i = y_i;
 
 		int best_distance = xy_length({std::max(pos.x - search_area.from.x, search_area.to.x - pos.x), std::max(pos.y - search_area.from.y, search_area.to.y - pos.y)});
 		unit_t* best_unit = nullptr;
@@ -7554,6 +7869,18 @@ struct state_functions {
 			if (done) break;
 		}
 		return best_unit;
+	}
+
+	template<typename F>
+	unit_t* find_nearest_unit(xy pos, rect search_area, F&& predicate) const {
+
+		auto cmp_l = [&](auto& a, int b) {
+			return a.value < b;
+		};
+		auto x_i = std::lower_bound(st.unit_finder_x.begin(), st.unit_finder_x.end(), pos.x, cmp_l);
+		auto y_i = std::lower_bound(st.unit_finder_y.begin(), st.unit_finder_y.end(), pos.y, cmp_l);
+
+		return find_nearest_unit(pos, search_area, x_i, y_i, x_i, y_i, predicate);
 	}
 
 	bool unit_is_factory(unit_t* u) const {
@@ -7992,6 +8319,15 @@ struct state_functions {
 
 	void queue_order_front(unit_t* u, const order_type_t* order_type, order_target_t target) {
 		queue_order(u->order_queue.begin(), u, order_type, target);
+	}
+
+	void remove_one_order(unit_t* u, const order_type_t* order_type) {
+		for (order_t* o : ptr(u->order_queue)) {
+			if (o->order_type == order_type) {
+				remove_queued_order(u, o);
+				break;
+			}
+		}
 	}
 
 	void set_queued_order(unit_t* u, bool interrupt, const order_type_t* order_type, order_target_t target) {
@@ -8434,7 +8770,7 @@ struct game_load_functions : state_functions {
 
 		for (auto& v : game_st.unit_type_allowed) v.fill(true);
 		for (auto& v : game_st.tech_available) v.fill(true);
-		st.tech_researched.fill({});
+		st.tech_researched = {};
 		for (auto& v : game_st.max_upgrade_levels) {
 			for (size_t i = 0; i < game_st.max_upgrade_levels.size(); ++i) {
 				v[i] = get_upgrade_type(i)->max_level;
@@ -8444,25 +8780,25 @@ struct game_load_functions : state_functions {
 		// upgrade progress?
 		// UPRP stuff?
 
-		for (auto& v : st.unit_counts) v.fill(0);
-		for (auto& v : st.completed_unit_counts) v.fill(0);
+		st.unit_counts = {};
+		st.completed_unit_counts = {};
 
-		st.factory_counts.fill(0);
-		st.building_counts.fill(0);
-		st.non_building_counts.fill(0);
+		st.factory_counts = {};
+		st.building_counts = {};
+		st.non_building_counts = {};
 
-		st.completed_factory_counts.fill(0);
-		st.completed_building_counts.fill(0);
-		st.completed_non_building_counts.fill(0);
+		st.completed_factory_counts = {};
+		st.completed_building_counts = {};
+		st.completed_non_building_counts = {};
 
-		st.total_buildings_ever_completed.fill(0);
-		st.total_non_buildings_ever_completed.fill(0);
+		st.total_buildings_ever_completed = {};
+		st.total_non_buildings_ever_completed = {};
 
-		st.unit_score.fill(0);
-		st.building_score.fill(0);
+		st.unit_score = {};
+		st.building_score = {};
 
-		for (auto& v : st.supply_used) v.fill(0);
-		for (auto& v : st.supply_available) v.fill(0);
+		st.supply_used = {};
+		st.supply_available = {};
 
 		auto set_acquisition_ranges = [&]() {
 			for (int i = 0; i < 228; ++i) {
@@ -8545,7 +8881,7 @@ struct game_load_functions : state_functions {
 		game_st.max_unit_width = max_unit_width;
 		game_st.max_unit_height = max_unit_height;
 
-		st.random_counts.fill(0);
+		st.random_counts = {};
 		st.total_random_counts = 0;
 		st.lcg_rand_state = 42;
 
@@ -8554,6 +8890,11 @@ struct game_load_functions : state_functions {
 		st.repulse_field.resize(game_st.repulse_field_width * game_st.repulse_field_height);
 
 		st.prev_bullet_source_unit = nullptr;
+
+		st.current_minerals = {};
+		st.current_gas = {};
+		st.total_minerals_gathered = {};
+		st.total_gas_gathered = {};
 
 	}
 

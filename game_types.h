@@ -463,8 +463,8 @@ struct unit_t: flingy_t {
 		xy target_resource_position;
 		unit_t* target_resource_unit;
 		int repair_resource_loss_timer;
-		bool is_carrying_something;
-		int resource_carry_count;
+		bool is_gathering;
+		int resources_carried;
 		unit_t* gather_target;
 		std::pair<unit_t*, unit_t*> gather_link;
 	} worker;
@@ -491,8 +491,6 @@ struct unit_t: flingy_t {
 				int resource_iscript;
 				bool is_being_gathered;
 				intrusive_list<unit_t, worker_gather_link> gather_queue;
-				int resource_group;
-				bool resource_belongs_to_ai;
 			} resource;
 			struct {
 				unit_t* exit;
@@ -510,6 +508,9 @@ struct unit_t: flingy_t {
 			struct {
 				xy origin;
 			} powerup;
+			struct {
+				std::array<int, 4> larva_spawn_side_values;
+			} hatchery;
 		};
 	} building;
 

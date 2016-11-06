@@ -40,7 +40,7 @@ struct unit_type_t {
 
 		flag_two_units_in_one_egg = 0x400,
 		flag_detector = 0x800,
-
+		flag_resource_depot = 0x1000,
 		flag_resource = 0x2000,
 
 		flag_creep = 0x20000,
