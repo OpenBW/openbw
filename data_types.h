@@ -114,6 +114,46 @@ struct unit_type_t {
 using unit_types_t = type_container<unit_type_t>;
 
 struct weapon_type_t {
+	enum {
+		bullet_type_fly,
+		bullet_type_follow_target,
+		bullet_type_appear_at_target_unit,
+		bullet_type_persist_at_target_pos,
+		bullet_type_appear_at_target_pos,
+		bullet_type_appear_at_source_unit,
+		bullet_type_self_destruct,
+		bullet_type_bounce,
+		bullet_type_attack_target_pos,
+		bullet_type_extend_to_max_range
+	};
+	enum {
+		hit_type_none,
+		hit_type_normal,
+		hit_type_radial_splash,
+		hit_type_enemy_splash,
+		hit_type_lockdown,
+		hit_type_nuclear_missile,
+		hit_type_parasite,
+		hit_type_broodlings,
+		hit_type_emp_shockwave,
+		hit_type_irradiate,
+		hit_type_ensnare,
+		hit_type_plague,
+		hit_type_stasis_field,
+		hit_type_dark_swarm,
+		hit_type_consume,
+		hit_type_yamato_gun,
+		hit_type_restoration,
+		hit_type_disruption_web,
+		hit_type_corrosive_acid,
+		hit_type_mind_control,
+		hit_type_feedback,
+		hit_type_optical_flare,
+		hit_type_maelstrom,
+		hit_type_23,
+		hit_type_air_splash
+	};
+
 	int id;
 
 	int label;
@@ -123,19 +163,19 @@ struct weapon_type_t {
 	int min_range;
 	int max_range;
 	upgrade_type_t* damage_upgrade;
-	int weapon_type;
-	int weapon_behavior;
-	int remove_after;
-	int explosion_type;
+	int damage_type;
+	int bullet_type;
+	int lifetime;
+	int hit_type;
 	int inner_splash_radius;
 	int medium_splash_radius;
 	int outer_splash_radius;
 	int damage_amount;
 	int damage_bonus;
 	int cooldown;
-	int damage_factor;
+	int bullet_count;
 	fp8 attack_angle;
-	int launch_spin;
+	direction_t bullet_heading_offset;
 	int forward_offset;
 	int upward_offset;
 	int target_error_message;
@@ -213,7 +253,7 @@ struct image_type_t {
 	bool has_directional_frames;
 	bool is_clickable;
 	bool has_iscript_animations;
-	bool hidden_until_unit_completed;
+	bool always_visible;
 	int modifier;
 	int color_shift;
 	int iscript_id;
@@ -230,13 +270,14 @@ using image_types_t = type_container<image_type_t>;
 struct order_type_t {
 	int id;
 
+	int label;
 	int use_weapon_targeting;
 	int background;
 	int unused3;
 	bool valid_for_turret;
 	int unused5;
 	bool can_be_interrupted;
-	int unk7;
+	bool unk7;
 	bool can_be_queued;
 	int unk9;
 	bool can_be_obstructed;
@@ -324,7 +365,7 @@ namespace iscript_opcodes {
 		opc___43,
 		opc_dogrddamage
 	};
-};
+}
 namespace iscript_anims {
 	enum {
 		Init,
@@ -356,7 +397,7 @@ namespace iscript_anims {
 		UnBurrow,
 		Enable
 	};
-};
+}
 
 struct iscript_t {
 	struct script {

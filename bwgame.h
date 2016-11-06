@@ -211,8 +211,12 @@ struct state_base_copyable {
 	rect viewport;
 
 	size_t allocated_order_count;
+	size_t active_bullets_size;
 
 	a_vector<uint8_t> repulse_field;
+
+	const unit_t* prev_bullet_source_unit;
+	bool prev_bullet_heading_offset_clockwise;
 };
 
 struct state_base_non_copyable {
@@ -229,7 +233,12 @@ struct state_base_non_copyable {
 	intrusive_list<unit_t, default_link_f> destroyed_units;
 	intrusive_list<unit_t, default_link_f> free_units;
 
+	intrusive_list<bullet_t, default_link_f> active_bullets;
+
 	a_vector<unit_t> units = a_vector<unit_t>(1700);
+
+	intrusive_list<bullet_t, default_link_f> free_bullets;
+	a_list<bullet_t> bullets;
 
 	std::array<intrusive_list<unit_t, intrusive_list_member_link<unit_t, &unit_t::player_units_link>>, 12> player_units;
 
@@ -267,8 +276,9 @@ struct state_functions {
 
 	bool allow_random = false;
 	bool update_tiles = false;
+	flingy_t* iscript_flingy = nullptr;
+	bullet_t* iscript_bullet = nullptr;
 	unit_t* iscript_unit = nullptr;
-	unit_t* iscript_order_unit = nullptr;
 	mutable bool unit_finder_search_active = false;
 
 	const order_type_t* get_order_type(int id) const {
@@ -276,17 +286,22 @@ struct state_functions {
 		return &global_st.order_types.vec[id];
 	}
 
-	struct iscript_unit_setter {
-		unit_t*& iscript_unit;
-		unit_t* prev_iscript_unit;
-		iscript_unit_setter(state_functions* sf, unit_t* new_iscript_unit) : iscript_unit(sf->iscript_unit) {
-			prev_iscript_unit = iscript_unit;
-			iscript_unit = new_iscript_unit;
+	template<typename T>
+	struct thingy_setter {
+		T& thingy;
+		T prev_thingy;
+		thingy_setter(T& thingy, T new_thingy) : thingy(thingy) {
+			prev_thingy = std::move(thingy);
+			thingy = std::move(new_thingy);
 		}
-		~iscript_unit_setter() {
-			iscript_unit = prev_iscript_unit;
+		~thingy_setter() {
+			thingy = std::move(prev_thingy);
 		}
 	};
+	template<typename T, typename T2>
+	auto make_thingy_setter(T& thingy, T2&& new_thingy) {
+		return thingy_setter<T>(thingy, std::forward<T2>(new_thingy));
+	}
 
 	void u_set_status_flag(unit_t* u, unit_t::status_flags_t flag) {
 		u->status_flags |= flag;
@@ -465,6 +480,10 @@ struct state_functions {
 		if ((size_t)id >= 999) xcept("invalid image id %d", id);
 		return &global_st.image_types.vec[id];
 	}
+	const weapon_type_t* get_weapon_type(int id) const {
+		if ((size_t)id >= 130) xcept("invalid weapon id %d", id);
+		return &game_st.weapon_types.vec[id];
+	}
 
 	unit_t* get_unit(unit_id id) const {
 		size_t idx = id.index();
@@ -473,6 +492,7 @@ struct state_functions {
 		if (actual_index >= st.units.size()) xcept("attempt to dereference invalid unit id %d (actual index %d)", idx, actual_index);
 		unit_t* u = &st.units[actual_index];
 		if (u->unit_id_generation != id.generation()) return nullptr;
+		if (unit_dead(u)) return nullptr;
 		return u;
 	}
 
@@ -497,6 +517,10 @@ struct state_functions {
 	}
 	bool is_in_map_bounds(xy pos) const {
 		return (size_t)pos.x < game_st.map_width && (size_t)pos.y < game_st.map_height;
+	}
+
+	bool is_in_bounds(xy pos, rect bounds) const {
+		return pos >= bounds.from && pos < bounds.to;
 	}
 
 	rect translate_rect(rect src, xy translation) {
@@ -550,7 +574,7 @@ struct state_functions {
 			size_t uy = pos.y;
 			size_t megatile_index = st.tiles_mega_tile_index[index];
 			int flags = game_st.vf4.at(megatile_index).flags[uy / 8 % 4 * 4 + ux / 8 % 4];
-			return flags & MiniTileFlags::Walkable;
+			return flags & vf4_entry::flag_walkable;
 		}
 		if (tile.flags & tile_t::flag_walkable) return true;
 		return false;
@@ -613,7 +637,7 @@ struct state_functions {
 		size_t r = 0;
 		for (auto id : u->loaded_units) {
 			unit_t* nu = get_unit(id);
-			if (!nu || unit_dead(nu)) continue;
+			if (!nu) continue;
 			r += nu->unit_type->space_required;;
 		}
 		return r;
@@ -659,10 +683,17 @@ struct state_functions {
 		u->energy = std::min(energy, unit_max_energy(u));
 	}
 
+	bool is_mineral_field(const unit_type_t* unit_type) {
+		if (unit_type->id == UnitTypes::Resource_Mineral_Field) return true;
+		if (unit_type->id == UnitTypes::Resource_Mineral_Field_Type_2) return true;
+		if (unit_type->id == UnitTypes::Resource_Mineral_Field_Type_3) return true;
+		return false;
+	}
+
 	void set_unit_resources(unit_t* u, int resources) {
 		if (ut_resource(u)) return;
 		u->building.resource.resource_count = resources;
-		if (u->unit_type->id >= UnitTypes::Resource_Mineral_Field && u->unit_type->id <= UnitTypes::Resource_Mineral_Field_Type_3) {
+		if (is_mineral_field(u->unit_type)) {
 			int anim = iscript_anims::WorkingToIdle;
 			if (resources < 250) anim = iscript_anims::SpecialState1;
 			else if (resources < 500) anim = iscript_anims::SpecialState2;
@@ -706,10 +737,10 @@ struct state_functions {
 		if (!image && u->subunit) image = find_image(u->subunit->sprite, first, last);
 		if (image) iscript_run_anim(image, iscript_anims::Death);
 		if (ut_worker(u) && !still_disabled) {
-			unit_t*target = u->worker.harvest_target;
+			unit_t* target = u->worker.gather_target;
 			if (target && ut_resource(target)) {
 				if (u->worker.is_carrying_something) {
-					if (target->building.resource.gather_queue_count) {
+					if (target->building.resource.is_being_gathered) {
 						xcept("disable_effect_end fixme");
 					}
 				}
@@ -775,7 +806,7 @@ struct state_functions {
 		}
 		if (u->storm_timer) --u->storm_timer;
 		int prev_acidSporeCount = u->acid_spore_count;
-		for (auto&v : u->acid_spore_time) {
+		for (auto& v : u->acid_spore_time) {
 			if (!v) continue;
 			--v;
 			if (!v) --u->acid_spore_count;
@@ -982,6 +1013,10 @@ struct state_functions {
 		return true;
 	}
 
+	bool unit_position_is_visible(const unit_t* u, xy position) const {
+		return (st.tiles[tile_index(position)].visible & (1 << u->owner)) == 0;
+	}
+
 	const regions_t::region* get_region_at(xy pos) const {
 		size_t index = game_st.regions.tile_region_index.at((size_t)pos.y / 32 * 256 + (size_t)pos.x / 32);
 		if (index >= 0x2000) {
@@ -1104,7 +1139,7 @@ struct state_functions {
 		typename decltype(x)::raw_unsigned_type uv = x.raw_value;
 		size_t r = std::lower_bound(tan_table.begin(), tan_table.end(), uv) - tan_table.begin();
 		return negative ? -direction_t::from_raw((direction_t::raw_type)r) : direction_t::from_raw((direction_t::raw_type)r);
-	};
+	}
 
 	direction_t xy_direction(xy_fp8 pos) const {
 		if (pos.x == fp8::zero()) return pos.y <= fp8::zero() ? direction_t::zero() : direction_t::from_raw(-128);
@@ -1188,7 +1223,7 @@ struct state_functions {
 		return r;
 	}
 
-	int unit_target_movement_range(const unit_t* u, const unit_t* target) const {
+	int unit_target_movement_range(const flingy_t* u, const flingy_t* target) const {
 		if (!u_movement_flag(u, 2)) return 0;
 		if (u_movement_flag(target, 2)) {
 			if (fp8::extend(target->next_velocity_direction - u->next_velocity_direction).abs() <= fp8::from_raw(32)) return 0;
@@ -1219,7 +1254,7 @@ struct state_functions {
 	unit_t* unit_first_loaded_unit(const unit_t* u) const {
 		for (size_t i = 0; i != u->unit_type->space_provided; ++i) {
 			unit_t* nu = get_unit(u->loaded_units.at(i));
-			if (!nu || unit_dead(nu)) continue;
+			if (!nu) continue;
 			return nu;
 		}
 		return nullptr;
@@ -1356,22 +1391,125 @@ struct state_functions {
 		} else set_unit_order(u, u->unit_type->return_to_idle);
 	}
 
+	void set_next_target_waypoint(flingy_t* u, xy pos) {
+		if (u->next_target_waypoint == pos) return;
+		u->next_target_waypoint = pos;
+	}
+
+	void set_unit_gathering(unit_t* u) {
+		if (u_gathering(u)) return;
+		u_set_status_flag(u, unit_t::status_flag_gathering);
+		queue_order_front(u, get_order_type(Orders::ResetHarvestCollision), {});
+	}
+
+	bool any_neighbor_tile_unoccupied(const unit_t* u) const {
+		auto unit_bb = unit_sprite_inner_bounding_box(u);
+		rect_t<xy_t<size_t>> tile_bb;
+		tile_bb.from.x = unit_bb.from.x / 32u - 1;
+		tile_bb.from.y = unit_bb.from.y / 32u - 1;
+		tile_bb.to.x = unit_bb.to.x / 32u + 1;
+		tile_bb.to.y = unit_bb.to.y / 32u + 1;
+		if (tile_bb.from.x >= game_st.map_tile_width) tile_bb.from.x = 0;
+		if (tile_bb.from.y >= game_st.map_tile_height) tile_bb.from.y = 0;
+		if (tile_bb.to.x >= game_st.map_tile_width) tile_bb.to.x = game_st.map_tile_width - 1;
+		if (tile_bb.to.y >= game_st.map_tile_height) tile_bb.to.y = game_st.map_tile_height - 1;
+		size_t tile_width = (u->unit_type->dimensions.from.x + u->unit_type->dimensions.to.x + 1) / 32u;
+		size_t tile_height = (u->unit_type->dimensions.from.y + u->unit_type->dimensions.to.y + 1) / 32u;
+		size_t top_index = tile_bb.from.y * game_st.map_tile_width + tile_bb.from.x;
+		size_t bottom_index = tile_bb.to.y * game_st.map_tile_width + tile_bb.from.x;
+		for (size_t i = 0; i != tile_width; ++i) {
+			if (~st.tiles.at(top_index).flags & tile_t::flag_occupied) return true;
+			if (~st.tiles.at(bottom_index).flags & tile_t::flag_occupied) return true;
+			++top_index;
+			++bottom_index;
+		}
+		size_t left_index = tile_bb.from.y * game_st.map_tile_width + tile_bb.from.x;
+		size_t right_index = tile_bb.from.y * game_st.map_tile_width + tile_bb.to.x;
+		for (size_t i = 0; i != tile_height; ++i) {
+			if (~st.tiles.at(left_index).flags & tile_t::flag_occupied) return true;
+			if (~st.tiles.at(right_index).flags & tile_t::flag_occupied) return true;
+			left_index += game_st.map_tile_width;
+			right_index += game_st.map_tile_width;
+		}
+		log("any_neighbor_tile_unoccupied failed\n");
+		return false;
+	}
+
+	bool unit_pos_is_bordering_target(const unit_t* u, xy pos, const unit_t* target) {
+		auto bb = unit_sprite_inner_bounding_box(target);
+		bb.from -= target->unit_type->dimensions.to + xy(1, 1);
+		bb.to += target->unit_type->dimensions.from + xy(1, 1);
+		if (pos.x == bb.from.x || pos.x == bb.to.x) {
+			if (pos.y >= bb.from.y && pos.y <= bb.to.y) {
+				return true;
+			}
+		}
+		if (pos.y == bb.from.y || pos.y == bb.to.y) {
+			if (pos.x >= bb.from.x && pos.x <= bb.to.x) {
+				return false;
+			}
+		}
+		return false;
+	}
+
+	void move_to_target(unit_t* u, unit_t* target) {
+		if (u->move_target.unit == target && u->move_target.pos == target->sprite->position) {
+			u_unset_status_flag(u, unit_t::status_flag_immovable);
+		} else if (unit_pos_is_bordering_target(u, u->move_target.pos, target)) {
+			u_unset_status_flag(u, unit_t::status_flag_immovable);
+		} else {
+			set_unit_move_target(u, target);
+		}
+	}
+
+	void move_to_target_reset(unit_t* u, unit_t* target) {
+		move_to_target(u, target);
+		set_next_target_waypoint(u, target->sprite->position);
+	}
+
+	bool try_gather_resource(unit_t* u, unit_t* target) {
+		if (target->building.resource.is_being_gathered) return false;
+		target->building.resource.is_being_gathered = true;
+		u->worker.gather_target = target;
+		u->worker.is_carrying_something = true;
+		if (u->order_type->id == Orders::WaitForGas) {
+			queue_order_front(u, get_order_type(Orders::HarvestGas), order_target_t(target));
+		} else {
+			queue_order_front(u, get_order_type(Orders::Harvest3), order_target_t(target));
+			queue_order_front(u, get_order_type(Orders::MiningMinerals), order_target_t(target));
+			idle(u);
+			return true;
+		}
+		return false;
+	}
+
+	void wait_for_resource(unit_t* u, unit_t* target) {
+		u->order_queue_timer = 0;
+		u->order_state = 2;
+		if (!try_gather_resource(u, target)) {
+			if (!u->worker.target_resource_unit) {
+				u->worker.gather_target = target;
+				target->building.resource.gather_queue.push_front(*u);
+			}
+			queue_order_front(u, get_order_type(Orders::Harvest4), order_target_t(target));
+		}
+	}
+
+	bool is_facing_next_target_waypoint(const unit_t* u) const {
+		if (u->position == u->next_target_waypoint) return true;
+		if (u->heading == xy_direction(u->next_target_waypoint - u->sprite->position)) return true;
+		return false;
+	}
+
 	void order_destroy(unit_t* u) {
 		xcept("order destroy %p\n", u);
 	}
 
 	void order_Stop(unit_t* u) {
 		stop_unit(u);
-		if (u->move_target.pos != u->next_target_waypoint) {
-			u->next_target_waypoint = u->move_target.pos;
-		}
+		set_next_target_waypoint(u, u->move_target.pos);
 		iscript_run_to_idle(u);
-		if (!u->order_queue.empty()) {
-			u->user_action_flags |= 1;
-			activate_next_order(u);
-		} else {
-			set_unit_order(u, u->unit_type->return_to_idle);
-		}
+		idle(u);
 	}
 
 	void order_Guard(unit_t* u) {
@@ -1384,9 +1522,7 @@ struct state_functions {
 			if (u->main_order_timer == 0) {
 				u->main_order_timer = 15;
 				if (ut_turret(u)) {
-					if (u->next_target_waypoint != u->subunit->next_target_waypoint) {
-						u->next_target_waypoint = u->subunit->next_target_waypoint;
-					}
+					set_next_target_waypoint(u, u->subunit->next_target_waypoint);
 				}
 				if (unit_target_acquisition_range(u)) {
 					unit_t* target = find_acquire_target(u);
@@ -1397,9 +1533,7 @@ struct state_functions {
 	}
 
 	void order_TurretGuard(unit_t* u) {
-		if (u->next_target_waypoint != u->subunit->next_target_waypoint) {
-			u->next_target_waypoint = u->subunit->next_target_waypoint;
-		}
+		set_next_target_waypoint(u, u->subunit->next_target_waypoint);
 		order_PlayerGuard(u);
 	}
 
@@ -1409,9 +1543,7 @@ struct state_functions {
 				xcept("fixme move to unit");
 			} else {
 				set_unit_move_target(u, u->order_target.pos);
-				if (u->order_target.pos != u->next_target_waypoint) {
-					u->next_target_waypoint = u->order_target.pos;
-				}
+				set_next_target_waypoint(u, u->order_target.pos);
 				u->order_state = 1;
 			}
 		} else {
@@ -1424,6 +1556,125 @@ struct state_functions {
 	void order_Nothing(unit_t* u) {
 		if (!u->order_queue.empty()) {
 			activate_next_order(u);
+		}
+	}
+
+	void order_MoveToMinerals(unit_t* u) {
+		log("order_MoveToMinerals begin\n");
+		if (u->carrying_flags && (u->carrying_flags & 3) == 0) {
+			stop_unit(u);
+			set_next_target_waypoint(u, u->move_target.pos);
+			idle(u);
+			return;
+		}
+		set_unit_gathering(u);
+
+		auto find_mineral_field = [&](xy pos, int range, bool require_not_being_gathered) {
+			rect area{pos - xy(range, range), pos + xy(range, range)};
+			int ground_height = get_ground_height_at(pos);
+			return find_nearest_unit(pos, area, [&](const unit_t* target) {
+				if (!is_mineral_field(target->unit_type)) return false;
+				if (!any_neighbor_tile_unoccupied(target)) return false;
+				if (!is_reachable(u->sprite->position, target->sprite->position)) return false;
+				if (get_ground_height_at(pos) != ground_height) return false;
+				if (!unit_position_is_visible(u, target->sprite->position)) return false;
+				if (target->pathing_flags & 1) xcept("find_mineral_field fixme");
+				if (require_not_being_gathered && target->building.resource.is_being_gathered) return false;
+				return true;
+			});
+		};
+
+		unit_t* target = u->order_target.unit;
+		if (!target || !is_mineral_field(target->unit_type)) {
+			xy search_pos = u->sprite->position;
+			if (u->worker.target_resource_position != xy()) {
+				search_pos = u->worker.target_resource_position;
+				u->worker.target_resource_position = {};
+			}
+			target = find_mineral_field(search_pos, 32 * 12, false);
+			if (!target) {
+				stop_unit(u);
+				set_next_target_waypoint(u, u->move_target.pos);
+				idle(u);
+				return;
+			}
+			u->order_target.pos = target->sprite->position;
+			u->order_target.unit = target;
+			u->order_state = 0;
+		}
+		if (!ut_resource(target)) xcept("MoveToMinerals: target is not a resource");
+		if (u->order_state == 0) {
+			move_to_target_reset(u, u->order_target.unit);
+			u->worker.target_resource_position = u->order_target.pos;
+			u->worker.target_resource_unit = u->order_target.unit;
+			u->order_state = 1;
+		} else {
+			if (u->order_state == 1) {
+				if (!unit_target_in_range(u, target, 10) && !unit_is_at_move_target(u)) return;
+				if (target->building.resource.is_being_gathered) {
+					unit_t* new_target = find_mineral_field(u->sprite->position, 32 * 8, true);
+					if (new_target) {
+						move_to_target_reset(u, new_target);
+						u->worker.target_resource_position = new_target->sprite->position;
+						u->worker.target_resource_unit = new_target;
+						return;
+					}
+				}
+				u->order_state = 3;
+			}
+			if (u->order_state == 3) {
+				if (unit_is_at_move_target(u)) {
+					if (u_immovable(u)) {
+						target = find_mineral_field(u->sprite->position, 32 * 12, false);
+						if (target) {
+							move_to_target_reset(u, target);
+							u->worker.target_resource_position = target->sprite->position;
+							u->worker.target_resource_unit = target;
+						} else idle(u);
+					} else {
+						if (u->carrying_flags & 2) {
+							set_unit_order(u, get_order_type(Orders::ReturnMinerals));
+						} else {
+							set_next_target_waypoint(u, u->order_target.pos);
+							order_target_t order_target;
+							order_target.position = target->sprite->position;
+							order_target.unit = target;
+							queue_order_front(u, get_order_type(Orders::WaitForMinerals), order_target);
+							idle(u);
+						}
+					}
+				}
+			}
+		}
+		log("target %d\n", target - &st.units.front());
+		log("order_MoveToMinerals end\n");
+	}
+
+	void order_WaitForMinerals(unit_t* u) {
+		if (u->order_target.unit && is_mineral_field(u->order_target.unit->unit_type)) {
+			if (u->order_state == 0) {
+				wait_for_resource(u, u->order_target.unit);
+			}
+		} else {
+			set_unit_order(u, get_order_type(Orders::MoveToMinerals));
+		}
+	}
+
+	void order_MiningMinerals(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		if (target && is_mineral_field(target->unit_type)) {
+			set_unit_gathering(u);
+			if (u->order_state == 0) {
+				if (is_facing_next_target_waypoint(u)) {
+					u->order_target.pos = u->sprite->position + to_xy(direction_xy(u->heading, fp8::integer(20)));
+					u->order_state = 4;
+					sprite_run_anim(u->sprite, iscript_anims::AlmostBuilt);
+					u->main_order_timer = 75;
+					u->order_state = 5;
+				}
+			} else xcept("order_state %d", u->order_state);
+		} else {
+			xcept("waa");
 		}
 	}
 
@@ -1734,10 +1985,16 @@ struct state_functions {
 			xcept("ReturnGas");
 			break;
 		case Orders::MoveToMinerals:
-			xcept("MoveToMinerals");
+			order_MoveToMinerals(u);
 			break;
 		case Orders::WaitForMinerals:
-			xcept("WaitForMinerals");
+			order_WaitForMinerals(u);
+			break;
+		case Orders::MiningMinerals:
+			order_MiningMinerals(u);
+			break;
+		case Orders::Harvest3:
+			xcept("Harvest3");
 			break;
 		case Orders::Harvest4:
 			xcept("Harvest4");
@@ -2007,7 +2264,7 @@ struct state_functions {
 		execute_secondary_order(u);
 
 		if (u->subunit && !ut_turret(u)) {
-			iscript_unit_setter ius(this, u->subunit);
+			auto ius = make_thingy_setter(iscript_unit, u->subunit);
 			update_unit(u->subunit);
 		}
 
@@ -2017,12 +2274,9 @@ struct state_functions {
 
 		if (!u->sprite) xcept("unit has null sprite");
 
-	};
+	}
 
-// 	int unit_movepos_state(const unit_t* u) const {
-// 		if (u->sprite->position != u->move_target.pos) return 0;
-// 		return u_immovable(u) ? 2 : 1;
-// 	};
+
 	bool unit_is_at_move_target(const flingy_t* u) const {
 		return u->sprite->position == u->move_target.pos;
 	}
@@ -2076,7 +2330,7 @@ struct state_functions {
 	bool unit_target_is_enemy(const unit_t* u, const unit_t* target) const {
 		int n_owner = target->owner;
 		if (n_owner == 11) n_owner = target->sprite->owner;
-		return st.alliances[u->owner][target->owner] == 0;
+		return st.alliances[u->owner][n_owner] == 0;
 	}
 
 	unit_t* get_largest_blocking_unit(const unit_t* u, rect bounds) const {
@@ -2102,11 +2356,11 @@ struct state_functions {
 		return std::make_pair(true, largest_unit);
 	}
 
-	void set_flingy_move_target(flingy_t* u, xy move_target) {
-		if (u->move_target.pos == move_target) return;
-		u->move_target.pos = move_target;
-		u->move_target.unit = nullptr;
-		u->next_movement_waypoint = move_target;
+	void set_flingy_move_target(flingy_t* u, xy target_pos, unit_t* target_unit = nullptr) {
+		if (u->move_target.pos == target_pos) return;
+		u->move_target.pos = target_pos;
+		u->move_target.unit = target_unit;
+		u->next_movement_waypoint = target_pos;
 		u_unset_movement_flag(u, 4);
 		u_set_movement_flag(u, 1);
 	}
@@ -2122,7 +2376,21 @@ struct state_functions {
 		set_flingy_move_target(u, move_target);
 		if (u_immovable(u)) u_unset_status_flag(u, unit_t::status_flag_immovable);
 		u->recent_order_timer = 15;
-		if (!u->order_queue.empty() && u->order_queue.front().order_type->unk7) {
+		if (!u->order_queue.empty() && !u->order_queue.front().order_type->unk7) {
+			u_set_movement_flag(u, 0x20);
+		} else {
+			u_unset_movement_flag(u, 0x20);
+		}
+	}
+
+	void set_unit_move_target(unit_t* u, unit_t* target) {
+		xy target_pos = target->sprite->position;
+		if (u->move_target.pos == target_pos && u->move_target.unit == target) return;
+		if (u->path) u->path->state_flags |= 1;
+		set_flingy_move_target(u, target_pos, target);
+		if (u_immovable(u)) u_unset_status_flag(u, unit_t::status_flag_immovable);
+		u->recent_order_timer = 15;
+		if (!u->order_queue.empty() && !u->order_queue.front().order_type->unk7) {
 			u_set_movement_flag(u, 0x20);
 		} else {
 			u_unset_movement_flag(u, 0x20);
@@ -2686,7 +2954,7 @@ struct state_functions {
 
 	struct pathfinder {
 		unit_t* u = nullptr;
-		unit_t* target_unit = nullptr;
+		const unit_t* target_unit = nullptr;
 		xy source;
 		const regions_t::region* source_region = nullptr;
 		const regions_t::region* destination_region = nullptr;
@@ -2961,7 +3229,7 @@ struct state_functions {
 
 		struct pf_search {
 			unit_t* u = nullptr;
-			unit_t* target_unit = nullptr;
+			const unit_t* target_unit = nullptr;
 			std::array<int, 4> inner;
 			std::array<int, 4> outer;
 			rect target_unit_bb;
@@ -3294,7 +3562,6 @@ struct state_functions {
 						is_goal = true;
 					}
 				}
-
 			} else if (pos == target) is_goal = true;
 			if (is_goal) {
 				flags = 0xff;
@@ -5094,6 +5361,7 @@ struct state_functions {
 				u->movement_state = movement_states::UM_WaitFree;
 				break;
 			case 7:
+				collision_get_slide_free_direction(u, collision_unit, slide_free_direction);
 				u->path->slide_free_direction = slide_free_direction;
 				u->movement_state = movement_states::UM_SlidePrep;
 				break;
@@ -5243,6 +5511,10 @@ struct state_functions {
 		return false;
 	}
 
+	bool movement_UM_Lump(unit_t* u, execute_movement_struct& ems) {
+		return false;
+	}
+
 	bool execute_movement(unit_t* u) {
 		execute_movement_struct ems;
 		ems.refresh_vision = update_tiles;
@@ -5257,7 +5529,9 @@ struct state_functions {
 			case movement_states::UM_InitSeq:
 				cont = movement_UM_InitSeq(u, ems);
 				break;
-
+			case movement_states::UM_Lump:
+				cont = movement_UM_Lump(u, ems);
+				break;
 			case movement_states::UM_Turret:
 				cont = movement_UM_Turret(u, ems);
 				break;
@@ -5432,7 +5706,6 @@ struct state_functions {
 		for (auto idx : u->loaded_units) {
 			unit_t* lu = get_unit(idx);
 			if (!lu || !lu->sprite) continue;
-			if (unit_dead(lu)) continue;
 			if (!ut_worker(lu)) continue;
 			if (lu->worker.powerup && lu->worker.powerup->unit_type->id == UnitTypes::Powerup_Flag) return true;
 		}
@@ -5450,12 +5723,12 @@ struct state_functions {
 		size_t index = tile_index(pos);
 		tile_id creep_tile = st.gfx_creep_tiles.at(index);
 		tile_id tile_id = creep_tile ? creep_tile : game_st.gfx_tiles.at(index);
-		size_t megatile_index = game_st.cv5.at(tile_id.group_index()).megaTileRef[tile_id.subtile_index()];
+		size_t megatile_index = game_st.cv5.at(tile_id.group_index()).mega_tile_index[tile_id.subtile_index()];
 		size_t ux = pos.x;
 		size_t uy = pos.y;
 		int flags = game_st.vf4.at(megatile_index).flags[uy / 8 % 4 * 4 + ux / 8 % 4];
-		if (flags&MiniTileFlags::High) return 2;
-		if (flags&MiniTileFlags::Middle) return 1;
+		if (flags & vf4_entry::flag_high) return 2;
+		if (flags & vf4_entry::flag_middle) return 1;
 		return 0;
 	}
 
@@ -5569,7 +5842,7 @@ struct state_functions {
 			u->subunit->position = to_xy(u->exact_position);
 			move_sprite(u->subunit->sprite, u->subunit->position);
 			set_image_offset(u->subunit->sprite->main_image, get_image_lo_offset(u->sprite->main_image, 2, 0));
-			iscript_unit_setter ius(this, u->subunit);
+			auto ius = make_thingy_setter(iscript_unit, u->subunit);
 			if (!u_movement_flag(u, 2)) {
 				if (u_status_flag(u->subunit, (unit_t::status_flags_t)0x1000000)) {
 					u_unset_status_flag(u->subunit, (unit_t::status_flags_t)0x1000000);
@@ -5720,7 +5993,7 @@ struct state_functions {
 
 	void update_hidden_unit(unit_t* u) {
 		if (u->subunit && !ut_turret(u)) {
-			iscript_unit_setter ius(this, u->subunit);
+			auto ius = make_thingy_setter(iscript_unit, u->subunit);
 			update_hidden_unit(u->subunit);
 		}
 		execute_movement(u);
@@ -5782,7 +6055,7 @@ struct state_functions {
 	}
 
 	void remove_target_references(unit_t* u, const unit_t* target) {
-		auto test = [&](unit_t*& ref) {
+		auto test = [&](auto*& ref) {
 			if (ref == target) ref = nullptr;
 		};
 		test(u->current_build_unit);
@@ -5793,8 +6066,9 @@ struct state_functions {
 		test(u->irradiated_by);
 		if (ut_worker(u)) {
 			test(u->worker.target_resource_unit);
-			if (u->worker.repair_resource_loss_timer) {
-				test(u->worker.harvest_target);
+			if (u->worker.is_carrying_something) {
+				u->worker.is_carrying_something = false;
+				test(u->worker.gather_target);
 			}
 		} else if (ut_flag(u, (unit_type_t::flags_t)2)) {
 			xcept("fixme: verify this flag");
@@ -5898,7 +6172,7 @@ struct state_functions {
 		}
 
 		for (unit_t* u : ptr(st.visible_units)) {
-			iscript_order_unit = u;
+			iscript_flingy = u;
 			iscript_unit = u;
 			//log("move unit %d --\n", u - &st.units.front());
 			update_unit_movement(u);
@@ -5923,13 +6197,13 @@ struct state_functions {
 		}
 
 		for (unit_t* u : ptr(st.visible_units)) {
-			iscript_order_unit = u;
+			iscript_flingy = u;
 			iscript_unit = u;
 			update_unit(u);
 		}
 
 		for (unit_t* u : ptr(st.hidden_units)) {
-			iscript_order_unit = u;
+			iscript_flingy = u;
 			iscript_unit = u;
 			update_hidden_unit(u);
 		}
@@ -5938,13 +6212,28 @@ struct state_functions {
 		// some lurker stuff
 
 		for (unit_t* u : ptr(st.scanner_sweep_units)) {
-			iscript_order_unit = u;
+			iscript_flingy = u;
 			iscript_unit = u;
 			update_unit(u);
 		}
 
-		iscript_order_unit = nullptr;
+		iscript_flingy = nullptr;
 		iscript_unit = nullptr;
+	}
+
+	void update_bullets() {
+
+		for (bullet_t* b : ptr(st.active_bullets)) {
+			iscript_bullet = b;
+			iscript_flingy = b;
+			if (b->sprite) {
+				if (!iscript_execute_sprite(b->sprite)) b->sprite = nullptr;
+			}
+			bullet_execute(b);
+		}
+		iscript_bullet = nullptr;
+		iscript_flingy = nullptr;
+
 	}
 
 	void process_frame() {
@@ -5962,6 +6251,7 @@ struct state_functions {
 		}
 
 		update_units();
+		update_bullets();
 
 		allow_random = false;
 
@@ -6186,6 +6476,174 @@ struct state_functions {
 		image->iscript_state.current_script = &i->second;
 	}
 
+	bool is_spell(const weapon_type_t* weapon_type) {
+		int id = weapon_type->id;
+		if (id == WeaponTypes::Spider_Mines) return true;
+		if (id == WeaponTypes::Lockdown) return true;
+		if (id == WeaponTypes::EMP_Shockwave) return true;
+		if (id == WeaponTypes::Irradiate) return true;
+		if (id == 50) return true;
+		if (id == 51) return true;
+		if (id == WeaponTypes::Suicide_Infested_Terran) return true;
+		if (id == WeaponTypes::Parasite) return true;
+		if (id == WeaponTypes::Spawn_Broodlings) return true;
+		if (id == WeaponTypes::Ensnare) return true;
+		if (id == WeaponTypes::Dark_Swarm) return true;
+		if (id == WeaponTypes::Plague) return true;
+		if (id == WeaponTypes::Consume) return true;
+		if (id == 68) return true;
+		if (id == WeaponTypes::Psi_Assault) return true;
+		if (id == WeaponTypes::Scarab) return true;
+		if (id == WeaponTypes::Stasis_Field) return true;
+		if (id == WeaponTypes::Psionic_Storm) return true;
+		if (id == WeaponTypes::Restoration) return true;
+		if (id == WeaponTypes::Mind_Control) return true;
+		if (id == WeaponTypes::Feedback) return true;
+		if (id == WeaponTypes::Optical_Flare) return true;
+		if (id == WeaponTypes::Maelstrom) return true;
+		return false;
+	}
+
+	void bullet_hit(bullet_t* b) {
+		switch (b->weapon_type->hit_type) {
+		case weapon_type_t::hit_type_none:
+			break;
+		default: xcept("unknown bullet hit type %d", b->weapon_type->hit_type);
+		}
+	}
+
+	void bullet_update_target_pos(bullet_t* b) {
+		if (!b->bullet_target.unit) return;
+		b->bullet_target.pos = b->bullet_target.unit->sprite->position;
+	}
+
+	void bullet_kill(bullet_t* b) {
+		b->bullet_state = bullet_t::state_dying;
+		bullet_update_target_pos(b);
+		sprite_run_anim(b->sprite, iscript_anims::Death);
+	}
+
+	bool bullet_state_init(bullet_t* b) {
+		if (~b->order_signal & 1) return false;
+		b->order_signal &= 1;
+		switch (b->weapon_type->bullet_type) {
+		case weapon_type_t::bullet_type_appear_at_target_unit:
+		case weapon_type_t::bullet_type_persist_at_target_pos:
+		case weapon_type_t::bullet_type_appear_at_source_unit:
+		case weapon_type_t::bullet_type_self_destruct:
+			bullet_kill(b);
+			break;
+		default: xcept("unknown bullet type %d", b->weapon_type->bullet_type);
+		}
+		return true;
+	}
+
+	bool bullet_state_dying(bullet_t* b) {
+		if (b->sprite) return false;
+		--st.active_bullets_size;
+		st.active_bullets.remove(*b);
+		bw_insert_list(st.free_bullets, *b);
+		return false;
+	}
+
+	void bullet_execute(bullet_t* b) {
+		while (true) {
+			bool cont = false;
+			switch (b->bullet_state) {
+			case bullet_t::state_init:
+				cont = bullet_state_init(b);
+				break;
+			case bullet_t::state_dying:
+				cont = bullet_state_dying(b);
+				break;
+			default: xcept("unknown bullet state %d", b->bullet_state);
+			}
+			if (!cont) break;
+		}
+	}
+
+	bool initialize_bullet(bullet_t* b, const weapon_type_t* weapon_type, unit_t* source_unit, xy pos, int owner, direction_t heading) {
+		const flingy_type_t* flingy_type = weapon_type->flingy;
+		if (!flingy_type) xcept("attempt to create bullet with null flingy");
+		if (!initialize_flingy(b, flingy_type, pos, owner, heading)) return false;
+
+		b->movement_flags |= 8;
+		b->bullet_state = 0;
+		b->bullet_target = {};
+		b->order_signal = 0;
+		b->weapon_type = weapon_type;
+		b->remaining_time = weapon_type->lifetime;
+		b->hit_flags = 0;
+		b->remaining_bounces = 0;
+
+		if (weapon_type->bullet_heading_offset != direction_t::zero()) {
+			bool clockwise;
+			if (source_unit == st.prev_bullet_source_unit) clockwise = !st.prev_bullet_heading_offset_clockwise;
+			else clockwise = lcg_rand(weapon_type->id) & 1;
+			direction_t heading_offset = weapon_type->bullet_heading_offset;
+			if (!clockwise) heading_offset = -heading_offset;
+			b->next_velocity_direction += heading_offset;
+			b->heading = b->next_velocity_direction;
+			st.prev_bullet_source_unit = source_unit;
+			st.prev_bullet_heading_offset_clockwise = clockwise;
+		}
+
+		b->source_unit = nullptr;
+		if (ut_turret(source_unit)) b->source_unit = source_unit->subunit;
+		if (source_unit->unit_type->id == UnitTypes::Protoss_Scarab) b->source_unit = source_unit->fighter.parent;
+		if (!b->source_unit) b->source_unit = source_unit;
+
+		if (u_hallucination(source_unit)) b->hit_flags |= 2;
+		b->prev_bounce_unit = nullptr;
+
+		unit_t* target_unit = source_unit->order_target.unit;
+		if (target_unit) {
+			b->sprite->elevation_level = target_unit->sprite->elevation_level + 1;
+			b->bullet_target.unit = target_unit;
+			b->bullet_target.pos = target_unit->sprite->position;
+		} else {
+			b->sprite->elevation_level = source_unit->sprite->elevation_level + 1;
+			b->bullet_target.unit = nullptr;
+			b->bullet_target.pos = source_unit->sprite->position;
+		}
+
+		switch (weapon_type->bullet_type) {
+		case weapon_type_t::bullet_type_appear_at_source_unit:
+			break;
+		default: xcept("unknown bullet_type %d", weapon_type->bullet_type);
+		}
+
+		return true;
+	}
+
+	bullet_t* new_bullet() {
+		if (!st.free_bullets.empty()) {
+			bullet_t* r = &st.free_bullets.front();
+			st.free_bullets.pop_front();
+			return r;
+		}
+		if (st.bullets.size() >= 100) return nullptr;
+		return &*st.bullets.emplace(st.bullets.end());
+	}
+
+	void free_bullet(bullet_t* b) {
+		st.free_bullets.push_front(*b);
+	}
+
+	bullet_t* create_bullet(const weapon_type_t* weapon_type, unit_t* source_unit, xy pos, int owner, direction_t heading) {
+		if (weapon_type->id == WeaponTypes::Halo_Rockets && st.active_bullets_size >= 80) return nullptr;
+		if (u_cannot_attack(source_unit) && !is_spell(weapon_type)) return nullptr;
+		bullet_t* b = new_bullet();
+		if (!b) return nullptr;
+		if (!initialize_bullet(b, weapon_type, source_unit, pos, owner, heading)) {
+			free_bullet(b);
+			return nullptr;
+		}
+		++st.active_bullets_size;
+		bw_insert_list(st.active_bullets, *b);
+		return b;
+	}
+
 	bool iscript_execute(image_t* image, iscript_state_t& state, bool move_only = false, fp8* distance_moved = nullptr) {
 
 		if (state.wait) {
@@ -6218,8 +6676,8 @@ struct state_functions {
 				set_image_heading_by_index(image, dir);
 			}
 			update_image_frame_index(image);
-			if (iscript_unit && (u_grounded_building(iscript_unit) || u_completed(iscript_unit))) {
-				if (!image_type->hidden_until_unit_completed) {
+			if (iscript_unit && (u_burrowed(iscript_unit) || u_in_building(iscript_unit))) {
+				if (!image_type->always_visible) {
 					hide_image(image);
 				} else if (image->modifier == 0) {
 					if (script_image->modifier >= 2 && script_image->modifier <= 7) {
@@ -6232,13 +6690,23 @@ struct state_functions {
 			return image;
 		};
 
+		auto use_weapon = [&](unit_t* u, int weapon_id) {
+			const weapon_type_t* weapon_type = get_weapon_type(weapon_id);
+			if (!weapon_type->flingy) return;
+			create_bullet(weapon_type, u, u->order_target.pos, u->owner, u->heading);
+			if (weapon_type->bullet_count == 2) {
+				create_bullet(weapon_type, u, u->order_target.pos, u->owner, u->heading);
+			}
+		};
+
 		const int* program_data = global_st.iscript.program_data.data();
 		const int* p = program_data + state.program_counter;
 		while (true) {
 			using namespace iscript_opcodes;
-			//size_t pc = p - program_data;
+			size_t pc = p - program_data;
+			if (pc == 0) xcept("iscript: program counter is null");
 			int opc = *p++ - 0x808091;
-			//log("iscript image %d (move_only %d): %04x: opc %d\n", image - st.images.data(), move_only, pc, opc);
+			//if (!move_only) log("iscript image %d type %d: %04x: opc %d\n", image - st.images.data(), image->image_type->id, pc, opc);
 			int a, b, c;
 			switch (opc) {
 			case opc_playfram:
@@ -6343,6 +6811,19 @@ struct state_functions {
 				xcept("opc_playsnd");
 				break;
 
+			case opc_playsndbtwn:
+				a = *p++;
+				b = *p++;
+				if (move_only) break;
+				lcg_rand(5);
+				// todo: callback for sound?
+				break;
+			case opc_domissiledmg:
+			case opc_dogrddamage:
+				if (move_only) break;
+				if (iscript_bullet) bullet_hit(iscript_bullet);
+				break;
+
 			case opc_followmaingraphic:
 				if (move_only) break;
 				if (image_t* main_image = image->sprite->main_image) {
@@ -6365,39 +6846,44 @@ struct state_functions {
 			case opc_turnccwise:
 				a = *p++;
 				if (move_only) break;
-				set_unit_heading(iscript_unit, iscript_unit->heading - direction_t::from_raw(8 * a));
+				if (iscript_unit) set_unit_heading(iscript_unit, iscript_unit->heading - direction_t::from_raw(8 * a));
 				break;
 			case opc_turncwise:
 				a = *p++;
 				if (move_only) break;
-				set_unit_heading(iscript_unit, iscript_unit->heading + direction_t::from_raw(8 * a));
+				if (iscript_unit) set_unit_heading(iscript_unit, iscript_unit->heading + direction_t::from_raw(8 * a));
 				break;
 			case opc_turn1cwise:
 				if (move_only) break;
-				if (!iscript_unit->order_target.unit) set_unit_heading(iscript_unit, iscript_unit->heading + direction_t::from_raw(8));
+				if (iscript_unit && !iscript_unit->order_target.unit) set_unit_heading(iscript_unit, iscript_unit->heading + direction_t::from_raw(8));
 			case opc_turnrand:
 				a = *p++;
 				if (move_only) break;
 				if (lcg_rand(6) % 4 == 1) {
-					set_unit_heading(iscript_unit, iscript_unit->heading - direction_t::from_raw(8 * a));
+					if (iscript_unit) set_unit_heading(iscript_unit, iscript_unit->heading - direction_t::from_raw(8 * a));
 				} else {
-					set_unit_heading(iscript_unit, iscript_unit->heading + direction_t::from_raw(8 * a));
+					if (iscript_unit) set_unit_heading(iscript_unit, iscript_unit->heading + direction_t::from_raw(8 * a));
 				}
 				break;
 
 			case opc_sigorder:
 				a = *p++;
 				if (move_only) break;
-				if (iscript_order_unit) iscript_order_unit->order_signal |= a;
+				if (iscript_flingy) iscript_flingy->order_signal |= a;
 				break;
 
+			case opc_useweapon:
+				a = *p++;
+				if (move_only) break;
+				if (iscript_unit) use_weapon(iscript_unit, a);
+				break;
 			case opc_move:
 				a = *p++;
 				if (distance_moved) {
-					*distance_moved = get_modified_unit_speed(iscript_unit, fp8::integer(a));
+					if (iscript_unit) *distance_moved = get_modified_unit_speed(iscript_unit, fp8::integer(a));
 				}
 				if (move_only) break;
-				set_next_speed(iscript_unit, get_modified_unit_speed(iscript_unit, fp8::integer(a)));
+				if (iscript_unit) set_next_speed(iscript_unit, get_modified_unit_speed(iscript_unit, fp8::integer(a)));
 				break;
 
 			case opc_engframe:
@@ -6415,16 +6901,20 @@ struct state_functions {
 
 			case opc_nobrkcodestart:
 				if (move_only) break;
-				u_set_status_flag(iscript_unit, unit_t::status_flag_iscript_nobrk);
-				iscript_unit->sprite->flags |= sprite_t::flag_iscript_nobrk;
+				if (iscript_unit) {
+					u_set_status_flag(iscript_unit, unit_t::status_flag_iscript_nobrk);
+					iscript_unit->sprite->flags |= sprite_t::flag_iscript_nobrk;
+				}
 				break;
 			case opc_nobrkcodeend:
 				if (move_only) break;
-				u_unset_status_flag(iscript_unit, unit_t::status_flag_iscript_nobrk);
-				iscript_unit->sprite->flags &= ~sprite_t::flag_iscript_nobrk;
-				if (!iscript_unit->order_queue.empty() && iscript_unit->user_action_flags & 1) {
-					iscript_run_to_idle(iscript_unit);
-					activate_next_order(iscript_unit);
+				if (iscript_unit) {
+					u_unset_status_flag(iscript_unit, unit_t::status_flag_iscript_nobrk);
+					iscript_unit->sprite->flags &= ~sprite_t::flag_iscript_nobrk;
+					if (!iscript_unit->order_queue.empty() && iscript_unit->user_action_flags & 1) {
+						iscript_run_to_idle(iscript_unit);
+						activate_next_order(iscript_unit);
+					}
 				}
 				break;
 
@@ -6440,7 +6930,7 @@ struct state_functions {
 			case opc_setfldirect:
 				a = *p++;
 				if (move_only) break;
-				set_unit_heading(iscript_unit, direction_t::from_raw(a * 8));
+				if (iscript_unit) set_unit_heading(iscript_unit, direction_t::from_raw(a * 8));
 				break;
 
 			case opc_setflspeed:
@@ -6468,7 +6958,7 @@ struct state_functions {
 			case opc_orderdone:
 				a = *p++;
 				if (move_only) break;
-				if (iscript_order_unit) iscript_order_unit->order_signal &= ~a;
+				if (iscript_flingy) iscript_flingy->order_signal &= ~a;
 				break;
 
 			default:
@@ -6509,8 +6999,10 @@ struct state_functions {
 			image->modifier_data2 = 3;
 			if (image->modifier_data1 >= 8) {
 				set_image_modifier(image, image->modifier + 1);
-				u_set_status_flag(iscript_unit, unit_t::status_flag_cloaked);
-				u_set_status_flag(iscript_unit, unit_t::status_flag_requires_detector);
+				if (iscript_unit) {
+					u_set_status_flag(iscript_unit, unit_t::status_flag_cloaked);
+					u_set_status_flag(iscript_unit, unit_t::status_flag_requires_detector);
+				}
 				image->flags |= image_t::flag_redraw;
 			}
 		}
@@ -6655,7 +7147,7 @@ struct state_functions {
 		return sprite;
 	}
 
-	bool initialize_flingy(flingy_t* f, const flingy_type_t* flingy_type, xy pos, int owner, direction_t direction) {
+	bool initialize_flingy(flingy_t* f, const flingy_type_t* flingy_type, xy pos, int owner, direction_t heading) {
 		f->flingy_type = flingy_type;
 		f->movement_flags = 0;
 		f->next_speed = fp8::zero();
@@ -6668,11 +7160,10 @@ struct state_functions {
 		f->exact_position = to_xy_fp8(pos);
 
 		set_flingy_move_target(f, pos);
-		if (f->next_target_waypoint != pos) {
-			f->next_target_waypoint = pos;
-		}
-		f->heading = direction;
-		f->next_velocity_direction = direction;
+		set_next_target_waypoint(f, pos);
+		f->heading = heading;
+		f->next_velocity_direction = heading;
+		f->hp = fp8::from_raw(1);
 
 		f->sprite = create_sprite(flingy_type->sprite, pos, owner);
 		if (!f->sprite) return false;
@@ -6736,28 +7227,27 @@ struct state_functions {
 			auto* script = image->iscript_state.current_script;
 			auto& anims_pc = script->animation_pc;
 			int anim = iscript_anims::Walking;
-			// BW just returns if the animation doesn't exist,
-			// so this could be changed to a return statement if it throws
-			if ((size_t)anim >= anims_pc.size()) xcept("script %d does not have animation %d", script->id, anim);
-			iscript_unit_setter ius(this, u);
-			iscript_state_t st;
-			st.current_script = script;
-			st.animation = anim;
-			st.program_counter = anims_pc[anim];
-			st.return_address = 0;
-			st.wait = 0;
-			fp8 total_distance_moved {};
-			for (int i = 0; i < 32; ++i) {
-				fp8 distance_moved {};
-				iscript_execute(image, st, true, &distance_moved);
-				// This get_modified_unit_acceleration is very out of place, and
-				// it makes the stored flingy_top_speed value wrong. But BroodWar does it.
-				// It's probably a bug, but the value might not be used for anything
-				// significant.
-				total_distance_moved += get_modified_unit_acceleration(u, distance_moved);
+			if ((size_t)anim < anims_pc.size() && anims_pc[anim] != 0) {
+				auto ius = make_thingy_setter(iscript_unit, u);
+				iscript_state_t st;
+				st.current_script = script;
+				st.animation = anim;
+				st.program_counter = anims_pc[anim];
+				st.return_address = 0;
+				st.wait = 0;
+				fp8 total_distance_moved {};
+				for (int i = 0; i < 32; ++i) {
+					fp8 distance_moved {};
+					iscript_execute(image, st, true, &distance_moved);
+					// This get_modified_unit_acceleration is very out of place, and
+					// it makes the stored flingy_top_speed value wrong. But BroodWar does it.
+					// It's probably a bug, but the value might not be used for anything
+					// significant.
+					total_distance_moved += get_modified_unit_acceleration(u, distance_moved);
+				}
+				auto avg_distance_moved = total_distance_moved / 32;
+				u->flingy_top_speed = avg_distance_moved;
 			}
-			auto avg_distance_moved = total_distance_moved / 32;
-			u->flingy_top_speed = avg_distance_moved;
 		} else {
 			u->flingy_top_speed = get_modified_unit_speed(u, u->flingy_type->top_speed);
 			u->flingy_acceleration = get_modified_unit_acceleration(u, u->flingy_type->acceleration);
@@ -6959,14 +7449,114 @@ struct state_functions {
 	}
 
 	template<typename F>
-	unit_t* find_unit(rect area, const F& predicate) const {
+	unit_t* find_unit(rect area, F&& predicate) const {
 		for (unit_t* u : find_units(area)) {
 			if (predicate(u)) return u;
 		}
 		return nullptr;
 	}
 
-	bool unit_is_factory(unit_t* u) {
+	template<typename F>
+	unit_t* find_nearest_unit(xy pos, rect search_area, F&& predicate) const {
+
+		auto cmp_l = [&](auto& a, int b) {
+			return a.value < b;
+		};
+		auto x_i = std::lower_bound(st.unit_finder_x.begin(), st.unit_finder_x.end(), pos.x, cmp_l);
+		auto y_i = std::lower_bound(st.unit_finder_y.begin(), st.unit_finder_y.end(), pos.y, cmp_l);
+
+		const auto x_begin = st.unit_finder_x.begin();
+		const auto y_begin = st.unit_finder_y.begin();
+		const auto x_end = st.unit_finder_x.end();
+		const auto y_end = st.unit_finder_y.end();
+
+		auto left_i = x_i;
+		auto up_i = y_i;
+		auto right_i = x_i;
+		auto down_i = y_i;
+
+		int best_distance = xy_length({std::max(pos.x - search_area.from.x, search_area.to.x - pos.x), std::max(pos.y - search_area.from.y, search_area.to.y - pos.y)});
+		unit_t* best_unit = nullptr;
+
+		while (true) {
+			bool done = true;
+			int prev_best_distance = best_distance;
+			if (left_i != x_begin) {
+				--left_i;
+				done = false;
+				unit_t* u = left_i->u;
+				if (u->sprite->position.x >= search_area.from.x) {
+					if (u->sprite->position.y >= search_area.from.y && u->sprite->position.y < search_area.to.y) {
+						int d = xy_length(pos - u->sprite->position);
+						if (d < best_distance && predicate(u)) {
+							best_distance = d;
+							best_unit = u;
+						}
+					}
+				} else {
+					left_i = x_begin;
+				}
+			}
+			if (right_i != x_end) {
+				done = false;
+				unit_t* u = right_i->u;
+				if (u->sprite->position.x < search_area.to.x) {
+					if (u->sprite->position.y >= search_area.from.y && u->sprite->position.y < search_area.to.y) {
+						int d = xy_length(pos - u->sprite->position);
+						if (d < best_distance && predicate(u)) {
+							best_distance = d;
+							best_unit = u;
+						}
+					}
+					++right_i;
+				} else {
+					right_i = x_end;
+				}
+			}
+			if (up_i != y_begin) {
+				done = false;
+				--up_i;
+				unit_t* u = up_i->u;
+				if (u->sprite->position.y >= search_area.from.y) {
+					if (u->sprite->position.x >= search_area.from.x && u->sprite->position.x < search_area.to.x) {
+						int d = xy_length(pos - u->sprite->position);
+						if (d < best_distance && predicate(u)) {
+							best_distance = d;
+							best_unit = u;
+						}
+					}
+				} else {
+					up_i = y_begin;
+				}
+			}
+			if (down_i != y_end) {
+				done = false;
+				unit_t* u = down_i->u;
+				if (u->sprite->position.y < search_area.to.y) {
+					if (u->sprite->position.x >= search_area.from.x && u->sprite->position.x < search_area.to.x) {
+						int d = xy_length(pos - u->sprite->position);
+						if (d < best_distance && predicate(u)) {
+							best_distance = d;
+							best_unit = u;
+						}
+					}
+					++down_i;
+				} else {
+					down_i = y_end;
+				}
+			}
+			if (best_distance != prev_best_distance) {
+				if (search_area.from.x < pos.x - best_distance) search_area.from.x = pos.x - best_distance;
+				if (search_area.from.y < pos.y - best_distance) search_area.from.y = pos.y - best_distance;
+				if (search_area.to.x > pos.x + best_distance) search_area.to.x = pos.x + best_distance;
+				if (search_area.to.y > pos.y + best_distance) search_area.to.y = pos.y + best_distance;
+			}
+			if (done) break;
+		}
+		return best_unit;
+	}
+
+	bool unit_is_factory(unit_t* u) const {
 		if (u->unit_type->id == UnitTypes::Terran_Command_Center) return true;
 		if (u->unit_type->id == UnitTypes::Terran_Barracks) return true;
 		if (u->unit_type->id == UnitTypes::Terran_Factory) return true;
@@ -6980,23 +7570,30 @@ struct state_functions {
 		return false;
 	}
 
+	void set_unit_tiles_occupied(const unit_t* u, xy position) {
+		xy size(u->unit_type->tile_size.x / 32u, u->unit_type->tile_size.y / 32u);
+		xy pos(position.x / 32u, position.y / 32u);
+		tiles_flags_or(pos.x - size.x / 2, pos.y - size.y / 2, size.x, size.y, tile_t::flag_occupied);
+	}
+
 	bool initialize_unit_type(unit_t* u, const unit_type_t* unit_type, xy pos, int owner) {
 
-		iscript_unit_setter ius(this, u);
+		auto ius = make_thingy_setter(iscript_unit, u);
 		if (!initialize_flingy(u, unit_type->flingy, pos, owner, direction_t::zero())) return false;
 
 		u->owner = owner;
 		u->order_type = get_order_type(Orders::Fatal);
 		u->order_state = 0;
 		u->order_signal = 0;
+		u->order_unit_type = nullptr;
 		u->main_order_timer = 0;
 		u->ground_weapon_cooldown = 0;
 		u->air_weapon_cooldown = 0;
 		u->spell_cooldown = 0;
-		u->order_target.unit = nullptr;
+		u->order_target = {};
 		u->order_target.pos = { 0,0 };
 		u->unit_type = unit_type;
-		u->resource_type = 0;
+		u->carrying_flags = 0;
 		u->secondary_order_timer = 0;
 
 		if (!iscript_execute_sprite(u->sprite)) {
@@ -7007,7 +7604,7 @@ struct state_functions {
 		u->shield_points = fp8::integer(u->unit_type->shield_points);
 		if (u->unit_type->id == UnitTypes::Protoss_Shield_Battery) u->energy = fp8::integer(100);
 		else u->energy = unit_max_energy(u) / 4;
-		// u->ai_action_flag = 0;
+
 		u->sprite->elevation_level = unit_type->elevation_level;
 		u_set_status_flag(u, unit_t::status_flag_grounded_building, ut_building(u));
 		u_set_status_flag(u, unit_t::status_flag_flying, ut_flyer(u));
@@ -7027,6 +7624,9 @@ struct state_functions {
 			u->building.creep_timer = 0;
 			u->building.upgrade_level = 0;
 		}
+		if (ut_resource(u)) {
+			u->building.resource.gather_queue.clear();
+		} else if (is_mineral_field(unit_type)) xcept("mineral field is not a resource");
 		u->path = nullptr;
 		u->movement_state = 0;
 		u->recent_order_timer = 0;
@@ -7062,6 +7662,99 @@ struct state_functions {
 		xcept("destroy_unit\n");
 	}
 
+	bool initialize_unit(unit_t* u, const unit_type_t* unit_type, xy pos, int owner) {
+
+		u->order_queue.clear();
+
+		u->auto_target_unit = nullptr;
+		u->connected_unit = nullptr;
+
+		u->order_queue_count = 0;
+		u->order_queue_timer = 0;
+		u->unknown_0x086 = 0;
+		u->attack_notify_timer = 0;
+		u->displayed_unit_id = 0;
+		u->last_event_timer = 0;
+		u->last_event_color = 0;
+		u->rank_increase = 0;
+		u->kill_count = 0;
+
+		u->remove_timer = 0;
+		u->defensive_matrix_hp = 0;
+		u->defensive_matrix_timer = 0;
+		u->stim_timer = 0;
+		u->ensnare_timer = 0;
+		u->lockdown_timer = 0;
+		u->irradiate_timer = 0;
+		u->stasis_timer = 0;
+		u->plague_timer = 0;
+		u->storm_timer = 0;
+		u->irradiated_by = nullptr;
+		u->irradiate_owner = 0;
+		u->parasite_flags = 0;
+		u->cycle_counter = 0;
+		u->is_blind = 0;
+		u->maelstrom_timer = 0;
+		u->unused_0x125 = 0;
+		u->acid_spore_count = 0;
+		for (auto& v : u->acid_spore_time) v = 0;
+		u->status_flags = 0;
+		u->user_action_flags = 0;
+		u->pathing_flags = 0;
+		u->previous_hp = 1;
+		u->ai = nullptr;
+
+		if (!initialize_unit_type(u, unit_type, pos, owner)) return false;
+
+		u->build_queue.fill(nullptr);
+		u->unit_id_generation = (u->unit_id_generation + 1) % (1 << 5);
+		if (!is_disabled(u) || u_completed(u)) {
+			if (unit_is_factory(u)) u->current_button_set = UnitTypes::Factories;
+			else u->current_button_set = UnitTypes::Buildings;
+		}
+		u->wireframe_randomizer = lcg_rand(15);
+		if (ut_turret(u)) u->hp = fp8::integer(1) / 256;
+		else u->hp = u->unit_type->hitpoints / 10;
+		if (u_grounded_building(u)) u->order_type = u->unit_type->human_ai_idle;
+		else u->order_type = get_order_type(Orders::Nothing);
+		// secondary_order_id is uninitialized
+		if (!u->secondary_order_type || u->secondary_order_type->id != Orders::Nothing) {
+			u->secondary_order_type = get_order_type(Orders::Nothing);
+			u->secondary_order_unk_a = 0;
+			u->secondary_order_unk_b = 0;
+			u->current_build_unit = nullptr;
+			u->secondary_order_state = 0;
+		}
+		u->unit_finder_bounding_box = { {-1, -1}, {-1, -1} };
+		st.player_units[owner].push_front(*u);
+		increment_unit_counts(u, 1);
+
+		if (u_grounded_building(u)) {
+			unit_finder_insert(u);
+			set_unit_tiles_occupied(u, u->sprite->position);
+			check_unit_collision(u);
+			if (u_flying(u)) increment_repulse_field(u); // impossible?
+			set_construction_graphic(u, true);
+			set_sprite_visibility(u->sprite, 0);
+		} else {
+			if (unit_type->id==UnitTypes::Terran_Vulture || unit_type->id==UnitTypes::Hero_Jim_Raynor_Vulture) {
+				u->vulture.spider_mine_count = 0;
+			}
+			u->sprite->flags |= sprite_t::flag_hidden;
+			set_sprite_visibility(u->sprite, 0);
+		}
+		u->detected_flags = 0xffffffff;
+		if (ut_turret(u)) {
+			u->sprite->flags |= 0x10;
+		} else {
+			if (!us_hidden(u)) {
+				refresh_unit_vision(u);
+			}
+		}
+
+		return true;
+	};
+
 	unit_t* create_unit(const unit_type_t* unit_type, xy pos, int owner) {
 		if (!unit_type) xcept("attempt to create unit of null type");
 
@@ -7076,96 +7769,7 @@ struct state_functions {
 				return (unit_t*)nullptr;
 			}
 			unit_t* u = &st.free_units.front();
-			auto initialize_unit = [&]() {
-
-				u->order_queue.clear();
-
-				u->auto_target_unit = nullptr;
-				u->connected_unit = nullptr;
-
-				u->order_queue_count = 0;
-				u->order_queue_timer = 0;
-				u->unknown_0x086 = 0;
-				u->attack_notify_timer = 0;
-				u->displayed_unit_id = 0;
-				u->last_event_timer = 0;
-				u->last_event_color = 0;
-				//u->unused_0x08C = 0;
-				u->rank_increase = 0;
-				u->kill_count = 0;
-
-				u->remove_timer = 0;
-				u->defensive_matrix_hp = 0;
-				u->defensive_matrix_timer = 0;
-				u->stim_timer = 0;
-				u->ensnare_timer = 0;
-				u->lockdown_timer = 0;
-				u->irradiate_timer = 0;
-				u->stasis_timer = 0;
-				u->plague_timer = 0;
-				u->storm_timer = 0;
-				u->irradiated_by = nullptr;
-				u->irradiate_owner = 0;
-				u->parasite_flags = 0;
-				u->cycle_counter = 0;
-				u->is_blind = 0;
-				u->maelstrom_timer = 0;
-				u->unused_0x125 = 0;
-				u->acid_spore_count = 0;
-				for (auto& v : u->acid_spore_time) v = 0;
-				u->status_flags = 0;
-				u->user_action_flags = 0;
-				u->pathing_flags = 0;
-				u->previous_hp = 1;
-				u->ai = nullptr;
-
-				if (!initialize_unit_type(u, unit_type, pos, owner)) return false;
-
-				u->build_queue.fill(nullptr);
-				u->unit_id_generation = (u->unit_id_generation + 1) % (1 << 5);
-				if (!is_disabled(u) || u_completed(u)) {
-					if (unit_is_factory(u)) u->current_button_set = UnitTypes::Factories;
-					else u->current_button_set = UnitTypes::Buildings;
-				}
-				u->wireframe_randomizer = lcg_rand(15);
-				if (ut_turret(u)) u->hp = fp8::integer(1) / 256;
-				else u->hp = u->unit_type->hitpoints / 10;
-				if (u_grounded_building(u)) u->order_type = u->unit_type->human_ai_idle;
-				else u->order_type = get_order_type(Orders::Nothing);
-				// secondary_order_id is uninitialized
-				if (!u->secondary_order_type || u->secondary_order_type->id != Orders::Nothing) {
-					u->secondary_order_type = get_order_type(Orders::Nothing);
-					u->secondary_order_unk_a = 0;
-					u->secondary_order_unk_b = 0;
-					u->current_build_unit = nullptr;
-					u->secondary_order_state = 0;
-				}
-				u->unit_finder_bounding_box = { {-1, -1}, {-1, -1} };
-				st.player_units[owner].push_front(*u);
-				increment_unit_counts(u, 1);
-
-				if (u_grounded_building(u)) {
-					unit_finder_insert(u);
-					xcept("initialize_unit: fixme");
-				} else {
-					if (unit_type->id==UnitTypes::Terran_Vulture || unit_type->id==UnitTypes::Hero_Jim_Raynor_Vulture) {
-						u->vulture.spider_mine_count = 0;
-					}
-					u->sprite->flags |= sprite_t::flag_hidden;
-					set_sprite_visibility(u->sprite, 0);
-				}
-				u->detected_flags = 0xffffffff;
-				if (ut_turret(u)) {
-					u->sprite->flags |= 0x10;
-				} else {
-					if (!us_hidden(u)) {
-						refresh_unit_vision(u);
-					}
-				}
-
-				return true;
-			};
-			if (!initialize_unit()) {
+			if (!initialize_unit(u, unit_type, pos, owner)) {
 				net_error_string(62); // Unable to create unit
 				return (unit_t*)nullptr;
 			}
@@ -7173,6 +7777,7 @@ struct state_functions {
 			return u;
 		};
 		unit_t* u = get_new(unit_type);
+		if (!u) return nullptr;
 		if (u_grounded_building(u)) bw_insert_list(st.visible_units, *u);
 		else bw_insert_list(st.hidden_units, *u);
 
@@ -7247,7 +7852,7 @@ struct state_functions {
 			modifier_data1 = u->sprite->main_image->modifier_data1;
 			modifier_data2 = u->sprite->main_image->modifier_data2;
 		}
-		iscript_unit_setter ius(this, u);
+		auto ius = make_thingy_setter(iscript_unit, u);
 		const image_type_t* construction_image = u->unit_type->construction_animation;
 		if (!animated || !construction_image) construction_image = u->sprite->sprite_type->image;
 		replace_sprite_images(u->sprite, construction_image, u->heading);
@@ -7266,9 +7871,7 @@ struct state_functions {
 		u->heading = heading;
 		u->current_velocity_direction = heading;
 		u->velocity = direction_xy(heading, u->current_speed);
-		if (u->next_target_waypoint != u->sprite->position) {
-			u->next_target_waypoint = u->sprite->position;
-		}
+		set_next_target_waypoint(u, u->sprite->position);
 		for (image_t* img : ptr(u->sprite->images)) {
 			set_image_heading(img, heading);
 		}
@@ -7363,27 +7966,35 @@ struct state_functions {
 		--st.allocated_order_count;
 	}
 
-	void queue_order(unit_t* u, const order_type_t* order_type, order_t* insert_after, order_target target) {
-		auto get_new = [&](const order_type_t* order_type, order_target target) {
-			if (st.free_orders.empty()) return (order_t*)nullptr;
-			order_t* o = &st.free_orders.front();
-			st.free_orders.pop_front();
-			++st.allocated_order_count;
-			o->order_type = order_type;
-			o->target = target;
-			return o;
-		};
-		order_t* o = get_new(order_type, target);
+	order_t* create_order(const order_type_t* order_type, order_target_t target) {
+		if (st.free_orders.empty()) return (order_t*)nullptr;
+		order_t* o = &st.free_orders.front();
+		st.free_orders.pop_front();
+		++st.allocated_order_count;
+		o->order_type = order_type;
+		o->target = target;
+		return o;
+	}
+
+	void queue_order(intrusive_list<order_t, default_link_f>::iterator pos, unit_t* u, const order_type_t* order_type, order_target_t target) {
+		order_t* o = create_order(order_type, target);
 		if (!o) {
 			local_unit_status_error(u, 872);
 			return;
 		}
 		if (o->order_type->highlight != -1) ++u->order_queue_count;
-		if (insert_after) u->order_queue.insert(++u->order_queue.iterator_to(*insert_after), *o);
-		else bw_insert_list(u->order_queue, *o);
+		u->order_queue.insert(pos, *o);
 	}
 
-	void set_queued_order(unit_t* u, bool interrupt, const order_type_t* order_type, order_target target) {
+	void queue_order_back(unit_t* u, const order_type_t* order_type, order_target_t target) {
+		queue_order(u->order_queue.end(), u, order_type, target);
+	}
+
+	void queue_order_front(unit_t* u, const order_type_t* order_type, order_target_t target) {
+		queue_order(u->order_queue.begin(), u, order_type, target);
+	}
+
+	void set_queued_order(unit_t* u, bool interrupt, const order_type_t* order_type, order_target_t target) {
 		if (u->order_type->id == Orders::Die) return;
 		while (!u->order_queue.empty()) {
 			order_t* o = &u->order_queue.back();
@@ -7394,16 +8005,15 @@ struct state_functions {
 		if (order_type->id == Orders::Cloak) {
 			xcept("cloak fixme");
 		} else {
-			queue_order(u, order_type, nullptr, target);
+			queue_order_back(u, order_type, target);
 		}
 	}
 
 	void iscript_run_to_idle(unit_t* u) {
 		u->status_flags &= ~unit_t::status_flag_iscript_nobrk;
 		u->sprite->flags &= ~sprite_t::flag_iscript_nobrk;
-		iscript_unit_setter ius(this, u);
-		unit_t* prev_iscript_order_unit = iscript_order_unit;
-		iscript_order_unit = u;
+		auto ius = make_thingy_setter(iscript_unit, u);
+		auto ifs = make_thingy_setter(iscript_flingy, u);
 		int anim = -1;
 		switch (u->sprite->main_image->iscript_state.animation) {
 		case iscript_anims::AirAttkInit:
@@ -7431,7 +8041,6 @@ struct state_functions {
 			sprite_run_anim(u->sprite, anim);
 		}
 		u_unset_movement_flag(u, 8);
-		iscript_order_unit = prev_iscript_order_unit;
 	}
 
 	void activate_next_order(unit_t* u) {
@@ -7439,7 +8048,7 @@ struct state_functions {
 		if (u->ai) xcept("ai stuff");
 		if ((u_order_not_interruptible(u) || u_iscript_nobrk(u)) && u->order_queue.front().order_type->id != Orders::Die) return;
 		const order_type_t* order_type = u->order_queue.front().order_type;
-		order_target target = u->order_queue.front().target;
+		order_target_t target = u->order_queue.front().target;
 		remove_queued_order(u, &u->order_queue.front());
 
 		u->user_action_flags &= ~1;
@@ -7478,11 +8087,11 @@ struct state_functions {
 
 	void set_unit_order(unit_t* u, const order_type_t* order_type) {
 		u->user_action_flags |= 1;
-		set_queued_order(u, true, order_type, order_target {});
+		set_queued_order(u, true, order_type, order_target_t {});
 		activate_next_order(u);
 	}
 
-	void set_unit_order(unit_t* u, const order_type_t* order_type, order_target target) {
+	void set_unit_order(unit_t* u, const order_type_t* order_type, order_target_t target) {
 		u->user_action_flags |= 1;
 		set_queued_order(u, true, order_type, target);
 		activate_next_order(u);
@@ -7490,7 +8099,7 @@ struct state_functions {
 
 	void set_unit_order(unit_t* u, const order_type_t* order_type, unit_t* target_unit) {
 		u->user_action_flags |= 1;
-		order_target target;
+		order_target_t target;
 		target.unit = target_unit;
 		if (target_unit) {
 			target.position = target_unit->sprite->position;
@@ -7501,7 +8110,7 @@ struct state_functions {
 
 	void set_unit_order(unit_t* u, const order_type_t* order_type, xy position) {
 		u->user_action_flags |= 1;
-		order_target target;
+		order_target_t target;
 		target.position = position;
 		set_queued_order(u, true, order_type, target);
 		activate_next_order(u);
@@ -7714,7 +8323,6 @@ struct state_functions {
 		}
 		u->air_strength = get_unit_strength(u, false);
 		u->ground_strength = get_unit_strength(u, true);
-
 	}
 
 	unit_t* create_initial_unit(const unit_type_t* unit_type, xy pos, int owner) {
@@ -7909,6 +8517,10 @@ struct game_load_functions : state_functions {
 		};
 
 		clear_and_make_free(st.units, st.free_units);
+		st.active_bullets_size = 0;
+		st.active_bullets.clear();
+		st.bullets.clear();
+		st.free_bullets.clear();
 		clear_and_make_free(st.sprites, st.free_sprites);
 		for (size_t i = 0; i != 2500; ++i) st.sprites[i].index = i;
 		st.sprites_on_tile_line.clear();
@@ -7924,7 +8536,7 @@ struct game_load_functions : state_functions {
 
 		int max_unit_width = 0;
 		int max_unit_height = 0;
-		for (auto&v : game_st.unit_types.vec) {
+		for (auto& v : game_st.unit_types.vec) {
 			int width = v.dimensions.from.x + 1 + v.dimensions.to.x;
 			int height = v.dimensions.from.y + 1 + v.dimensions.to.y;
 			if (width > max_unit_width) max_unit_width = width;
@@ -7940,6 +8552,8 @@ struct game_load_functions : state_functions {
 		game_st.repulse_field_width = (game_st.map_width + 47) / 48;
 		game_st.repulse_field_height = (game_st.map_height + 47) / 48;
 		st.repulse_field.resize(game_st.repulse_field_width * game_st.repulse_field_height);
+
+		st.prev_bullet_source_unit = nullptr;
 
 	}
 
@@ -7990,7 +8604,7 @@ struct game_load_functions : state_functions {
 					auto& mt = game_st.vf4[mega_tile_index & 0x7fff];
 					for (size_t sy = 0; sy < 4; ++sy) {
 						for (size_t sx = 0; sx < 4; ++sx) {
-							if (~mt.flags[sy * 4 + sx] & MiniTileFlags::Walkable) {
+							if (~mt.flags[sy * 4 + sx] & vf4_entry::flag_walkable) {
 								set_unwalkable(x * 4 + sx, y * 4 + sy);
 							}
 						}
@@ -8482,7 +9096,7 @@ struct game_load_functions : state_functions {
 						for (size_t sx = 0; sx != 4; ++sx) {
 							int flags = game_st.vf4.at(megatile_index).flags[sy * 4 + sx];
 							mask >>= 1;
-							if (~flags & MiniTileFlags::Walkable) {
+							if (~flags & vf4_entry::flag_walkable) {
 								mask |= 0x8000;
 							}
 						}
@@ -8770,12 +9384,12 @@ struct game_load_functions : state_functions {
 		int hp = unit_type->hitpoints.integer_part();
 		if (unit_type->has_shield) hp += unit_type->shield_points;
 		if (hp == 0) return 0;
-		int fact = weapon_type->damage_factor;
+		int bullet_count = weapon_type->bullet_count;
 		int cd = weapon_type->cooldown;
 		int dmg = weapon_type->damage_amount;
 		int range = weapon_type->max_range;
-		unsigned int a = (range / (unsigned)cd) * fact * dmg;
-		unsigned int b = (hp * ((int64_t)(fact*dmg << 11) / cd)) >> 8;
+		unsigned int a = (range / (unsigned)cd) * bullet_count * dmg;
+		unsigned int b = (hp * ((int64_t)(bullet_count*dmg << 11) / cd)) >> 8;
 		// This function calculates (int)(sqrt(x)*7.58)
 		auto sqrt_x_times_7_58 = [&](int x) {
 			if (x <= 0) return 0;
@@ -9031,10 +9645,10 @@ struct game_load_functions : state_functions {
 				int very_high_count = 0;
 				for (size_t y = 0; y < 4; ++y) {
 					for (size_t x = 0; x < 4; ++x) {
-						if (mt.flags[y * 4 + x] & MiniTileFlags::Walkable) ++walkable_count;
-						if (mt.flags[y * 4 + x] & MiniTileFlags::Middle) ++middle_count;
-						if (mt.flags[y * 4 + x] & MiniTileFlags::High) ++high_count;
-						if (mt.flags[y * 4 + x] & MiniTileFlags::BlocksView) ++very_high_count;
+						if (mt.flags[y * 4 + x] & vf4_entry::flag_walkable) ++walkable_count;
+						if (mt.flags[y * 4 + x] & vf4_entry::flag_middle) ++middle_count;
+						if (mt.flags[y * 4 + x] & vf4_entry::flag_high) ++high_count;
+						if (mt.flags[y * 4 + x] & vf4_entry::flag_very_high) ++very_high_count;
 					}
 				}
 				if (walkable_count > 12) flags |= tile_t::flag_walkable;
@@ -9048,13 +9662,36 @@ struct game_load_functions : state_functions {
 
 		};
 
-		// fixme: load this properly. the vf4/cv5_entry structures need to be refactored
 		auto& vf4_data = global_st.tileset_vf4.at(game_st.tileset_index);
-		game_st.vf4.resize(vf4_data.size() / sizeof(vf4_entry));
-		memcpy(game_st.vf4.data(), vf4_data.data(), vf4_data.size() / sizeof(vf4_entry) * sizeof(vf4_entry));
+		data_loading::data_reader_le r(vf4_data.data(), vf4_data.data() + vf4_data.size());
+		game_st.vf4.reserve(vf4_data.size() / 32);
+		while (r.left()) {
+			game_st.vf4.emplace_back();
+			auto& e = game_st.vf4.back();
+			for (size_t i = 0; i != 16; ++i) {
+				e.flags[i] = r.get<uint16_t>();
+			}
+		}
 		auto& cv5_data = global_st.tileset_cv5.at(game_st.tileset_index);
-		game_st.cv5.resize(cv5_data.size() / sizeof(cv5_entry));
-		memcpy(game_st.cv5.data(), cv5_data.data(), cv5_data.size() / sizeof(cv5_entry) * sizeof(cv5_entry));
+		r = data_loading::data_reader_le(cv5_data.data(), cv5_data.data() + cv5_data.size());
+		game_st.cv5.reserve(cv5_data.size() / 52);
+		while (r.left()) {
+			game_st.cv5.emplace_back();
+			auto& e = game_st.cv5.back();
+			r.get<uint16_t>();
+			e.flags = r.get<uint16_t>();
+			r.get<uint16_t>();
+			r.get<uint16_t>();
+			r.get<uint16_t>();
+			r.get<uint16_t>();
+			r.get<uint16_t>();
+			r.get<uint16_t>();
+			r.get<uint16_t>();
+			r.get<uint16_t>();
+			for (size_t i = 0; i != 16; ++i) {
+				e.mega_tile_index[i] = r.get<uint16_t>();
+			}
+		}
 
 		set_mega_tile_flags();
 	}
@@ -9101,7 +9738,7 @@ struct game_load_functions : state_functions {
 				r.skip(len);
 				chunks[tag] = { chunk_data, r.ptr };
 			}
-			for (auto&v : tags) {
+			for (auto& v : tags) {
 				tag_t tag = std::get<0>(v);
 				auto i = chunks.find(tag);
 				if (i == chunks.end()) {
@@ -9195,7 +9832,7 @@ struct game_load_functions : state_functions {
 			}
 			for (size_t i = 0; i < game_st.gfx_tiles.size(); ++i) {
 				tile_id tile_id = game_st.gfx_tiles[i];
-				size_t megatile_index = game_st.cv5.at(tile_id.group_index()).megaTileRef[tile_id.subtile_index()];
+				size_t megatile_index = game_st.cv5.at(tile_id.group_index()).mega_tile_index[tile_id.subtile_index()];
 				int cv5_flags = game_st.cv5.at(tile_id.group_index()).flags & ~(tile_t::flag_walkable | tile_t::flag_unwalkable | tile_t::flag_very_high | tile_t::flag_middle | tile_t::flag_high | tile_t::flag_partially_walkable);
 				st.tiles_mega_tile_index[i] = (uint16_t)megatile_index;
 				st.tiles[i].flags = game_st.mega_tile_flags.at(megatile_index) | cv5_flags;
@@ -9431,7 +10068,7 @@ struct game_load_functions : state_functions {
 				if ((size_t)unit_type_id >= 228) xcept("UNIT: invalid unit type %d", unit_type_id);
 				if ((size_t)owner >= 12) xcept("UNIT: invalid owner %d", owner);
 
-				const unit_type_t*unit_type = get_unit_type(unit_type_id);
+				const unit_type_t* unit_type = get_unit_type(unit_type_id);
 
 				//log("create unit of type %d\n", unit_type->id);
 
@@ -9455,9 +10092,7 @@ struct game_load_functions : state_functions {
 				};
 				auto is_neutral_unit = [&]() {
 					if (owner == 11) return true;
-					if (unit_type->id == UnitTypes::Resource_Mineral_Field) return true;
-					if (unit_type->id == UnitTypes::Resource_Mineral_Field_Type_2) return true;
-					if (unit_type->id == UnitTypes::Resource_Mineral_Field_Type_3) return true;
+					if (is_mineral_field(unit_type)) return true;
 					if (unit_type->id == UnitTypes::Resource_Vespene_Geyser) return true;
 					if (unit_type->id == UnitTypes::Critter_Rhynadon) return true;
 					if (unit_type->id == UnitTypes::Critter_Bengalaas) return true;
@@ -9477,7 +10112,12 @@ struct game_load_functions : state_functions {
 
 				unit_t* u = create_initial_unit(unit_type, { x,y }, owner);
 
-				if (valid_properties & 0x2) set_unit_hp(u, std::max(u->unit_type->hitpoints * hp_percent / 100, fp8::integer(1) / 256));
+				if (valid_properties & 0x2) {
+					using tmp_t = fixed_point<32, 8, true>;
+					tmp_t tmp = tmp_t::extend(u->unit_type->hitpoints);
+					tmp = std::max(tmp * hp_percent / 100, tmp_t::from_raw(1));
+					set_unit_hp(u, fp8::truncate(tmp));
+				}
 				if (valid_properties & 0x4) set_unit_shield_points(u, fp8::integer(u->unit_type->shield_points * shield_percent / 100));
 				if (valid_properties & 0x8) set_unit_energy(u, unit_max_energy(u) * energy_percent / 100);
 				if (valid_properties & 0x10) set_unit_resources(u, resources);
@@ -9961,7 +10601,7 @@ void global_init(global_state& st, load_data_file_F&& load_data_file) {
 		lo_offsets.emplace_back();
 
 		for (int i = 0; i < 999; ++i) {
-			const image_type_t*image_type = get_image_type(i);
+			const image_type_t* image_type = get_image_type(i);
 			image_grp_index.push_back(load(image_type->grp_filename_index, load_grp));
 			lo_indices[0].push_back(load(image_type->attack_filename_index, load_offsets));
 			lo_indices[1].push_back(load(image_type->damage_filename_index, load_offsets));
@@ -10001,21 +10641,21 @@ void global_init(global_state& st, load_data_file_F&& load_data_file) {
 	load_data_file(buf, "arr/orders.dat");
 	st.order_types = data_loading::load_orders_dat(buf);
 
-	auto fixup_sprite_type = [&](sprite_type_t*&ptr) {
+	auto fixup_sprite_type = [&](sprite_type_t*& ptr) {
 		size_t index = (size_t)ptr;
 		if (index == 517) ptr = nullptr;
 		else ptr = get_sprite_type(index);
 	};
-	auto fixup_image_type = [&](image_type_t*&ptr) {
+	auto fixup_image_type = [&](image_type_t*& ptr) {
 		size_t index = (size_t)ptr;
 		if (index == 999) ptr = nullptr;
 		else ptr = get_image_type(index);
 	};
 
-	for (auto&v : st.flingy_types.vec) {
+	for (auto& v : st.flingy_types.vec) {
 		fixup_sprite_type(v.sprite);
 	}
-	for (auto&v : st.sprite_types.vec) {
+	for (auto& v : st.sprite_types.vec) {
 		fixup_image_type(v.image);
 	}
 
@@ -10080,7 +10720,7 @@ struct game_player {
 	std::unique_ptr<state> uptr_st;
 	game_player() = default;
 	template<typename T>
-	game_player(T&& init_arg) {
+	explicit game_player(T&& init_arg) {
 		init(std::forward<T>(init_arg));
 	}
 	void init(const char* data_path) {

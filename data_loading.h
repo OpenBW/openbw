@@ -106,7 +106,7 @@ struct paged_reader {
 	size_t current_page = ~(size_t)0;
 	size_t file_pointer = 0;
 	size_t file_size = 0;
-	paged_reader(base_reader_T& reader) : reader(reader) {
+	explicit paged_reader(base_reader_T& reader) : reader(reader) {
 		file_size = reader.size();
 	}
 	void get_bytes(uint8_t* dst, size_t n) {
@@ -161,7 +161,7 @@ struct file_reader {
 	a_string filename;
 	FILE* f = nullptr;
 	file_reader() = default;
-	file_reader(a_string filename) {
+	explicit file_reader(a_string filename) {
 		open(std::move(filename));
 	}
 	~file_reader() {
@@ -362,7 +362,7 @@ struct bit_reader {
 	base_reader_T& r;
 	int data;
 	size_t bits_n = 0;
-	bit_reader(base_reader_T& r) : r(r) {}
+	explicit bit_reader(base_reader_T& r) : r(r) {}
 	void next() {
 		data = r.template get<uint8_t>();
 	}
@@ -742,7 +742,7 @@ struct mpq_archive_reader {
 	size_t sector_size;
 	a_vector<hash_table_entry> hash_table;
 	a_vector<block_table_entry> block_table;
-	mpq_archive_reader(base_reader_T& r) : r(r) {
+	explicit mpq_archive_reader(base_reader_T& r) : r(r) {
 		auto mpq_signature = r.template get<uint32_t>();
 		if (mpq_signature != 0x1a51504d) xcept("signature mismatch; file is not an mpq archive");
 
@@ -848,7 +848,7 @@ struct data_files_loader {
 		file_reader<> file;
 		paged_reader<file_reader<>> paged;
 		mpq_archive_reader<paged_reader<file_reader<>>> mpq;
-		mpq_t(a_string filename) : file(std::move(filename)), paged(file), mpq(paged) {}
+		explicit mpq_t(a_string filename) : file(std::move(filename)), paged(file), mpq(paged) {}
 	};
 	a_list<mpq_t> mpqs;
 
@@ -862,7 +862,7 @@ struct data_files_loader {
 				auto file_r = v.mpq.open(filename);
 				size_t len = file_r.size();
 				dst.resize(len);
-				file_r.get_bytes((uint8_t*)dst.data(), len);
+				file_r.get_bytes(dst.data(), len);
 				return;
 			}
 		}
@@ -879,15 +879,13 @@ static inline data_files_loader data_files_directory(a_string path) {
 	return r;
 }
 
-template<typename T>
-void load_data_file(T& dst, bwgame::a_string archive_filename, bwgame::a_string filename) {
+static void load_data_file(a_vector<uint8_t>& dst, bwgame::a_string archive_filename, bwgame::a_string filename) {
 	auto mpq_file_r = file_reader<>(archive_filename);
 	auto mpq_r = make_mpq_archive_reader(mpq_file_r);
 	auto file_r = mpq_r.open(filename);
-	size_t fsize = file_r.size();
-	size_t len = fsize / sizeof(typename T::value_type);
+	size_t len = file_r.size();
 	dst.resize(len);
-	file_r.get_bytes((uint8_t*)dst.data(), len*sizeof(typename T::value_type));
+	file_r.get_bytes(dst.data(), len);
 }
 
 template<typename to_T, typename from_T, typename std::enable_if<!std::is_pointer<to_T>::value>::type* = nullptr>
@@ -1100,19 +1098,19 @@ weapon_types_t load_weapons_dat(const data_T& data) {
 	rawr(uint32_t, min_range, count);
 	rawr(uint32_t, max_range, count);
 	rawr(uint8_t, damage_upgrade, count);
-	rawr(uint8_t, weapon_type, count);
-	rawr(uint8_t, weapon_behavior, count);
-	rawr(uint8_t, remove_after, count);
-	rawr(uint8_t, explosion_type, count);
+	rawr(uint8_t, damage_type, count);
+	rawr(uint8_t, bullet_type, count);
+	rawr(uint8_t, lifetime, count);
+	rawr(uint8_t, hit_type, count);
 	rawr(uint16_t, inner_splash_radius, count);
 	rawr(uint16_t, medium_splash_radius, count);
 	rawr(uint16_t, outer_splash_radius, count);
 	rawr(uint16_t, damage_amount, count);
 	rawr(uint16_t, damage_bonus, count);
 	rawr(uint8_t, cooldown, count);
-	rawr(uint8_t, damage_factor, count);
+	rawr(uint8_t, bullet_count, count);
 	rawr(uint8_t, attack_angle, count);
-	rawr(uint8_t, launch_spin, count);
+	rawr(int8_t, bullet_heading_offset, count);
 	rawr(int8_t, forward_offset, count);
 	rawr(int8_t, upward_offset, count);
 	rawr(uint16_t, target_error_message, count);
@@ -1266,7 +1264,7 @@ image_types_t load_images_dat(const data_T& data) {
 	rawr(uint8_t, has_directional_frames, count);
 	rawr(uint8_t, is_clickable, count);
 	rawr(uint8_t, has_iscript_animations, count);
-	rawr(uint8_t, hidden_until_unit_completed, count);
+	rawr(uint8_t, always_visible, count);
 	rawr(uint8_t, modifier, count);
 	rawr(uint8_t, color_shift, count);
 	rawr(uint32_t, iscript_id, count);
@@ -1298,10 +1296,12 @@ order_types_t load_orders_dat(const data_T& data) {
 
 	auto& arr = order_types.vec;
 
+	rawr(uint16_t, label, count);
 	rawr(uint8_t, use_weapon_targeting, count);
 	rawr(uint8_t, background, count);
 	rawr(uint8_t, unused3, count);
 	rawr(uint8_t, valid_for_turret, count);
+	rawr(uint8_t, unused5, count);
 	rawr(uint8_t, can_be_interrupted, count);
 	rawr(uint8_t, unk7, count);
 	rawr(uint8_t, can_be_queued, count);

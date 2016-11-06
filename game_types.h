@@ -7,10 +7,8 @@
 
 namespace bwgame {
 
-struct image_t;
 struct sprite_t;
-struct order_t;
-struct path_t;
+struct flingy_t;
 struct unit_t;
 
 struct unit_id {
@@ -58,23 +56,19 @@ struct sight_values_t {
 };
 
 struct cv5_entry {
-	uint16_t field_0;
 	uint16_t flags;
-	uint16_t left;
-	uint16_t top;
-	uint16_t right;
-	uint16_t bottom;
-	uint16_t field_C;
-	uint16_t field_E;
-	uint16_t field_10;
-	uint16_t field_12;
-	std::array<uint16_t, 16> megaTileRef;
+	std::array<uint16_t, 16> mega_tile_index;
 };
-static_assert(sizeof(cv5_entry) == 52, "cv5_entry: wrong size");
 struct vf4_entry {
+	enum flags_t : uint16_t {
+		flag_walkable = 1,
+		flag_middle = 2,
+		flag_high = 4,
+		flag_very_high = 8
+	};
+
 	std::array<uint16_t, 16> flags;
 };
-static_assert(sizeof(vf4_entry) == 32, "vf4_entry: wrong size");
 
 struct tile_id {
 	uint16_t raw_value = 0;
@@ -185,7 +179,7 @@ struct regions_t {
 
 struct target_t {
 	xy pos;
-	unit_t*unit = nullptr;
+	unit_t* unit = nullptr;
 };
 
 struct link_base {
@@ -279,7 +273,6 @@ struct flingy_t: thingy_t {
 	fp8 flingy_turn_rate;
 	direction_t next_velocity_direction;
 	const flingy_type_t* flingy_type;
-	int unknown_0x026;
 	int flingy_movement_type;
 	xy position;
 	xy_fp8 exact_position;
@@ -290,29 +283,43 @@ struct flingy_t: thingy_t {
 	fp8 flingy_acceleration;
 	direction_t current_velocity_direction;
 	direction_t desired_velocity_direction;
-	int owner;
-	const order_type_t* order_type;
-	int order_state;
 	int order_signal;
-	const unit_type_t* order_unit_type;
-	int main_order_timer;
-	int ground_weapon_cooldown;
-	int air_weapon_cooldown;
-	int spell_cooldown;
-	target_t order_target;
 
 };
 
-struct order_target {
+struct bullet_t: flingy_t {
+	enum {
+		state_init,
+		state_move,
+		state_follow,
+		state_bounce,
+		state_damage_over_time,
+		state_dying,
+		state_hit_near_target
+	};
+	int bullet_state;
+	target_t bullet_target;
+	const weapon_type_t* weapon_type;
+	int remaining_time;
+	int hit_flags;
+	int remaining_bounces;
+	unit_t* source_unit;
+	unit_t* prev_bounce_unit;
+	size_t hit_near_target_position_index;
+};
+
+struct order_target_t {
 	xy position;
 	unit_t* unit = nullptr;
 	const unit_type_t* unit_type = nullptr;
+	order_target_t() = default;
+	explicit order_target_t(unit_t* unit) : unit(unit) {}
 };
 
 struct order_t: link_base {
 
 	const order_type_t* order_type;
-	order_target target;
+	order_target_t target;
 };
 
 struct path_t: link_base {
@@ -374,6 +381,16 @@ struct unit_t: flingy_t {
 		status_flag_cooldown_upgrade = 0x20000000,
 		status_flag_hallucination = 0x40000000,
 	};
+
+	int owner;
+	const order_type_t* order_type;
+	int order_state;
+	const unit_type_t* order_unit_type;
+	int main_order_timer;
+	int ground_weapon_cooldown;
+	int air_weapon_cooldown;
+	int spell_cooldown;
+	target_t order_target;
 
 	fp8 shield_points;
 	const unit_type_t* unit_type;
@@ -443,12 +460,12 @@ struct unit_t: flingy_t {
 
 	struct {
 		unit_t* powerup;
-		xy target_resource;
-		unit_t*target_resource_unit;
+		xy target_resource_position;
+		unit_t* target_resource_unit;
 		int repair_resource_loss_timer;
 		bool is_carrying_something;
 		int resource_carry_count;
-		unit_t* harvest_target;
+		unit_t* gather_target;
 		std::pair<unit_t*, unit_t*> gather_link;
 	} worker;
 	struct worker_gather_link {
@@ -459,7 +476,7 @@ struct unit_t: flingy_t {
 
 	struct building_t {
 		building_t() {}
-		unit_t*addon;
+		unit_t* addon;
 		unit_type_t* addon_build_type;
 		int upgrade_research_time;
 		tech_type_t* tech_type;
@@ -472,7 +489,7 @@ struct unit_t: flingy_t {
 			struct {
 				int resource_count;
 				int resource_iscript;
-				int gather_queue_count;
+				bool is_being_gathered;
 				intrusive_list<unit_t, worker_gather_link> gather_queue;
 				int resource_group;
 				bool resource_belongs_to_ai;
@@ -487,7 +504,7 @@ struct unit_t: flingy_t {
 				sprite_t* pylon_aura;
 			} pylon;
 			struct {
-				unit_t*nuke;
+				unit_t* nuke;
 				bool ready;
 			} silo;
 			struct {
@@ -497,7 +514,7 @@ struct unit_t: flingy_t {
 	} building;
 
 	int status_flags;
-	int resource_type;
+	int carrying_flags;
 	int wireframe_randomizer;
 	int secondary_order_state;
 	int recent_order_timer;
