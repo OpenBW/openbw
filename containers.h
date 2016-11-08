@@ -12,10 +12,10 @@
 #include <unordered_map>
 #include <string>
 
-namespace bwgame {
-
 #include "static_vector.h"
 #include "intrusive_list.h"
+
+namespace bwgame {
 
 template<typename T>
 using alloc = std::allocator<T>;

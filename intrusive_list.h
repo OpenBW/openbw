@@ -1,3 +1,11 @@
+#ifndef BWGAME_INTRUSIVE_LIST_H
+#define BWGAME_INTRUSIVE_LIST_H
+
+#include <utility>
+#include <cstddef>
+#include <iterator>
+
+namespace bwgame {
 
 template<typename T, std::pair<T*, T*> T::* link_ptr>
 struct intrusive_list_member_link {
@@ -226,7 +234,7 @@ public:
 		insert(end(), v);
 	}
 	void pop_back() {
-		erase(back());
+		erase(iterator(back()));
 	}
 	void push_front(reference v) {
 		insert(begin(), v);
@@ -262,3 +270,6 @@ public:
 	}
 };
 
+}
+
+#endif

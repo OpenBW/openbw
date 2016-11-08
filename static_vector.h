@@ -1,3 +1,11 @@
+#ifndef BWGAME_STATIC_VECTOR_H
+#define BWGAME_STATIC_VECTOR_H
+
+#include <cstddef>
+#include <iterator>
+#include <array>
+
+namespace bwgame {
 
 template<typename T, size_t max_elements>
 struct static_vector {
@@ -399,3 +407,7 @@ public:
 		return pos;
 	}
 };
+
+}
+
+#endif
