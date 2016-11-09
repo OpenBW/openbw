@@ -1199,6 +1199,10 @@ struct state_functions {
 		return global_st.direction_table[direction_index(dir)] * length;
 	}
 
+	xy_fp8 direction_xy(direction_t dir, int length) const {
+		return global_st.direction_table[direction_index(dir)] * length;
+	}
+
 	xy_fp8 direction_xy(direction_t dir) const {
 		return global_st.direction_table[direction_index(dir)];
 	}
@@ -1514,7 +1518,7 @@ struct state_functions {
 		if (u->order_type->id == Orders::WaitForGas) {
 			queue_order_front(u, get_order_type(Orders::HarvestGas), order_target_t(target));
 		} else {
-			queue_order_front(u, get_order_type(Orders::Harvest3), {});
+			queue_order_front(u, get_order_type(Orders::GatheringInterrupted), {});
 			queue_order_front(u, get_order_type(Orders::MiningMinerals), order_target_t(target));
 			idle(u);
 			return true;
@@ -1530,7 +1534,7 @@ struct state_functions {
 				u->worker.gather_target = target;
 				target->building.resource.gather_queue.push_front(*u);
 			}
-			queue_order_front(u, get_order_type(Orders::Harvest4), {});
+			queue_order_front(u, get_order_type(Orders::GatherWaitInterrupted), {});
 		}
 	}
 
@@ -1641,8 +1645,9 @@ struct state_functions {
 				}
 			}
 			if (next_unit) {
+				next_unit->worker.gather_target = nullptr;
 				resource->building.resource.gather_queue.remove(*next_unit);
-				remove_one_order(next_unit, get_order_type(Orders::Harvest4));
+				remove_one_order(next_unit, get_order_type(Orders::GatherWaitInterrupted));
 				try_gather_resource(next_unit, resource);
 			}
 		}
@@ -1829,6 +1834,8 @@ struct state_functions {
 							move_to_target_reset(u, target);
 							u->worker.target_resource_position = target->sprite->position;
 							u->worker.target_resource_unit = target;
+							u->order_target.unit = target;
+							u->order_target.pos = target->sprite->position;
 						} else idle(u);
 					} else {
 						if (u->carrying_flags & 2) {
@@ -1874,7 +1881,7 @@ struct state_functions {
 					sprite_run_anim(u->sprite, iscript_anims::GndAttkToIdle);
 					unit_gather_resources_from(u, target);
 					gather_queue_next(u, target);
-					remove_one_order(u, get_order_type(Orders::Harvest3));
+					remove_one_order(u, get_order_type(Orders::GatheringInterrupted));
 					if (u->carrying_flags & 2) {
 						set_unit_order(u, get_order_type(Orders::ReturnMinerals));
 					} else {
@@ -1886,7 +1893,7 @@ struct state_functions {
 			if (u->worker.is_gathering) {
 				gather_queue_next(u, u->worker.gather_target);
 			}
-			remove_one_order(u, get_order_type(Orders::Harvest3));
+			remove_one_order(u, get_order_type(Orders::GatheringInterrupted));
 			set_unit_order(u, get_order_type(Orders::MoveToMinerals));
 		}
 	}
@@ -1903,8 +1910,8 @@ struct state_functions {
 			case Orders::MoveToMinerals:
 			case Orders::WaitForMinerals:
 			case Orders::MiningMinerals:
-			case Orders::Harvest3:
-			case Orders::Harvest4:
+			case Orders::GatheringInterrupted:
+			case Orders::GatherWaitInterrupted:
 				while (u->order_queue.back().order_type->id == Orders::ResetHarvestCollision) {
 					remove_queued_order(u, &u->order_queue.back());
 				}
@@ -1922,7 +1929,7 @@ struct state_functions {
 			free_path(u->path);
 			u->path = nullptr;
 		}
-		u->movement_state = 0;
+		u->movement_state = movement_states::UM_Init;
 		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
 		else u->pathing_flags &= ~1;
 		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
@@ -2028,6 +2035,23 @@ struct state_functions {
 		}
 	}
 
+	void order_GatherWaitInterrupted(unit_t* u) {
+		if (u->worker.gather_target) {
+			u->worker.gather_target->building.resource.gather_queue.remove(*u);
+			u->worker.gather_target = nullptr;
+		}
+		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+		idle(u);
+	}
+
+	void order_GatheringInterrupted(unit_t* u) {
+		if (u->worker.is_gathering) {
+			gather_queue_next(u, u->worker.gather_target);
+		}
+		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+		idle(u);
+	}
+
 	void execute_main_order(unit_t* u) {
 		switch (u->order_type->id) {
 		case Orders::Die:
@@ -2101,11 +2125,11 @@ struct state_functions {
 		case Orders::Upgrade:
 			xcept("Upgrade");
 			break;
-		case Orders::Harvest3:
-			xcept("Harvest3");
+		case Orders::GatheringInterrupted:
+			order_GatheringInterrupted(u);
 			break;
-		case Orders::Harvest4:
-			xcept("Harvest4");
+		case Orders::GatherWaitInterrupted:
+			order_GatherWaitInterrupted(u);
 			break;
 		case Orders::Interrupted:
 			xcept("Interrupted");
@@ -2339,12 +2363,6 @@ struct state_functions {
 		case Orders::MiningMinerals:
 			order_MiningMinerals(u);
 			break;
-		case Orders::Harvest3:
-			xcept("Harvest3");
-			break;
-		case Orders::Harvest4:
-			xcept("Harvest4");
-			break;
 		case Orders::ReturnMinerals:
 			order_ReturnMinerals(u);
 			break;
@@ -2476,9 +2494,6 @@ struct state_functions {
 			break;
 		case Orders::CastStasisField:
 			xcept("CastStasisField");
-			break;
-		case Orders::ResetHarvestCollision:
-			xcept("ResetHarvestCollision");
 			break;
 		case Orders::Patrol:
 			xcept("Patrol");
@@ -3118,7 +3133,7 @@ struct state_functions {
 		return false;
 	}
 
-	bool check_unit_movement_terrain_collision(unit_t* u, execute_movement_struct& ems) {
+	bool check_unit_movement_terrain_collision(unit_t* u, const execute_movement_struct& ems) {
 		if (u_ground_unit(u)) {
 			return check_unit_movement_terrain_collision(u, ems.position - u->sprite->position);
 		} else {
@@ -3126,7 +3141,7 @@ struct state_functions {
 		}
 	}
 
-	unit_t* check_unit_movement_unit_collision(unit_t* u, execute_movement_struct& ems) {
+	unit_t* check_unit_movement_unit_collision(unit_t* u, const execute_movement_struct& ems) {
 		if (us_hidden(u)) return nullptr;
 		xy movement = ems.position - u->sprite->position;
 
@@ -3188,7 +3203,7 @@ struct state_functions {
 		return nullptr;
 	}
 
-	unit_t* check_ground_unit_movement_unit_collision(unit_t* u, execute_movement_struct& ems) {
+	unit_t* check_ground_unit_movement_unit_collision(unit_t* u, const execute_movement_struct& ems) {
 		if (u_ground_unit(u)) {
 			return check_unit_movement_unit_collision(u, ems);
 		} else {
@@ -3547,15 +3562,19 @@ struct state_functions {
 		}
 	}
 
-	bool pathfinder_unit_can_collide_with(const pathfinder& pf, const unit_t* target) const {
-		if (target != pf.consider_collision_with_unit && !pf.consider_collision_with_moving_units) {
+	bool pathfinder_unit_can_collide_with(const unit_t* u, const unit_t* target, const unit_t* consider_collision_with_unit, bool consider_collision_with_moving_units) const {
+		if (target != consider_collision_with_unit && !consider_collision_with_moving_units) {
 			if (!unit_is_at_move_target(target)) return false;
 		}
 		if (target->unit_type->id == UnitTypes::Special_Upper_Level_Door) return false;
 		if (target->unit_type->id == UnitTypes::Special_Right_Upper_Level_Door) return false;
 		if (target->unit_type->id == UnitTypes::Special_Pit_Door) return false;
 		if (target->unit_type->id == UnitTypes::Special_Right_Pit_Door) return false;
-		return unit_can_collide_with(pf.u, target);
+		return unit_can_collide_with(u, target);
+	}
+
+	bool pathfinder_unit_can_collide_with(const pathfinder& pf, const unit_t* target) const {
+		return pathfinder_unit_can_collide_with(pf.u, target, pf.consider_collision_with_unit, pf.consider_collision_with_moving_units);
 	}
 
 	void pathfinder_find_short_path(pathfinder& pf, xy target, const regions_t::region* target_region) const {
@@ -5198,8 +5217,17 @@ struct state_functions {
 			going_to_next_waypoint = true;
 			update_unit_movement_values(u, ems);
 			if (check_ground_unit_movement_unit_collision(u, ems) || check_unit_movement_terrain_collision(u, ems)) {
-				set_current_speed(u, fp8::zero());
-				finish_flingy_movement(u, ems);
+				set_next_speed(u, fp8::zero());
+				u->movement_flags = ems.post_movement_flags;
+				update_unit_heading(u, u->current_velocity_direction);
+				if (ems.stopping_movement) {
+					if (!s_flag(u->sprite, sprite_t::flag_iscript_nobrk)) {
+						sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
+					}
+				} else if (ems.starting_movement) {
+					sprite_run_anim(u->sprite, iscript_anims::Walking);
+				}
+
 				set_flingy_move_target(u, u->sprite->position);
 				stop_unit(u);
 			} else {
@@ -5228,10 +5256,66 @@ struct state_functions {
 		return false;
 	}
 
+	bool get_unique_sided_positions_within_bounds(xy& from, xy& to, rect bounds) const {
+		auto get_flags = [&](xy pos) {
+			int r = 0;
+			if (pos.y < bounds.from.y) r |= 8;
+			if (pos.y > bounds.to.y) r |= 4;
+			if (pos.x > bounds.to.x) r |= 2;
+			if (pos.x < bounds.from.x) r |= 1;
+			return r;
+		};
+
+		xy initial_from = from;
+		xy initial_to = to;
+
+		int from_flags = get_flags(from);
+		int to_flags = get_flags(to);
+
+
+		while (true) {
+			if ((from_flags | to_flags) == 0) return true;
+			if (from_flags & to_flags) {
+				from = initial_from;
+				to = initial_to;
+				return false;
+			}
+			auto visit = [&](int flags) {
+				xy pos;
+				if (flags & 8) {
+					pos.x = from.x + (bounds.from.y - from.y) * (to.x - from.x) / (to.y - from.y);
+					pos.y = bounds.from.y;
+				} else if (flags & 4) {
+					pos.x = from.x + (bounds.to.y - from.y) * (to.x - from.x) / (to.y - from.y);
+					pos.y = bounds.to.y;
+				} else if (flags & 2) {
+					pos.x = bounds.to.x;
+					pos.y = from.y + (bounds.to.x - from.x) * (to.y - from.y) / (to.x - from.x);
+				} else {
+					pos.x = bounds.from.x;
+					pos.y = from.y + (bounds.from.x - from.x) * (to.y - from.y) / (to.x - from.x);
+				}
+				return pos;
+			};
+			if (from_flags) {
+				from = visit(from_flags);
+				from_flags = get_flags(from);
+			} else {
+				to = visit(to_flags);
+				to_flags = get_flags(to);
+			}
+		}
+
+	}
+
 	bool movement_UM_CheckIllegal(unit_t* u, execute_movement_struct& ems) {
 		u_unset_status_flag(u, unit_t::status_flag_collision);
-		auto should_move_to_legal = [&]() {
-			if (!u_ground_unit(u) || !is_blocked(u, u->sprite->position).first) return false;
+		auto check_illegal = [&]() {
+			if (!u_ground_unit(u)) return false;
+			bool blocked;
+			unit_t* blocking_unit;
+			std::tie(blocked, blocking_unit) = is_blocked(u, u->sprite->position);
+			if (!blocked) return false;
 			if (u_order_not_interruptible(u) || u_iscript_nobrk(u) || u_movement_flag(u, 8)) {
 				u_set_status_flag(u, unit_t::status_flag_collision);
 				return false;
@@ -5239,24 +5323,221 @@ struct state_functions {
 			xy move_to = u->sprite->position;
 
 			if (unit_type_can_fit_at(u->unit_type, move_to)) {
-				unit_t* blocking_unit = get_largest_blocking_unit(u, unit_bounding_box(u, move_to));
 				if (blocking_unit) {
-					xcept("should_move_to_legal: blocking unit fixme");
+					check_unit_movement_terrain_collision(u, xy());
+					auto find_move_to = [&]() {
+						bool other_unit_is_moving = false;
+						if (u_can_move(blocking_unit) && (!unit_is_at_move_target(blocking_unit) || blocking_unit->movement_state == movement_states::UM_CheckIllegal || blocking_unit->movement_state == movement_states::UM_MoveToLegal)) {
+							other_unit_is_moving = true;
+							if (lcg_rand(50, 0, 31) < 24) return;
+						} else {
+
+							auto super_bb = [&](const unit_t* a, const unit_t* b) {
+								rect r = unit_sprite_inner_bounding_box(a);
+								r.from.x -= b->unit_type->dimensions.to.x + 1;
+								r.from.y -= b->unit_type->dimensions.to.y + 1;
+								r.to.x += b->unit_type->dimensions.from.x + 1;
+								r.to.y += b->unit_type->dimensions.from.y + 1;
+								return r;
+							};
+
+							std::array<rect, 4> initial_rects;
+							rect initial_rect = super_bb(blocking_unit, u);
+							initial_rects.fill(initial_rect);
+							initial_rects[0].to.y = initial_rect.from.y;
+							initial_rects[1].from.x = initial_rect.to.x;
+							initial_rects[2].from.y = initial_rect.to.y;
+							initial_rects[3].to.x = initial_rect.from.x;
+
+							auto find_rects = [&](const auto& rects, rect bounds) {
+								static_vector<rect, 4> r;
+								for (auto v : rects) {
+									if (this->get_unique_sided_positions_within_bounds(v.from, v.to, bounds)) {
+										r.emplace_back(v.from, v.to);
+									}
+								}
+								return r;
+							};
+
+							auto vec = find_rects(initial_rects, u->terrain_no_collision_bounds);
+
+							rect find_bb = initial_rect;
+							find_bb.from.x -= u->unit_type->dimensions.from.x;
+							find_bb.from.y -= u->unit_type->dimensions.from.y;
+							find_bb.to.x += u->unit_type->dimensions.to.x;
+							find_bb.to.y += u->unit_type->dimensions.to.y;
+							for (const unit_t* n : find_units_noexpand(find_bb)) {
+								if (pathfinder_unit_can_collide_with(u, n, nullptr, true)) {
+									auto bounds = super_bb(n, u);
+									vec = find_rects(vec, bounds);
+								}
+							}
+
+							xy best_pos = u->sprite->position;
+							int best_distance = 9999;
+							for (auto& v : vec) {
+								xy pos = u->sprite->position;
+								if (pos.x > v.to.x) {
+									pos.x = v.to.x;
+								} else if (pos.x < v.from.x) {
+									pos.x = v.from.x;
+								}
+								if (pos.y > v.to.y) {
+									pos.y = v.to.y;
+								} else if (pos.y < v.from.y) {
+									pos.y = v.from.y;
+								}
+								int distance = xy_length(pos - u->sprite->position);
+								if (distance < best_distance) {
+									best_distance = distance;
+									best_pos = pos;
+								}
+							}
+							if (best_distance != 9999) {
+								if (unit_type_can_fit_at(u->unit_type, best_pos) && !is_blocked(u, best_pos).first && is_reachable(u->sprite->position, best_pos)) {
+									move_to = best_pos;
+									return;
+								}
+							}
+						}
+						direction_t dir = u->next_velocity_direction + direction_t::from_raw(16 * lcg_rand(50, -3, 3));
+						fp8 length = fp8::integer(lcg_rand(50, 2, 4) * 4);
+						if (!other_unit_is_moving && u_grounded_building(blocking_unit)) length *= 3;
+						move_to = u->sprite->position + to_xy(direction_xy(dir, length));
+						if (!is_blocked(u, move_to).first && is_reachable(u->sprite->position, move_to)) {
+							return;
+						}
+						if (xy_length(u->move_target.pos - u->sprite->position) <= 32 || lcg_rand(50, 0, 31) >= 24) {
+							move_to = u->sprite->position;
+							move_to.x += 16 * lcg_rand(50, -2, 2);
+							move_to.y += 16 * lcg_rand(50, -2, 2);
+						} else {
+							dir = xy_direction(u->move_target.pos - u->sprite->position) + direction_t::from_raw(16 * lcg_rand(50, -1, 1));
+							length = fp8::integer(8 + lcg_rand(50, 0, 2) * 4);
+							if (!other_unit_is_moving && u_grounded_building(blocking_unit)) length *= 3;
+							move_to = u->sprite->position + to_xy(direction_xy(dir, length));
+						}
+						if (!is_reachable(u->sprite->position, move_to)) {
+							move_to = u->sprite->position;
+						} else {
+							auto is_blocked_r = is_blocked(u, move_to);
+							if (is_blocked_r.first) {
+								if (!is_blocked_r.second) {
+									move_to = u->sprite->position;
+								} else if (other_unit_is_moving && !u_can_move(is_blocked_r.second)) {
+									move_to = u->sprite->position;
+								}
+							}
+						}
+					};
+					find_move_to();
 				}
 			} else {
-				xcept("should_move_to_legal: can't fit fixme");
+
+				auto* r = get_region_at(u->sprite->position);
+				if (r->walkable()) {
+					direction_t dir = xy_direction(to_xy(r->center) - u->sprite->position) + direction_t::from_raw(16 * lcg_rand(50, -2, 2));
+					int length = lcg_rand(50, 2, 4) * 8;
+					int center_length = xy_length(to_xy(r->center) - u->sprite->position);
+					if (length > center_length - 1) length = center_length - 1;
+					move_to = u->sprite->position + to_xy(direction_xy(dir, length));
+					if (!is_reachable(u->sprite->position, move_to)) move_to = u->sprite->position;
+				} else {
+					int best_distance = std::numeric_limits<int>::max();
+					regions_t::region* best_region = nullptr;
+					xy last_center_pos;
+					for (auto* n : r->walkable_neighbors) {
+						last_center_pos = to_xy(n->center);
+						int distance = xy_length(to_xy(n->center) - u->sprite->position);
+						if (distance < best_distance) {
+							best_distance = distance;
+							best_region = n;
+						}
+					}
+					if (best_region) {
+						direction_t dir;
+						bool maybe_outside = false;
+						if (u->sprite->position.x + 32 < best_region->area.from.x) maybe_outside = true;
+						if (u->sprite->position.x - 32 >= best_region->area.to.x) maybe_outside = true;
+						if (u->sprite->position.y + 32 < best_region->area.from.y) maybe_outside = true;
+						if (u->sprite->position.y - 32 < best_region->area.to.y) maybe_outside = true;
+						if (maybe_outside) {
+							// bug? seems like it should be best_region->center, not last_center_pos
+							dir = xy_direction(last_center_pos - u->sprite->position);
+						} else {
+							dir = xy_direction(pathfinder_adjust_destination(best_region, u->sprite->position) - u->sprite->position);
+						}
+
+						move_to = u->sprite->position + to_xy(direction_xy(dir, 64));
+
+					} else {
+						if (!r->non_walkable_neighbors.empty()) {
+							size_t random_index = lcg_rand(50, 0, r->non_walkable_neighbors.size() - 1);
+							auto* n = r->non_walkable_neighbors[random_index];
+							int length = xy_length(to_xy(n->center) - u->sprite->position);
+							if (length > 64) length = 64;
+							direction_t dir = xy_direction(to_xy(n->center) - u->sprite->position);
+							move_to = u->sprite->position + to_xy(direction_xy(dir, length));
+						}
+					}
+				}
 			}
 
 			move_to = restrict_move_target_to_valid_bounds(u, move_to);
 			if (move_to != u->sprite->position) {
-				xcept("should_move_to_legal fixme");
+				if (u->path) {
+					free_path(u->path);
+					u->path = nullptr;
+				}
+				if (unit_is_at_move_target(u) || u->movement_flags & 4) {
+					set_unit_move_target(u, move_to);
+				} else {
+					set_next_target_waypoint(u, move_to);
+					if (u->next_movement_waypoint != move_to) {
+						u->next_movement_waypoint = move_to;
+						u_set_movement_flag(u, 1);
+					}
+				}
+				path_t* path = new_path();
+				if (path) {
+					path->delay = 0;
+					// creation_frame is not set here :(
+					path->state_flags = 0;
+
+					// long_path[0] is uninitialized here, so we reproduce the uninitialized behavior
+					if (path->short_path.size() == 1) {
+						path->long_path.resize(1);
+					} else {
+						size_t index = path->short_path[1].x;
+						if (index < game_st.regions.regions.size()) {
+							path->long_path = {&game_st.regions.regions[index]};
+						} else path->long_path = {nullptr};
+					}
+
+					path->full_long_path_size = 1;
+					path->current_long_path_index = 0;
+					path->short_path = {move_to};
+					path->current_short_path_index = 0;
+
+					path->source = u->sprite->position;
+					path->destination = move_to;
+					path->next = move_to;
+
+					u->path = path;
+				}
+
+				u->terrain_no_collision_bounds = {};
 				return true;
 			} else {
 				u->status_flags |= unit_t::status_flag_collision;
 				return false;
 			}
 		};
-		if (!should_move_to_legal()) {
+		if (check_illegal()) {
+			u->pathing_flags |= 2;
+			u->movement_state = movement_states::UM_MoveToLegal;
+			return false;
+		} else {
 			u->pathing_flags &= ~(2 | 4);
 			if (unit_is_at_move_target(u) || u_movement_flag(u, 4)) {
 				u->movement_state = movement_states::UM_AtRest;
@@ -5264,11 +5545,7 @@ struct state_functions {
 				u->movement_state = movement_states::UM_AnotherPath;
 			}
 			return true;
-		} else {
-			u->pathing_flags |= 2;
-			u->movement_state = movement_states::UM_MoveToLegal;
 		}
-		return false;
 	}
 
 	bool movement_UM_Dormant(unit_t* u, execute_movement_struct& ems) {
@@ -5485,7 +5762,7 @@ struct state_functions {
 				direction_t slide_free_direction = direction_t::from_raw(-1);
 				xy movement = ems.position - u->sprite->position;
 				int desired_quadrant = direction_index(u->current_velocity_direction) / 64;
-				if (ems.position.x != u->sprite->position.x && (ems.position.y == u->sprite->position.y || check_unit_movement_terrain_collision(u, {movement.x, 0}))) {
+				if (ems.position.x != u->sprite->position.x && (ems.position.y == u->sprite->position.y || check_unit_movement_terrain_collision(u, xy{movement.x, 0}))) {
 					if (movement.x >= 0) {
 						if (desired_quadrant == 0) slide_free_direction = direction_t::from_raw(0);
 						if (desired_quadrant == 1) slide_free_direction = direction_t::from_raw(-128);
@@ -5881,6 +6158,55 @@ struct state_functions {
 		return false;
 	}
 
+	bool movement_UM_MoveToLegal(unit_t* u, execute_movement_struct& ems) {
+		if (!u->path) {
+			u->movement_state = movement_states::UM_CheckIllegal;
+			return true;
+		}
+
+		auto move = [&]() {
+			if (!is_moving_along_path(u)) return true;
+			update_unit_movement_values(u, ems);
+			if (is_in_map_bounds(u->unit_type, ems.position)) {
+				finish_unit_movement(u, ems);
+				return false;
+			} else {
+				if (u->next_velocity_direction == xy_direction(u->next_movement_waypoint - u->sprite->position)) {
+					return true;
+				} else {
+					update_unit_movement_values(u, ems);
+					update_unit_heading(u, u->current_velocity_direction);
+					return false;
+				}
+			}
+		};
+
+		if (u->pathing_flags & 4) {
+			u->pathing_flags &= ~4;
+			u_set_status_flag(u, unit_t::status_flag_collision);
+			if (u->path) {
+				free_path(u->path);
+				u->path = nullptr;
+			}
+			u->movement_state = movement_states::UM_AtRest;
+			return true;
+		} else {
+			if (u->path->state_flags & 1 || u->path->next != u->next_movement_waypoint) {
+				u->next_movement_waypoint = u->path->next;
+			}
+			if (move()) {
+				if (u->path) {
+					free_path(u->path);
+					u->path = nullptr;
+				}
+				check_unit_collision(u);
+				u_set_status_flag(u, unit_t::status_flag_collision);
+				u->movement_state = movement_states::UM_CheckIllegal;
+			}
+			return false;
+		}
+	}
+
 	bool execute_movement(unit_t* u) {
 		execute_movement_struct ems;
 		ems.refresh_vision = update_tiles;
@@ -5917,6 +6243,9 @@ struct state_functions {
 				break;
 			case movement_states::UM_CheckIllegal:
 				cont = movement_UM_CheckIllegal(u, ems);
+				break;
+			case movement_states::UM_MoveToLegal:
+				cont = movement_UM_MoveToLegal(u, ems);
 				break;
 
 			case movement_states::UM_FailedPath:
@@ -6409,7 +6738,10 @@ struct state_functions {
 
 	void remove_target_references(unit_t* u, const unit_t* target) {
 		auto test = [&](auto*& ref) {
-			if (ref == target) ref = nullptr;
+			if (ref == target) {
+				ref = nullptr;
+				return true;
+			} else return false;
 		};
 		test(u->current_build_unit);
 		test(u->order_target.unit);
@@ -6419,9 +6751,8 @@ struct state_functions {
 		test(u->irradiated_by);
 		if (ut_worker(u)) {
 			test(u->worker.target_resource_unit);
-			if (u->worker.is_gathering) {
+			if (u->worker.is_gathering && test(u->worker.gather_target)) {
 				u->worker.is_gathering = false;
-				test(u->worker.gather_target);
 			}
 		} else if (ut_flag(u, (unit_type_t::flags_t)2)) {
 			xcept("fixme: verify this flag");
@@ -7835,7 +8166,7 @@ struct state_functions {
 		a_vector<state::unit_finder_entry>::iterator i_begin;
 		a_vector<state::unit_finder_entry>::iterator i_end;
 		rect area;
-		unit_finder_search(const state_functions& funcs, rect area) : funcs(funcs), area(area) {
+		unit_finder_search(const state_functions& funcs, rect area, bool expand) : funcs(funcs), area(area) {
 			if (funcs.unit_finder_search_active) xcept("recursive unit_finder_search is not supported");
 			funcs.unit_finder_search_active = true;
 
@@ -7844,7 +8175,7 @@ struct state_functions {
 			};
 			int begin_x = area.from.x;
 			int end_x = area.to.x;
-			if (end_x - begin_x <= funcs.game_st.max_unit_width) {
+			if (expand && end_x - begin_x <= funcs.game_st.max_unit_width) {
 				end_x = begin_x + funcs.game_st.max_unit_width + 1;
 			}
 			i_begin = std::lower_bound(funcs.st.unit_finder_x.begin(), funcs.st.unit_finder_x.end(), begin_x, cmp_l);
@@ -7872,7 +8203,11 @@ struct state_functions {
 	};
 
 	unit_finder_search find_units(rect area) const {
-		return unit_finder_search(*this, area);
+		return unit_finder_search(*this, area, true);
+	}
+
+	unit_finder_search find_units_noexpand(rect area) const {
+		return unit_finder_search(*this, area, false);
 	}
 
 	template<typename F>
@@ -8068,7 +8403,7 @@ struct state_functions {
 		}
 
 		u->path = nullptr;
-		u->movement_state = 0;
+		u->movement_state = movement_states::UM_Init;
 		u->recent_order_timer = 0;
 		u_set_status_flag(u, unit_t::status_flag_invincible, ut_invincible(u));
 
@@ -8749,7 +9084,7 @@ struct state_functions {
 			u->path = nullptr;
 		}
 
-		u->movement_state = 0;
+		u->movement_state = movement_states::UM_Init;
 		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
 		else u->pathing_flags &= ~1;
 		if (u->subunit && !ut_turret(u)) {
@@ -8757,7 +9092,7 @@ struct state_functions {
 				free_path(u->subunit->path);
 				u->subunit->path = nullptr;
 			}
-			u->subunit->movement_state = 0;
+			u->subunit->movement_state = movement_states::UM_Init;
 			if (u->subunit->sprite->elevation_level < 12) u->subunit->pathing_flags |= 1;
 			else u->subunit->pathing_flags &= ~1;
 		}
@@ -8781,7 +9116,7 @@ struct state_functions {
 			free_path(u->path);
 			u->path = nullptr;
 		}
-		u->movement_state = 0;
+		u->movement_state = movement_states::UM_Init;
 		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
 		else u->pathing_flags &= ~1;
 		st.visible_units.remove(*u);

@@ -188,7 +188,7 @@ struct link_base {
 
 struct default_link_f {
 	template<typename T>
-	auto* operator()(T*ptr) {
+	auto* operator()(T* ptr) {
 		return (std::pair<T*, T*>*)&ptr->link;
 	}
 };
@@ -355,7 +355,7 @@ struct unit_t: flingy_t {
 		status_flag_flying = 4,
 		status_flag_8 = 8,
 		status_flag_burrowed = 0x10,
-		status_flag_in_building = 0x20,
+		status_flag_hidden = 0x20,
 
 		status_flag_requires_detector = 0x100,
 		status_flag_cloaked = 0x200,
@@ -380,6 +380,7 @@ struct unit_t: flingy_t {
 		status_flag_speed_upgrade = 0x10000000,
 		status_flag_cooldown_upgrade = 0x20000000,
 		status_flag_hallucination = 0x40000000,
+		status_flag_lifetime_expired = 0x80000000,
 	};
 
 	int owner;
@@ -456,6 +457,9 @@ struct unit_t: flingy_t {
 			int unknown_04;
 			int flag_spawn_frame;
 		} beacon;
+		struct {
+			sprite_t* nuke_dot;
+		} ghost;
 	};
 
 	struct {
@@ -495,9 +499,6 @@ struct unit_t: flingy_t {
 			struct {
 				unit_t* exit;
 			} nydus;
-			struct {
-				sprite_t* nuke_dot;
-			} ghost;
 			struct {
 				sprite_t* pylon_aura;
 			} pylon;
@@ -563,7 +564,6 @@ struct unit_t: flingy_t {
 	std::array<int, 9> acid_spore_time;
 
 	int bullet_behavior_3_by_3_attack_sequence;
-	void* ai;
 	int air_strength;
 	int ground_strength;
 	int repulse_flags;
