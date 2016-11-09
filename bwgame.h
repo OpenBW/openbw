@@ -142,8 +142,6 @@ struct state_base_copyable {
 
 	int update_tiles_countdown;
 
-	std::array<int, 12> selection_circle_color;
-
 	int order_timer_counter;
 	int secondary_order_timer_counter;
 	int current_frame;
@@ -194,8 +192,6 @@ struct state_base_copyable {
 	std::array<std::array<int, 12>, 3> supply_used;
 	std::array<std::array<int, 12>, 3> supply_available;
 
-	uint32_t local_mask;
-
 	std::array<uint32_t, 12> shared_vision;
 
 	a_vector<tile_id> gfx_creep_tiles;
@@ -207,8 +203,6 @@ struct state_base_copyable {
 	uint32_t lcg_rand_state;
 
 	int last_net_error;
-
-	rect viewport;
 
 	size_t allocated_order_count;
 	size_t active_bullets_size;
@@ -620,12 +614,6 @@ struct state_functions {
 		return false;
 	}
 
-	void update_sprite_some_images_set_redraw(sprite_t* sprite) {
-		for (image_t* img : ptr(sprite->images)) {
-			if (img->modifier == 11) img->flags |= image_t::flag_redraw;
-		}
-	}
-
 	int visible_hp_plus_shields(const unit_t* u) const {
 		int r = 0;
 		if (u->unit_type->has_shield) r += u->shield_points.integer_part();
@@ -675,9 +663,6 @@ struct state_functions {
 
 	void set_unit_hp(unit_t* u, fp8 hitpoints) {
 		u->hp = std::min(hitpoints, u->unit_type->hitpoints);
-		if (us_selected(u) && u->sprite->visibility_flags&st.local_mask) {
-			update_sprite_some_images_set_redraw(u->sprite);
-		}
 		if (u_completed(u)) {
 			// damage overlay stuff
 
@@ -835,28 +820,6 @@ struct state_functions {
 
 	}
 
-	bool create_selection_circle(sprite_t* sprite, int color, int imageid) {
-		return false;
-	}
-
-	void remove_selection_circle(sprite_t* sprite) {
-
-	}
-
-	// todo: does this stuff belong here, or should it be part of graphics stuff?
-	void update_selection_sprite(sprite_t* sprite, int color) {
-		if (!sprite->selection_timer) return;
-		--sprite->selection_timer;
-		if (~sprite->visibility_flags&st.local_mask) sprite->selection_timer = 0;
-		if (sprite->selection_timer & 8 || (sprite->selection_timer == 0 && s_flag(sprite, sprite_t::flag_selected))) {
-			if (!s_flag(sprite, (sprite_t::flags_t)1)) {
-				if (create_selection_circle(sprite, color, idenums::IMAGEID_Selection_Circle_22pixels)) {
-					sprite->flags |= 1;
-				}
-			}
-		} else remove_selection_circle(sprite);
-	}
-
 	fp8 unit_cloak_energy_cost(const unit_t* u) const {
 		switch (u->unit_type->id) {
 		case UnitTypes::Terran_Ghost:
@@ -892,9 +855,6 @@ struct state_functions {
 				if (u->secondary_order_type->id == Orders::Cloak) set_secondary_order(u, get_order_type(Orders::Nothing));
 			} else {
 				u->energy -= cost;
-				if (us_selected(u)) {
-					update_sprite_some_images_set_redraw(u->sprite);
-				}
 			}
 		} else {
 			fp8 max_energy = unit_max_energy(u);
@@ -902,9 +862,6 @@ struct state_functions {
 				max_energy = fp8::integer(50);
 			}
 			u->energy = std::min(u->energy + fp8::integer(8) / 256, max_energy);
-			if (us_selected(u)) {
-				update_sprite_some_images_set_redraw(u->sprite);
-			}
 		}
 	}
 
@@ -924,9 +881,6 @@ struct state_functions {
 			if (u->shield_points != max_shields) {
 				u->shield_points += fp8::integer(7) / 256;
 				if (u->shield_points > max_shields) u->shield_points = max_shields;
-				if (us_selected(u)) {
-					update_sprite_some_images_set_redraw(u->sprite);
-				}
 			}
 		}
 		if (u->unit_type->id == UnitTypes::Zerg_Zergling || u->unit_type->id == UnitTypes::Hero_Devouring_One) {
@@ -2616,10 +2570,6 @@ struct state_functions {
 	}
 
 	void update_unit(unit_t* u) {
-
-		if (!ut_turret(u) && !us_hidden(u)) {
-			update_selection_sprite(u->sprite, st.selection_circle_color[u->owner]);
-		}
 
 		update_unit_values(u);
 
@@ -6574,19 +6524,9 @@ struct state_functions {
 	}
 
 	void update_unit_sprite(unit_t* u) {
-		bool was_visible = (u->sprite->visibility_flags & st.local_mask) != 0;
 		if (update_thingy_visibility(u, u->unit_type->tile_size)) {
-			bool is_visible = (u->sprite->visibility_flags & st.local_mask) != 0;
 			if (u->subunit && !us_hidden(u->subunit)) {
 				set_sprite_visibility(u->subunit->sprite, u->sprite->visibility_flags);
-			}
-			if (was_visible && !is_visible) {
-				// some selection stuff
-				if (u_grounded_building(u) || (u->unit_type->id >= UnitTypes::Special_Floor_Missile_Trap && u->unit_type->id <= UnitTypes::Special_Right_Wall_Flame_Trap)) {
-					if (!unit_dead(u)) {
-						xcept("fixme create thingy");
-					}
-				}
 			}
 		}
 	}
@@ -6792,27 +6732,6 @@ struct state_functions {
 			removed_flags &= ~(1 << i);
 			for (unit_t* nu : ptr(st.player_units.at(i))) {
 				remove_target_references(nu, u);
-			}
-		}
-		if (changed_flags & st.local_mask) {
-			if (new_flags & st.local_mask) {
-				set_sprite_cloak_visible(u->sprite);
-				if (u->subunit) set_sprite_cloak_visible(u->subunit->sprite);
-			} else {
-				// selection stuff...
-				auto hide = [&](sprite_t* sprite) {
-					if (s_flag(sprite, sprite_t::flag_burrowed)) {
-						set_sprite_cloak_modifier(sprite, true, true, 0, 0);
-					} else {
-						for (image_t* image : ptr(sprite->images)) {
-							if (image->modifier >= 5 && image->modifier <= 7) {
-								set_image_modifier(image, image->modifier - 3);
-							}
-						}
-					}
-				};
-				hide(u->sprite);
-				if (u->subunit) hide(u->subunit->sprite);
 			}
 		}
 	}
@@ -7036,9 +6955,6 @@ struct state_functions {
 	}
 
 	void set_sprite_visibility(sprite_t* sprite, int visibility_flags) {
-		if ((sprite->visibility_flags & st.local_mask) != (visibility_flags & st.local_mask)) {
-			for (image_t* i : ptr(sprite->images)) i->flags |= image_t::flag_redraw;
-		}
 		sprite->visibility_flags = visibility_flags;
 	}
 
@@ -8738,7 +8654,6 @@ struct state_functions {
 
 		if (requires_detector_or_cloaked) {
 			set_sprite_cloak_modifier(u->sprite, u_requires_detector(u), u_cloaked(u), modifier_data1, modifier_data2);
-			if (u->detected_flags & st.local_mask) set_sprite_cloak_visible(u->sprite);
 		}
 
 		apply_unit_effects(u);
@@ -9154,21 +9069,6 @@ struct state_functions {
 				if (image->modifier == 0 || image->modifier == 2 || image->modifier == 4) {
 					image->modifier = 3;
 					image->flags |= image_t::flag_redraw;
-				}
-			}
-		}
-	}
-
-	void set_sprite_cloak_visible(sprite_t* sprite) {
-		if (s_flag(sprite, sprite_t::flag_burrowed)) {
-			xcept("set_sprite_cloak_visible fixme");
-		} else {
-			for (image_t* image : ptr(sprite->images)) {
-				if (image->modifier == 0) {
-					image->modifier = 6;
-					image->flags |= image_t::flag_redraw;
-				} else if (image->modifier >= 2 && image->modifier <= 4) {
-					set_image_modifier(image, image->modifier + 3);
 				}
 			}
 		}
@@ -11105,10 +11005,6 @@ struct game_load_functions : state_functions {
 				r.skip(2400);
 			}
 		};
-
-		// This doesn't really belong here, but it can stay until we have proper
-		// game setup code
-		st.local_mask = 1;
 
 		for (int i = 0; i < 12; ++i) {
 			st.alliances[i].fill(0);
