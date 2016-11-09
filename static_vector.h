@@ -21,7 +21,7 @@ struct static_vector {
 		friend static_vector;
 	private:
 		typedef const_iterator this_t;
-		typename static_vector::pointer ptr;
+		typename static_vector::const_pointer ptr;
 	public:
 		typedef std::random_access_iterator_tag iterator_category;
 		typedef typename static_vector::value_type value_type;
@@ -30,7 +30,7 @@ struct static_vector {
 		typedef typename static_vector::const_reference reference;
 		const_iterator() = default;
 		const_iterator(const const_iterator&) = default;
-		explicit const_iterator(typename static_vector::pointer ptr) : ptr(ptr) {}
+		explicit const_iterator(typename static_vector::const_pointer ptr) : ptr(ptr) {}
 		reference operator*() const {
 			return *ptr;
 		}
@@ -329,7 +329,7 @@ public:
 		return iterator(ptr_begin());
 	}
 	const_iterator begin() const {
-		return iterator(ptr_begin());
+		return const_iterator(ptr_begin());
 	}
 	const_iterator cbegin() const {
 		return iterator(ptr_begin());
