@@ -944,6 +944,12 @@ struct data_type_cast_helper<fp8, int16_t> {
 		return fp8::from_raw(v);
 	}
 };
+template<>
+struct data_type_cast_helper<fp1, uint8_t> {
+	fp1 operator()(uint8_t v) {
+		return fp1::from_raw(v);
+	}
+};
 
 template<typename to_T, typename from_T>
 to_T data_type_cast(from_T v) {

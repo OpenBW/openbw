@@ -39,9 +39,11 @@ struct unit_type_t {
 		flag_regens_hp = 0x80,
 
 		flag_two_units_in_one_egg = 0x400,
-		flag_detector = 0x800,
+		
 		flag_resource_depot = 0x1000,
 		flag_resource = 0x2000,
+		
+		flag_detector = 0x8000,
 
 		flag_creep = 0x20000,
 
@@ -100,8 +102,8 @@ struct unit_type_t {
 	int build_time;
 	int unknown2;
 	int group_flags;
-	int supply_provided;
-	int supply_required;
+	fp1 supply_provided;
+	fp1 supply_required;
 	size_t space_required;
 	size_t space_provided;
 	int build_score;

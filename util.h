@@ -501,6 +501,7 @@ struct fixed_point {
 
 };
 
+using fp1 = fixed_point<31, 1, true>;
 using fp8 = fixed_point<24, 8, true>;
 using ufp8 = fixed_point<24, 8, false>;
 using direction_t = fixed_point<0, 8, true, true>;

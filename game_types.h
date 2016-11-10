@@ -409,21 +409,17 @@ struct unit_t: flingy_t {
 	int displayed_unit_id;
 	int last_event_timer;
 	int last_event_color;
-	// _unused_0x08c
 	int rank_increase;
 	int kill_count;
 	int last_attacking_player;
 	int secondary_order_timer;
-	// int ai_action_flag;
 	int user_action_flags;
 	int current_button_set;
 	bool is_cloaked;
 	int movement_state;
-	std::array<unit_type_t*, 5> build_queue;
+	static_vector<const unit_type_t*, 5> build_queue;
 	fp8 energy;
-	int build_queue_slot;
 	int unit_id_generation;
-	//int secondary_order_id;
 	const order_type_t* secondary_order_type;
 	int building_overlay_state;
 	fp8 hp_construction_rate;
@@ -527,10 +523,7 @@ struct unit_t: flingy_t {
 	std::pair<unit_t*, unit_t*> burrowed_unit_link;
 
 	union {
-		struct {
-			xy position;
-			unit_t* unit;
-		} rally;
+		target_t rally;
 		struct {
 			std::pair<unit_t*, unit_t*> psi_link;
 		} pylon;
