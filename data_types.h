@@ -92,7 +92,7 @@ struct unit_type_t {
 	int last_pissed_sound;
 	int first_yes_sound;
 	int last_yes_sound;
-	xy tile_size;
+	xy placement_size;
 	int addon_horizontal;
 	int addon_vertical;
 	rect dimensions;

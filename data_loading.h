@@ -1056,7 +1056,7 @@ unit_types_t load_units_dat(const data_T& data) {
 	rawr(uint16_t, last_pissed_sound, units_count);
 	rawr(uint16_t, first_yes_sound, units_count);
 	rawr(uint16_t, last_yes_sound, units_count);
-	rawr(int16_t, tile_size, total_count);
+	rawr(int16_t, placement_size, total_count);
 	rawr(uint16_t, addon_horizontal, buildings_count);
 	rawr(uint16_t, addon_vertical, buildings_count);
 	rawr(int16_t, dimensions, total_count);

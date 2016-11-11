@@ -1017,6 +1017,13 @@ struct state_functions {
 		if (u->unit_type->id == UnitTypes::Special_Map_Revealer) return true;
 		return false;
 	}
+	
+	bool unit_is_refinery(const unit_t* u) const {
+		if (u->unit_type->id == UnitTypes::Terran_Refinery) return true;
+		if (u->unit_type->id == UnitTypes::Protoss_Assimilator) return true;
+		if (u->unit_type->id == UnitTypes::Zerg_Extractor) return true;
+		return false;
+	}
 
 	bool unit_target_is_undetected(const unit_t* u, const unit_t* target) const {
 		if (!u_cloaked(target) && !u_requires_detector(target)) return false;
@@ -1682,7 +1689,7 @@ struct state_functions {
 		xcept("drop_carried_items: fixme");
 	}
 	
-	bool has_available_supply_for(int owner, const unit_type_t* unit_type, bool show_error) {
+	bool has_available_supply_for(int owner, const unit_type_t* unit_type, bool show_error = false) const {
 		if (ut_flag(unit_type, (unit_type_t::flags_t)0x1000000)) return true;
 		auto supply_required = unit_type->supply_required;
 		if (ut_flag(unit_type, unit_type_t::flag_two_units_in_one_egg)) supply_required *= 2;
@@ -1711,17 +1718,24 @@ struct state_functions {
 		return true;
 	}
 	
+	bool has_available_resources_for(int owner, const unit_type_t* unit_type, bool show_error = false) const {
+		if (st.current_minerals[owner] < unit_type->mineral_cost) {
+			// todo: callback for error message/sound?
+			(void)show_error;
+			return false;
+		}
+		if (st.current_gas[owner] < unit_type->gas_cost) {
+			// todo: callback for error message/sound?
+			(void)show_error;
+			return false;
+		}
+		return true;
+	}
+	
 	bool build_queue_push(unit_t* u, const unit_type_t* unit_type) {
 		if (u->build_queue.size() >= 5) return false;
 		if (u->build_queue.empty() && !has_available_supply_for(u->owner, unit_type, true)) return false;
-		if (st.current_minerals[u->owner] < unit_type->mineral_cost) {
-			// todo: callback for error message/sound?
-			return false;
-		}
-		if (st.current_gas[u->owner] < unit_type->gas_cost) {
-			// todo: callback for error message/sound?
-			return false;
-		}
+		if (!has_available_resources_for(u->owner, unit_type, true)) return false;
 		u->build_queue.push_back(unit_type);
 		if (!ut_flag(unit_type, unit_type_t::flag_building)) {
 			st.current_minerals[u->owner] -= unit_type->mineral_cost;
@@ -1730,6 +1744,48 @@ struct state_functions {
 		return true;
 	}
 	
+	bool train_unit(unit_t* u, const unit_type_t* unit_type) {
+		if (build_queue_push(u, unit_type)) {
+			set_secondary_order(u, get_order_type(Orders::Train));
+			return true;
+		} else return false;
+	}
+	
+	void place_building(unit_t* u, const order_type_t* order_type, xy position, const unit_type_t* unit_type) {
+		if (order_type->id == Orders::BuildingLand) {
+			set_unit_order(u, order_type, position);
+			return;
+		}
+		if (u->unit_type->id == UnitTypes::Zerg_Drone) {
+			if (u->order_type->id == Orders::DroneBuild) return;
+			if (u->order_type->id == Orders::DroneLand && (u_order_not_interruptible(u) || u_iscript_nobrk(u))) return;
+		}
+		if (u->unit_type->id == UnitTypes::Zerg_Nydus_Canal && order_type->id == Orders::BuildNydusExit) {
+			set_unit_order(u, order_type, position);
+			return;
+		}
+		if (order_type->id == Orders::CTFCOP2) {
+			set_unit_order(u, order_type, position);
+			return;
+		}
+		if (!has_available_supply_for(u->owner, unit_type, true)) return;
+		if (!has_available_resources_for(u->owner, unit_type, true)) return;
+		set_unit_order(u, order_type, position);
+		if (!u->build_queue.empty()) xcept("place_building: refund build queue");
+		if (ut_building(u) && ut_flag(unit_type, unit_type_t::flag_building)) {
+			xcept("place_building: fixme addon");
+		} else {
+			build_queue_push(u, unit_type);
+		}
+	}
+	
+	bool can_place_building(int owner, xy pos, const unit_type_t* unit_type) const {
+		if (!has_available_supply_for(owner, unit_type, true)) return false;
+		if (!has_available_resources_for(owner, unit_type, true)) return false;
+		// todo: check tiles
+		log("can_place_building: fixme\n");
+		return true;
+	}
 
 	void order_SelfDestructing(unit_t* u) {
 		drop_carried_items(u);
@@ -2083,6 +2139,199 @@ struct state_functions {
 		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
 		idle(u);
 	}
+	
+	void order_PlaceBuilding(unit_t* u) {
+		if (u->order_state == 0) {
+			if (u->order_target.unit) {
+				u->order_target.pos = u->order_target.unit->sprite->position;
+			}
+			set_unit_move_target(u, u->order_target.pos);
+			set_next_target_waypoint(u, u->order_target.pos);
+			u->order_state = 1;
+		} else if (u->order_state == 1) {
+			if (unit_is_at_move_target(u)) {
+				const unit_type_t* unit_type = u->build_queue.front();
+				if (xy_length(to_xy_fp8(u->order_target.pos) - u->exact_position).integer_part() <= 128 && can_place_building(u->owner, u->order_target.pos, unit_type)) {
+					st.current_minerals[u->owner] -= unit_type->mineral_cost;
+					st.current_gas[u->owner] -= unit_type->gas_cost;
+					u_unset_status_flag(u, unit_t::status_flag_ground_unit);
+					u->sprite->elevation_level = u->unit_type->elevation_level + 1;
+					if (u->order_queue.empty()) {
+						queue_order_back(u, get_order_type(Orders::ResetCollision), {});
+						queue_order_back(u, u->unit_type->return_to_idle, {});
+					} else {
+						queue_order_front(u, get_order_type(Orders::ResetCollision), {});
+					}
+					unit_t* build_unit;
+					if (unit_type->id == UnitTypes::Terran_Refinery) xcept("fixme build refinery");
+					else build_unit = create_unit(unit_type, u->order_target.pos, u->owner);
+					u->build_queue.erase(u->build_queue.begin());
+					if (build_unit) {
+						build_unit->connected_unit = u;
+						u->order_type = get_order_type(Orders::ConstructingBuilding);
+						u->order_state = 3;
+						u->order_target.unit = build_unit;
+						set_unit_order(build_unit, get_order_type(Orders::IncompleteBuilding));
+					} else {
+						display_last_net_error_for_player(u->owner);
+						set_unit_order(u, u->unit_type->return_to_idle, {});
+					}
+				} else {
+					idle(u);
+				}
+			}
+		}
+	}
+	
+	void order_IncompleteBuilding(unit_t* u) {
+		if (u->order_state == 0) {
+			if (u->hp > u->unit_type->hitpoints / 5) ++u->order_state;
+		} else if (u->order_state == 1) {
+			sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
+			++u->order_state;
+		} else if (u->order_state == 2) {
+			if (u->hp > u->unit_type->hitpoints * 2 / 5) ++u->order_state;
+		} else if (u->order_state == 3) {
+			sprite_run_anim(u->sprite, iscript_anims::SpecialState2);
+			++u->order_state;
+		} else if (u->order_state == 4) {
+			if (u->hp > u->unit_type->hitpoints * 3 / 5) ++u->order_state;
+		} else if (u->order_state == 5) {
+			set_construction_graphic(u, false);
+			sprite_run_anim(u->sprite, iscript_anims::AlmostBuilt);
+			++u->order_state;
+		} else if (u->order_state == 6) {
+			if (u->hp > u->unit_type->hitpoints * 4 / 5) set_unit_order(u, get_order_type(Orders::Nothing));
+		}
+	}
+	
+	void order_ConstructingBuilding(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		auto done = [&]() {
+			sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
+			if (target) {
+				target->connected_unit = nullptr;
+				// todo: callback for sound?
+				if (ut_building(target) && target->owner == u->owner && unit_is_refinery(target)) {
+					set_unit_order(u, get_order_type(Orders::Harvest1), target);
+				} else {
+					idle(u);
+				}
+			}
+		};
+		if (!target || !ut_building(target)) {
+			done();
+			return;
+		}
+		
+		bool build = u->order_state >= 4;
+		
+		if (u->order_state == 0 || u->order_state == 2) {
+			if (u->order_state == 0) {
+				move_to_target_reset(u, target);
+				u->order_state = 2;
+			}
+			if (unit_is_at_move_target(u)) {
+				if (unit_is_at_move_target(u)) {
+					if (u_immovable(u) || (target->connected_unit != u && target->connected_unit->order_target.unit == target)) {
+						idle(u);
+					} else {
+						target->connected_unit = u;
+						u_unset_status_flag(u, unit_t::status_flag_ground_unit);
+						u->sprite->elevation_level = u->unit_type->elevation_level + 1;
+						set_queued_order(u, false, get_order_type(Orders::ResetCollision), {});
+						set_queued_order(u, false, u->unit_type->return_to_idle, {});
+						set_unit_move_target(u, target->sprite->position);
+						set_next_target_waypoint(u, target->sprite->position);
+						u->order_state = 3;
+					}
+				}
+			}
+		} else if (u->order_state == 3) {
+			if (unit_is_at_move_target(u)) u->order_state = 4;
+		} else if (u->order_state == 4) {
+			rect sprite_rect;
+			sprite_rect.from = target->sprite->position - xy(target->sprite->width / 2, target->sprite->height / 2);
+			sprite_rect.to = sprite_rect.from + xy(target->sprite->width - 1, target->sprite->height - 1);
+			rect placement_rect;
+			placement_rect.from = target->sprite->position - target->unit_type->placement_size / 2;
+			placement_rect.to = placement_rect.from + target->unit_type->placement_size - xy(1, 1);
+			rect inside_rect;
+			inside_rect.from = placement_rect.from + u->unit_type->dimensions.from + xy(1, 1);
+			inside_rect.to = placement_rect.to - u->unit_type->dimensions.to - xy(1, 1);
+			if (inside_rect.from.x < sprite_rect.from.x) inside_rect.from.x = sprite_rect.from.x;
+			if (inside_rect.from.y < sprite_rect.from.y) inside_rect.from.y = sprite_rect.from.y;
+			if (inside_rect.to.x > sprite_rect.to.x) inside_rect.to.x = sprite_rect.to.x;
+			if (inside_rect.to.y > sprite_rect.to.y) inside_rect.to.y = sprite_rect.to.y;
+			xy pos;
+			pos.x = lcg_rand(9, sprite_rect.from.x, sprite_rect.to.x);
+			pos.y = lcg_rand(9, sprite_rect.from.y, sprite_rect.to.y);
+			pos = restrict_move_target_to_valid_bounds(u, pos);
+			if (check_unit_movement_terrain_collision(u, pos - u->sprite->position)) {
+				pos.x = lcg_rand(9, inside_rect.from.x, inside_rect.to.x);
+				pos.y = lcg_rand(9, inside_rect.from.y, inside_rect.to.y);
+				pos = restrict_move_target_to_valid_bounds(u, pos);
+			}
+			set_unit_move_target(u, pos);
+			set_next_target_waypoint(u, pos);
+			u->order_target.pos = pos;
+			u->order_state = 5;
+		} else if (u->order_state == 5) {
+			u->order_state = 6;
+		} else if (u->order_state == 6) {
+			if (xy_length(to_xy_fp8(u->order_target.pos) - u->exact_position).integer_part() <= 20) {
+				stop_unit(u);
+				set_next_target_waypoint(u, target->sprite->position);
+				u->order_target.pos = u->sprite->position + to_xy(direction_xy(xy_direction(u->next_target_waypoint - u->sprite->position), 20));
+				u->order_state = 7;
+			}
+		} else if (u->order_state == 7) {
+			bool next = false;
+			if (u->position == u->next_target_waypoint) next = true;
+			else {
+				auto* weapon = unit_ground_weapon(u);
+				if (weapon) {
+					auto heading_error = fp8::extend(u->heading - xy_direction(u->next_target_waypoint - u->sprite->position)).abs();
+					if (heading_error < weapon->attack_angle) next = true;
+				}
+			}
+			if (next) {
+				u->main_order_timer = 30 + (lcg_rand(10) & 63);
+				sprite_run_anim(u->sprite, iscript_anims::AlmostBuilt);
+				u->order_state = 8;
+			}
+		} else if (u->order_state == 8) {
+			if (u->main_order_timer == 0) {
+				sprite_run_anim(u->sprite, iscript_anims::GndAttkToIdle);
+				u->order_state = 4;
+			}
+		}
+		
+		if (build) {
+			resume_building_unit(target, false);
+			if (u_completed(target)) {
+				done();
+			}
+		}
+		
+	}
+	
+	void order_ResetCollision(unit_t* u) {
+		u->sprite->elevation_level = u->unit_type->elevation_level;
+		u_unset_status_flag(u, unit_t::status_flag_gathering);
+		u_unset_status_flag(u, unit_t::status_flag_no_collide);
+		u_set_status_flag(u, unit_t::status_flag_ground_unit);
+		if (u->path) {
+			free_path(u->path);
+			u->path = nullptr;
+		}
+		u->movement_state = movement_states::UM_Init;
+		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
+		else u->pathing_flags &= ~1;
+		if (!u->order_queue.empty()) set_queued_order(u, false, u->unit_type->return_to_idle, {});
+		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+		idle(u);
+	}
 
 	void execute_main_order(unit_t* u) {
 		switch (u->order_type->id) {
@@ -2116,13 +2365,13 @@ struct state_functions {
 			xcept("DroneBuild");
 			break;
 		case Orders::PlaceBuilding:
-			xcept("PlaceBuilding");
+			order_PlaceBuilding(u);
 			break;
 		case Orders::PlaceProtossBuilding:
 			xcept("PlaceProtossBuilding");
 			break;
 		case Orders::ConstructingBuilding:
-			xcept("ConstructingBuilding");
+			order_ConstructingBuilding(u);
 			break;
 		case Orders::Repair:
 			xcept("Repair");
@@ -2134,7 +2383,7 @@ struct state_functions {
 			xcept("ZergUnitMorph");
 			break;
 		case Orders::IncompleteBuilding:
-			xcept("IncompleteBuilding");
+			order_IncompleteBuilding(u);
 			break;
 		case Orders::IncompleteMorphing:
 			xcept("IncompleteMorphing");
@@ -2185,7 +2434,7 @@ struct state_functions {
 			xcept("InitializeArbiter");
 			break;
 		case Orders::ResetCollision:
-			xcept("ResetCollision");
+			order_ResetCollision(u);
 			break;
 		case Orders::ResetHarvestCollision:
 			order_ResetHarvestCollision(u);
@@ -5117,29 +5366,42 @@ struct state_functions {
 		else if (xy_length(path->destination - path->next) < 16) u_set_movement_flag(u, 0x40);
 		return true;
 	}
+	
+	path_t* create_single_step_path(xy source, xy destination) {
+		path_t* path = new_path();
+		if (!path) return nullptr;
+		path->delay = 0;
+		// creation_frame is not set here :(
+		path->state_flags = 0;
+
+		// long_path[0] is uninitialized here, so we reproduce the uninitialized behavior
+		if (path->short_path.size() <= 1) {
+			path->long_path.resize(1);
+		} else {
+			size_t index = path->short_path[1].x;
+			if (index < game_st.regions.regions.size()) {
+				path->long_path = {&game_st.regions.regions[index]};
+			} else path->long_path = {nullptr};
+		}
+
+		path->full_long_path_size = 1;
+		path->current_long_path_index = 0;
+		path->short_path = {destination};
+		path->current_short_path_index = 0;
+
+		path->source = source;
+		path->destination = destination;
+		path->next = destination;
+		
+		return path;
+	}
 
 	bool unit_path_to(unit_t* u, xy to, const unit_t* consider_collision_with_unit = nullptr, bool consider_collision_with_moving_units = false) {
 		if (is_moving_along_path(u)) return true;
 		if (!u_ground_unit(u)) {
 			set_unit_move_target(u, to);
-			// Not sure if this can trigger. If it can, then BroodWar has a potential null pointer
-			// dereference in UM_FollowPath since from here this function returns true even if
-			// path allocation fails.
-			// Flying units don't do pathfinding though, so this should be unreachable.
-			xcept("unit_path_to called for flying unit");
-//			path_t* path = new_path();
-//			if (!path) return false;
-//			path->delay = 0;
-//			// creation_frame is not set here :(
-//			path->state_flags = 0;
-//			path->long_path = {??};
-//			path->full_long_path_size = 1;
-//			path->current_long_path_index = 0;
-//			path->short_path = {to};
-//			path->current_short_path_index = 0;
-
-//			path->source = u->sprite->position;
-//			path->destination = to;
+			u->path = create_single_step_path(u->sprite->position, to);
+			if (!u->path) return false;
 			return true;
 		}
 		if (!path_progress(u, to, consider_collision_with_unit, consider_collision_with_moving_units)) return false;
@@ -5603,34 +5865,7 @@ struct state_functions {
 						u_set_movement_flag(u, 1);
 					}
 				}
-				path_t* path = new_path();
-				if (path) {
-					path->delay = 0;
-					// creation_frame is not set here :(
-					path->state_flags = 0;
-
-					// long_path[0] is uninitialized here, so we reproduce the uninitialized behavior
-					if (path->short_path.size() <= 1) {
-						path->long_path.resize(1);
-					} else {
-						size_t index = path->short_path[1].x;
-						if (index < game_st.regions.regions.size()) {
-							path->long_path = {&game_st.regions.regions[index]};
-						} else path->long_path = {nullptr};
-					}
-
-					path->full_long_path_size = 1;
-					path->current_long_path_index = 0;
-					path->short_path = {move_to};
-					path->current_short_path_index = 0;
-
-					path->source = u->sprite->position;
-					path->destination = move_to;
-					path->next = move_to;
-
-					u->path = path;
-				}
-
+				u->path = create_single_step_path(u->sprite->position, move_to);
 				u->terrain_no_collision_bounds = {};
 				return true;
 			} else {
@@ -6687,7 +6922,7 @@ struct state_functions {
 	}
 
 	void update_unit_sprite(unit_t* u) {
-		if (update_thingy_visibility(u, u->unit_type->tile_size)) {
+		if (update_thingy_visibility(u, u->unit_type->placement_size)) {
 			if (u->subunit && !us_hidden(u->subunit)) {
 				set_sprite_visibility(u->subunit->sprite, u->sprite->visibility_flags);
 			}
@@ -7953,7 +8188,7 @@ struct state_functions {
 			}
 			if (!create_image(sprite_type->image, sprite, { 0,0 }, image_order_above)) return false;
 			sprite->width = std::min(sprite->main_image->grp->width, (size_t)0xff);
-			sprite->height = std::min(sprite->main_image->grp->width, (size_t)0xff);
+			sprite->height = std::min(sprite->main_image->grp->height, (size_t)0xff);
 			return true;
 		};
 
@@ -8412,13 +8647,13 @@ struct state_functions {
 	}
 
 	void set_unit_tiles_occupied(const unit_t* u, xy position) {
-		xy size(u->unit_type->tile_size.x / 32u, u->unit_type->tile_size.y / 32u);
+		xy size(u->unit_type->placement_size.x / 32u, u->unit_type->placement_size.y / 32u);
 		xy pos(position.x / 32u, position.y / 32u);
 		tiles_flags_or(pos.x - size.x / 2, pos.y - size.y / 2, size.x, size.y, tile_t::flag_occupied);
 	}
 
 	void set_unit_tiles_unoccupied(const unit_t* u, xy position) {
-		xy size(u->unit_type->tile_size.x / 32u, u->unit_type->tile_size.y / 32u);
+		xy size(u->unit_type->placement_size.x / 32u, u->unit_type->placement_size.y / 32u);
 		xy pos(position.x / 32u, position.y / 32u);
 		tiles_flags_and(pos.x - size.x / 2, pos.y - size.y / 2, size.x, size.y, ~tile_t::flag_occupied);
 	}
