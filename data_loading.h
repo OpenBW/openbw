@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <array>
 #include <cstring>
+#include <cstdio>
 
 namespace bwgame {
 namespace data_loading {
@@ -23,56 +24,83 @@ struct is_std_array<std::array<T, N>> : std::true_type{};
 //       and all functions should set it through a reference or similar (optional/variant?).
 //  (allocators can still throw exceptions if they want to)
 
-bool is_native_little_endian() {
+static inline bool is_native_little_endian() {
 	union endian_t {uint32_t a; uint8_t b;};
 	return (endian_t{1}).b == 1;
+}
+
+template<typename T, bool little_endian, typename std::enable_if<!is_std_array<T>::value>::type* = nullptr>
+static inline T value_at(const uint8_t* ptr) {
+	static_assert(std::is_integral<T>::value, "can only read integers and arrays of integers");
+	union endian_t {uint32_t a; uint8_t b;};
+	const bool native_little_endian = (endian_t{1}).b == 1;
+	if (little_endian == native_little_endian) {
+		if (((uintptr_t)ptr & (alignof(T) - 1)) == 0) {
+			return *(T*)ptr;
+		} else {
+			typename std::aligned_storage<sizeof(T), alignof(T)>::type buf;
+			memcpy(&buf, ptr, sizeof(T));
+			return *(T*)&buf;
+		}
+	} else {
+		T r = 0;
+		for (size_t i = 0; i < sizeof(T); ++i) {
+			r |= (T)ptr[i] << ((little_endian ? i : sizeof(T) - 1 - i) * 8);
+		}
+		return r;
+	}
+}
+template<typename T, bool little_endian, typename std::enable_if<is_std_array<T>::value>::type* = nullptr>
+static inline T value_at(const uint8_t* ptr) {
+	T r;
+	for (auto& v : r) {
+		v = value_at<typename std::remove_reference<decltype(v)>::type, little_endian>(ptr);
+		ptr += sizeof(v);
+	}
+	return r;
+}
+
+template<bool little_endian, typename T>
+static inline void set_value_at(uint8_t* ptr, T value) {
+	static_assert(std::is_integral<T>::value, "can only write integers");
+	union endian_t {uint32_t a; uint8_t b;};
+	const bool native_little_endian = (endian_t{1}).b == 1;
+	if (little_endian == native_little_endian) {
+		if (((uintptr_t)ptr & (alignof(T) - 1)) == 0) {
+			*(T*)ptr = value;
+		} else {
+			memcpy(ptr, &value, sizeof(T));
+		}
+	} else {
+		for (size_t i = 0; i < sizeof(T); ++i) {
+			ptr[i] = value >> ((little_endian ? i : sizeof(T) - 1 - i) * 8);
+		}
+	}
+}
+
+template<typename T, bool little_endian, typename self_T>
+T get_impl(self_T& self) {
+	typename std::aligned_storage<sizeof(T), alignof(T)>::type buf;
+	self.get_bytes((uint8_t*)&buf, sizeof(T));
+	return value_at<T, little_endian>((uint8_t*)&buf);
 }
 
 template<bool default_little_endian = true, bool bounds_checking = true>
 struct data_reader {
 	const uint8_t* ptr = nullptr;
+	const uint8_t* begin = nullptr;
 	const uint8_t* end = nullptr;
 	data_reader() = default;
-	data_reader(const uint8_t* ptr, const uint8_t* end) : ptr(ptr), end(end) {}
-	template<typename T, bool little_endian, typename std::enable_if<is_std_array<T>::value>::type* = nullptr>
-	static T value_at(const uint8_t* ptr) {
-		T r;
-		for (auto& v : r) {
-			v = value_at<typename std::remove_reference<decltype(v)>::type, little_endian>(ptr);
-			ptr += sizeof(v);
-		}
-		return r;
-	}
-	template<typename T, bool little_endian, typename std::enable_if<!is_std_array<T>::value>::type* = nullptr>
-	static T value_at(const uint8_t* ptr) {
-		static_assert(std::is_integral<T>::value, "can only read integers and arrays of integers");
-		union endian_t {uint32_t a; uint8_t b;};
-		const bool native_little_endian = (endian_t{1}).b == 1;
-		if (little_endian == native_little_endian) {
-			if (((uintptr_t)ptr & (alignof(T) - 1)) == 0) {
-				return *(T*)ptr;
-			} else {
-				typename std::aligned_storage<sizeof(T), alignof(T)>::type buf;
-				memcpy(&buf, ptr, sizeof(T));
-				return *(T*)&buf;
-			}
-		} else {
-			T r = 0;
-			for (size_t i = 0; i < sizeof(T); ++i) {
-				r |= (T)ptr[i] << ((little_endian ? i : sizeof(T) - 1 - i) * 8);
-			}
-			return r;
-		}
-	}
+	data_reader(const uint8_t* ptr, const uint8_t* end) : ptr(ptr), begin(ptr), end(end) {}
 	template<typename T, bool little_endian = default_little_endian>
 	T get() {
-		if (bounds_checking && ptr + sizeof(T) > end) xcept("data_reader: attempt to read past end");
+		if (bounds_checking && left() < sizeof(T)) xcept("data_reader: attempt to read past end");
 		ptr += sizeof(T);
 		return value_at<T, little_endian>(ptr - sizeof(T));
 	}
 	const uint8_t* get_n(size_t n) {
 		const uint8_t* r = ptr;
-		if (bounds_checking && (ptr + n > end || ptr + n < ptr)) xcept("data_reader: attempt to read past end");
+		if (bounds_checking && left() < n) xcept("data_reader: attempt to read past end");
 		ptr += n;
 		return r;
 	}
@@ -86,17 +114,29 @@ struct data_reader {
 		return r;
 	}
 	void skip(size_t n) {
-		if (bounds_checking && (ptr + n > end || ptr + n < ptr)) xcept("data_reader: attempt to seek past end");
+		if (bounds_checking && left() < n) xcept("data_reader: attempt to seek past end");
 		ptr += n;
 	}
-	size_t left() {
+	void get_bytes(uint8_t* dst, size_t n) {
+		memcpy(dst, get_n(n), n);
+	}
+	void seek(size_t offset) {
+		if (offset > size()) xcept("data_reader: attempt to seek past end");
+		ptr = begin + offset;
+	}
+	size_t left() const {
 		return end - ptr;
+	}
+	size_t size() const {
+		return (size_t)(end - begin);
+	}
+	size_t tell() const {
+		return (size_t)(ptr - begin);
 	}
 };
 
 using data_reader_le = data_reader<true>;
 using data_reader_be = data_reader<false>;
-
 
 
 template<typename base_reader_T, size_t page_size = 0x1000, bool default_little_endian = true>
@@ -110,7 +150,7 @@ struct paged_reader {
 		file_size = reader.size();
 	}
 	void get_bytes(uint8_t* dst, size_t n) {
-		if (file_pointer + n > file_size) xcept("paged_reader: attempt to read past end");
+		if (left() < n) xcept("paged_reader: attempt to read past end");
 		if (n > page_size / 2) {
 			reader.seek(file_pointer);
 			reader.get_bytes(dst, n);
@@ -143,15 +183,25 @@ struct paged_reader {
 	T get() {
 		uint8_t buffer[sizeof(T)];
 		get_bytes(buffer, sizeof(T));
-		return data_reader<>::value_at<T, little_endian>(buffer);
+		return value_at<T, little_endian>(buffer);
 	}
 
 	void seek(size_t offset) {
-		if (offset >= file_size) xcept("paged_reader: attempt to seek past end");
+		if (offset > file_size) xcept("paged_reader: attempt to seek past end");
 		file_pointer = offset;
 	}
+	
+	size_t left() const {
+		return file_size - file_pointer;
+	}
+	size_t size() const {
+		return file_size;
+	}
+	size_t tell() const {
+		return file_pointer;
+	}
 
-	bool eof() {
+	bool eof() const {
 		return file_pointer == file_size;
 	}
 };
@@ -196,7 +246,7 @@ struct file_reader {
 	T get() {
 		uint8_t buffer[sizeof(T)];
 		get_bytes(buffer, sizeof(T));
-		return data_reader<>::value_at<T, little_endian>(buffer);
+		return value_at<T, little_endian>(buffer);
 	}
 
 	template<typename T, bool little_endian = default_little_endian, typename std::enable_if<sizeof(T) == 1>::type* = nullptr>
@@ -224,6 +274,13 @@ struct file_reader {
 
 	bool eof() {
 		return feof(f);
+	}
+	
+	size_t left() const {
+		return size() - tell();
+	}
+	size_t tell() const {
+		return (size_t)ftell(f);
 	}
 
 	size_t size() {
@@ -253,24 +310,6 @@ static auto get_crypt_table() {
 	return crypt_table;
 }
 
-template<typename crypt_table_T>
-void decrypt_inplace(void* data, size_t size, uint32_t key, const crypt_table_T& crypt_table) {
-	uint8_t* ptr = (uint8_t*)data;
-	uint8_t* end = ptr + size / 4 * 4;
-	uint32_t add_n = 0xeeeeeeee;
-	while (ptr != end) {
-		add_n += crypt_table[(key&0xff) + 1024];
-		uint32_t xor_n = key + add_n;
-		ptr[0] ^= xor_n;
-		ptr[1] ^= xor_n >> 8;
-		ptr[2] ^= xor_n >> 16;
-		ptr[3] ^= xor_n >> 24;
-		add_n = add_n * 33 + ((uint32_t)ptr[0] | (uint32_t)ptr[1] << 8 | (uint32_t)ptr[2] << 16 | (uint32_t)ptr[3] << 24) + 3;
-		key = ((~key << 21) + 0x11111111) | key >> 11;
-		ptr += 4;
-	}
-}
-
 template<typename base_reader_T, bool default_little_endian = true>
 struct encrypted_reader {
 	base_reader_T& reader;
@@ -278,7 +317,7 @@ struct encrypted_reader {
 	uint32_t key;
 	uint32_t add_n = 0xeeeeeeee;
 	const crypt_table_t& crypt_table;
-	std::array<uint8_t, 4> data;
+	uint32_t data;
 	size_t data_n = 0;
 	size_t pos = 0;
 	encrypted_reader(base_reader_T& reader, size_t end_pos, uint32_t key, const crypt_table_t& crypt_table) : reader(reader), end_pos(end_pos), key(key), crypt_table(crypt_table) {
@@ -286,37 +325,30 @@ struct encrypted_reader {
 
 	void next() {
 		pos += 4;
-		auto d = reader.template get<std::array<uint8_t, 4>>();
+		auto d = reader.template get<uint32_t, true>();
 		add_n += crypt_table[(key&0xff) + 1024];
 		uint32_t xor_n = key + add_n;
-		data[0] = d[0] ^ xor_n;
-		data[1] = d[1] ^ xor_n >> 8;
-		data[2] = d[2] ^ xor_n >> 16;
-		data[3] = d[3] ^ xor_n >> 24;
-		add_n = add_n * 33 + ((uint32_t)data[0] | (uint32_t)data[1] << 8 | (uint32_t)data[2] << 16 | (uint32_t)data[3] << 24) + 3;
+		data = d ^ xor_n;
+		add_n = add_n * 33 + data + 3;
 		key = ((~key << 21) + 0x11111111) | key >> 11;
 	}
 
 	void get_bytes(uint8_t* dst, size_t n) {
-		size_t npos = pos - data_n + n;
-		if (npos > end_pos) xcept("encrypted_reader: attempt to read past end");
+		if (left() < n) xcept("encrypted_reader: attempt to read past end");
 		size_t i = 0;
 		if (data_n) {
 			for (;i != std::min(n, data_n); ++i) {
-				dst[i] = data[4 - data_n +  i];
+				dst[i] = data >> (8 * (4 - data_n + i));
 			}
 			data_n -= std::min(n, data_n);
 		}
 		while (i + 4 <= n) {
 			next();
-			dst[i] = data[0];
-			dst[i + 1] = data[1];
-			dst[i + 2] = data[2];
-			dst[i + 3] = data[3];
+			set_value_at<true>(dst + i, data);
 			i += 4;
 		}
 		if (i != n) {
-			if (pos + 4 > end_pos) {
+			if (end_pos - pos < 4) {
 				reader.get_bytes(&dst[i], n - i);
 				data_n = 0;
 				pos += n - i;
@@ -324,7 +356,7 @@ struct encrypted_reader {
 				next();
 				data_n = 4 - (n - i);
 				for (size_t i2 = 0; i != n; ++i, ++i2) {
-					dst[i] = data[i2];
+					dst[i] = data >> (8 * i2);
 				}
 			}
 		}
@@ -332,9 +364,17 @@ struct encrypted_reader {
 
 	template<typename T, bool little_endian = default_little_endian>
 	T get() {
-		std::array<uint8_t, sizeof(T)> buffer;
-		get_bytes(buffer.data(), buffer.size());
-		return data_reader<>::value_at<T, little_endian>(buffer.data());
+		return get_impl<T, little_endian>(*this);
+	}
+	
+	size_t left() const {
+		return end_pos - pos + data_n;
+	}
+	size_t size() const {
+		return end_pos;
+	}
+	size_t tell() const {
+		return pos - data_n;
 	}
 
 };
@@ -360,38 +400,43 @@ static uint32_t string_hash(const char* str, int n, const crypt_table_t& crypt_t
 template<typename base_reader_T, bool default_little_endian = true>
 struct bit_reader {
 	base_reader_T& r;
-	int data;
+	uint64_t data{};
 	size_t bits_n = 0;
 	explicit bit_reader(base_reader_T& r) : r(r) {}
 	void next() {
-		data = r.template get<uint8_t>();
+		auto left = r.left();
+		if (left >= 4) {
+			data |= (uint64_t)r.template get<uint32_t, true>() << bits_n;
+			bits_n += 32;
+			return;
+		}
+		switch (left) {
+		case 1:
+			data |= (uint64_t)r.template get<uint8_t>() << bits_n;
+			bits_n += 8;
+			break;
+		case 2:
+			data |= (uint64_t)r.template get<uint16_t, true>() << bits_n;
+			bits_n += 16;
+			break;
+		case 3:
+			data |= (uint64_t)r.template get<uint16_t, true>() << bits_n;
+			bits_n += 16;
+			data |= (uint64_t)r.template get<uint8_t>() << bits_n;
+			bits_n += 8;
+			break;
+		}
 	}
 	template<size_t bits, bool little_endian = default_little_endian>
 	auto get_bits() {
+		static_assert(bits <= 32, "bit_reader: only up to 32 bit reads are supported");
 		using r_t = uint_fastn_t<bits>;
-		r_t r{};
-		size_t i = 0;
-		if (bits_n) {
-			r |= (r_t)data >> (8 - bits_n);
-			if (bits < 8 && bits < bits_n) {
-				r &= ((r_t)1 << bits) - 1;
-				i += bits;
-				bits_n -= bits;
-			} else {
-				i += bits_n;
-				bits_n = 0;
-			}
-		}
-		while (i + 8 <= bits) {
+		if (bits_n < bits) {
 			next();
-			r |= (r_t)data << i;
-			i += 8;
 		}
-		if (i != bits) {
-			next();
-			bits_n = 8 - (bits - i);
-			r |= ((r_t)data & (((r_t)1 << (bits - i)) - 1)) << i;
-		}
+		r_t r = data & (((r_t)1 << bits) - 1);
+		data >>= bits;
+		bits_n -= bits;
 		return r;
 	}
 	template<typename T, bool little_endian = default_little_endian>
@@ -724,9 +769,7 @@ struct mpq_archive_file_reader {
 
 	template<typename T, bool little_endian = default_little_endian>
 	T get() {
-		std::array<uint8_t, sizeof(T)> buf;
-		get_bytes(buf.data(), buf.size());
-		return data_reader<>::value_at<T, little_endian>(buf.data());
+		return get_impl<T, little_endian>(*this);
 	}
 
 	size_t size() const {
@@ -842,15 +885,35 @@ auto make_mpq_archive_reader(base_reader_T& reader) {
 	return mpq_archive_reader<base_reader_T>(reader);
 }
 
+struct mpq_data {
+	data_reader<> r;
+	mpq_archive_reader<data_reader<>> mpq;
+	explicit mpq_data(uint8_t* data, size_t data_size) : r(data, data + data_size), mpq(r) {}
+	void operator()(a_vector<uint8_t>& dst, a_string filename) {
+		auto file_r = mpq.open(std::move(filename));
+		size_t len = file_r.size();
+		dst.resize(len);
+		file_r.get_bytes(dst.data(), len);
+		return;
+	}
+};
+
+struct mpq_file {
+	file_reader<> file;
+	paged_reader<file_reader<>> paged;
+	mpq_archive_reader<paged_reader<file_reader<>>> mpq;
+	explicit mpq_file(a_string filename) : file(std::move(filename)), paged(file), mpq(paged) {}
+	void operator()(a_vector<uint8_t>& dst, a_string filename) {
+		auto file_r = mpq.open(std::move(filename));
+		size_t len = file_r.size();
+		dst.resize(len);
+		file_r.get_bytes(dst.data(), len);
+		return;
+	}
+};
 
 struct data_files_loader {
-	struct mpq_t {
-		file_reader<> file;
-		paged_reader<file_reader<>> paged;
-		mpq_archive_reader<paged_reader<file_reader<>>> mpq;
-		explicit mpq_t(a_string filename) : file(std::move(filename)), paged(file), mpq(paged) {}
-	};
-	a_list<mpq_t> mpqs;
+	a_list<mpq_file> mpqs;
 
 	void add_mpq_file(a_string filename) {
 		mpqs.emplace_back(std::move(filename));
@@ -859,10 +922,7 @@ struct data_files_loader {
 	void operator()(a_vector<uint8_t>& dst, a_string filename) {
 		for (auto& v : mpqs) {
 			if (v.mpq.file_exists(filename)) {
-				auto file_r = v.mpq.open(filename);
-				size_t len = file_r.size();
-				dst.resize(len);
-				file_r.get_bytes(dst.data(), len);
+				v(dst, std::move(filename));
 				return;
 			}
 		}
@@ -877,15 +937,6 @@ static inline data_files_loader data_files_directory(a_string path) {
 	r.add_mpq_file(path + "BrooDat.mpq");
 	r.add_mpq_file(path + "StarDat.mpq");
 	return r;
-}
-
-static void load_data_file(a_vector<uint8_t>& dst, bwgame::a_string archive_filename, bwgame::a_string filename) {
-	auto mpq_file_r = file_reader<>(archive_filename);
-	auto mpq_r = make_mpq_archive_reader(mpq_file_r);
-	auto file_r = mpq_r.open(filename);
-	size_t len = file_r.size();
-	dst.resize(len);
-	file_r.get_bytes(dst.data(), len);
 }
 
 template<typename to_T, typename from_T, typename std::enable_if<!std::is_pointer<to_T>::value>::type* = nullptr>
