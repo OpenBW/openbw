@@ -1,3 +1,5 @@
+#ifndef BWGAME_BWGAME_H
+#define BWGAME_BWGAME_H
 
 #include "util.h"
 #include "data_types.h"
@@ -33,6 +35,12 @@ static void bw_insert_list(cont_T& cont, T& v) {
 	if (cont.empty()) cont.push_front(v);
 	else cont.insert(++cont.begin(), v);
 }
+
+enum {
+	race_zerg,
+	race_terran,
+	race_protoss
+};
 
 struct global_state {
 
@@ -123,9 +131,6 @@ struct game_state {
 
 	std::array<xy, 12> start_locations;
 
-	bool is_replay;
-	int local_player;
-
 	int max_unit_width;
 	int max_unit_height;
 
@@ -161,9 +166,9 @@ struct state_base_copyable {
 			controller_user_left,
 			controller_computer_defeated
 		};
-		int controller;
-		int race;
-		int force;
+		int controller = controller_inactive;
+		int race = race_zerg;
+		int force = 0;
 	};
 	std::array<player_t, 12> players;
 
@@ -472,6 +477,9 @@ struct state_functions {
 	bool ut_detector(const unit_t* u) const {
 		return ut_flag(u, unit_type_t::flag_detector);
 	}
+	bool ut_creep(const unit_t* u) const {
+		return ut_flag(u, unit_type_t::flag_creep);
+	}
 
 	bool us_selected(const unit_t* u) const {
 		return us_flag(u, sprite_t::flag_selected);
@@ -628,11 +636,11 @@ struct state_functions {
 		}
 	}
 
-	bool unit_type_spreads_creep(const unit_type_t* ut, bool include_non_evolving) const {
-		if (ut->id == UnitTypes::Zerg_Hatchery && include_non_evolving) return true;
+	bool unit_type_spreads_creep(const unit_type_t* ut, bool completed_only) const {
+		if (ut->id == UnitTypes::Zerg_Hatchery && completed_only) return true;
 		if (ut->id == UnitTypes::Zerg_Lair) return true;
 		if (ut->id == UnitTypes::Zerg_Hive) return true;
-		if (ut->id == UnitTypes::Zerg_Creep_Colony && include_non_evolving) return true;
+		if (ut->id == UnitTypes::Zerg_Creep_Colony && completed_only) return true;
 		if (ut->id == UnitTypes::Zerg_Spore_Colony) return true;
 		if (ut->id == UnitTypes::Zerg_Sunken_Colony) return true;
 		return false;
@@ -1582,7 +1590,7 @@ struct state_functions {
 			image_type = get_image_type(image_type->id + 1);
 			if (is_minerals) {
 				gathered = resource->building.resource.resource_count;
-				order_SelfDestructing(resource);
+				kill_unit(resource);
 			} else {
 				resource->building.resource.resource_count = 0;
 				gathered = 2;
@@ -1592,7 +1600,7 @@ struct state_functions {
 			gathered = 8;
 			if (is_minerals) {
 				if (resource->building.resource.resource_count == 0) {
-					order_SelfDestructing(resource);
+					kill_unit(resource);
 				}
 			} else {
 				if (resource->building.resource.resource_count < 8) {
@@ -1699,11 +1707,11 @@ struct state_functions {
 		}
 		size_t index;
 		if (unit_type->group_flags & GroupFlags::Zerg) {
-			index = 0;
+			index = race_zerg;
 		} else if (unit_type->group_flags & GroupFlags::Terran) {
-			index = 1;
+			index = race_terran;
 		} else if (unit_type->group_flags & GroupFlags::Protoss) {
-			index = 2;
+			index = race_zerg;
 		} else return false;
 		if (st.supply_used[owner][index] + supply_required > fp1::integer(200)) {
 			// todo: callback for error message/sound?
@@ -1786,14 +1794,18 @@ struct state_functions {
 		log("can_place_building: fixme\n");
 		return true;
 	}
-
-	void order_SelfDestructing(unit_t* u) {
+	
+	void kill_unit(unit_t* u) {
 		drop_carried_items(u);
 		while (!u->order_queue.empty()) {
 			remove_queued_order(u, &u->order_queue.front());
 		}
 		set_queued_order(u, true, get_order_type(Orders::Die), {});
 		activate_next_order(u);
+	}
+
+	void order_SelfDestructing(unit_t* u) {
+		kill_unit(u);
 	}
 
 	void order_Stop(unit_t* u) {
@@ -2941,7 +2953,7 @@ struct state_functions {
 	void execute_secondary_order(unit_t* u) {
 		if (u->secondary_order_type->id == Orders::Hallucination2) {
 			if (u->defensive_matrix_hp || u->stim_timer || u->ensnare_timer || u->lockdown_timer || u->irradiate_timer || u->stasis_timer || u->parasite_flags || u->storm_timer || u->plague_timer || u->is_blind || u->maelstrom_timer) {
-				order_SelfDestructing(u);
+				kill_unit(u);
 			}
 			return;
 		}
@@ -7702,13 +7714,6 @@ struct state_functions {
 			image_t* image = create_image(image_type, script_image->sprite, offset, order, script_image);
 			if (!image) return (image_t*)nullptr;
 
-			if (image->modifier == 0 && iscript_unit && u_hallucination(iscript_unit)) {
-				if (game_st.is_replay || iscript_unit->owner == game_st.local_player) {
-					set_image_modifier(image, image_t::modifier_hallucination);
-					image->modifier_data1 = 0;
-					image->modifier_data2 = 0;
-				}
-			}
 			if (image->flags & image_t::flag_has_directional_frames) {
 				int dir = script_image->flags & image_t::flag_horizontally_flipped ? 32 - script_image->frame_index_offset : script_image->frame_index_offset;
 				set_image_heading_by_index(image, dir);
@@ -8828,7 +8833,7 @@ struct state_functions {
 				}
 				if (u->current_build_unit) {
 					if (u->secondary_order_type->id == Orders::Train || u->secondary_order_type->id == Orders::TrainFighter) {
-						order_SelfDestructing(u->current_build_unit);
+						kill_unit(u->current_build_unit);
 					}
 				}
 				set_secondary_order(u, get_order_type(Orders::Nothing));
@@ -9770,7 +9775,7 @@ struct state_functions {
 			display_last_net_error_for_player(owner);
 			return nullptr;
 		}
-		if (unit_type_spreads_creep(unit_type, true) || unit_type->flags&unit_type_t::flag_creep) {
+		if (unit_type_spreads_creep(unit_type, true) || ut_flag(unit_type, unit_type_t::flag_creep)) {
 			xcept("apply creep");
 		}
 		finish_building_unit(u);
@@ -9780,6 +9785,14 @@ struct state_functions {
 
 		complete_unit(u);
 
+		return u;
+	}
+	
+	unit_t* create_completed_unit(const unit_type_t* unit_type, xy pos, int owner) {
+		unit_t* u = create_unit(unit_type, pos, owner);
+		if (!u) return nullptr;
+		finish_building_unit(u);
+		if (place_completed_unit(u)) complete_unit(u);
 		return u;
 	}
 
@@ -9794,6 +9807,11 @@ struct game_load_functions : state_functions {
 	explicit game_load_functions(state& st) : state_functions(st) {}
 
 	game_state& game_st = *st.game;
+	
+	struct setup_info_t {
+		bool use_map_settings = false;
+	};
+	setup_info_t setup_info;
 
 	unit_type_t* get_unit_type(int id) const {
 		if ((size_t)id >= 228) xcept("invalid unit id %d", id);
@@ -9879,7 +9897,18 @@ struct game_load_functions : state_functions {
 				v[i] = get_upgrade_type(i)->max_level;
 			}
 		}
-		st.upgrade_levels.fill({});
+		
+		st.alliances = {};
+		for (size_t i = 0; i != 12; ++i) {
+			st.alliances[i] = {};
+			st.alliances[i][i] = 1;
+		}
+		for (size_t i = 0; i != 12; ++i) {
+			st.alliances[i][11] = 1;
+			st.alliances[11][i] = 1;
+		}
+		
+		st.upgrade_levels = {};
 		// upgrade progress?
 		// UPRP stuff?
 
@@ -9969,9 +9998,6 @@ struct game_load_functions : state_functions {
 		st.allocated_order_count = 0;
 
 		st.last_net_error = 0;
-
-		game_st.is_replay = false;
-		game_st.local_player = 0;
 
 		int max_unit_width = 0;
 		int max_unit_height = 0;
@@ -11139,6 +11165,39 @@ struct game_load_functions : state_functions {
 
 		set_mega_tile_flags();
 	}
+	
+	void create_starting_units(int owner, xy position, int race) {
+		
+		const unit_type_t* resource_depot_type;
+		if (race == race_zerg) resource_depot_type = get_unit_type(UnitTypes::Zerg_Hatchery);
+		else if (race == race_terran) resource_depot_type = get_unit_type(UnitTypes::Terran_Command_Center);
+		else resource_depot_type = get_unit_type(UnitTypes::Protoss_Nexus);
+		
+		xy resource_depot_pos = (position - resource_depot_type->placement_size / 2) / 32u * 32u + resource_depot_type->placement_size / 2;
+		rect placement_rect;
+		placement_rect.from = resource_depot_pos - resource_depot_type->placement_size / 2;
+		placement_rect.to = placement_rect.from + resource_depot_type->placement_size;
+		for (unit_t* u : find_units(placement_rect)) {
+			u->user_action_flags |= 4;
+			kill_unit(u);
+		}
+		unit_t* resource_depot = create_completed_unit(resource_depot_type, resource_depot_pos, owner);
+		if (resource_depot) {
+			if (unit_type_spreads_creep(resource_depot_type, true) || ut_creep(resource_depot)) {
+				xcept("create_starting_units: fixme creep");
+			}
+		}
+		
+		const unit_type_t* worker_type;
+		if (race == race_zerg) worker_type = get_unit_type(UnitTypes::Zerg_Drone);
+		else if (race == race_terran) worker_type = get_unit_type(UnitTypes::Terran_SCV);
+		else worker_type = get_unit_type(UnitTypes::Protoss_Probe);
+		
+		for (size_t i = 0; i != 4; ++i) {
+			create_completed_unit(worker_type, position, owner);
+		}
+		
+	}
 
 	struct tag_t {
 		tag_t() = default;
@@ -11152,15 +11211,21 @@ struct game_load_functions : state_functions {
 			return std::hash<uint32_t>()((uint32_t)v.data[0] | (uint32_t)v.data[1] << 8 | (uint32_t)v.data[2] << 16 | (uint32_t)v.data[3] << 24);
 		}
 	};
+	
+	void load_map_file(a_string filename, std::function<void()> setup_f = {}) {
+		load_map(data_loading::mpq_file(std::move(filename)));
+	}
+	
+	template<typename load_data_file_F>
+	void load_map(load_data_file_F&& load_data_file, std::function<void()> setup_f = {}) {
+		a_vector<uint8_t> data;
+		load_data_file(data, "staredit/scenario.chk");
+		load_map_data(data.data(), data.size(), std::move(setup_f));
+	}
 
-	void load_map_file(const a_string& filename) {
-
-		// campaign stuff? see load_map_file
+	void load_map_data(uint8_t* data, size_t data_size, std::function<void()> setup_f = {}) {
 
 		//log("load map file '%s'\n", filename);
-
-		a_vector<uint8_t> data;
-		data_loading::load_data_file(data, filename, "staredit\\scenario.chk");
 
 		using data_loading::data_reader_le;
 
@@ -11172,7 +11237,7 @@ struct game_load_functions : state_functions {
 
 		using tag_list_t = a_vector<std::pair<tag_t, bool>>;
 		auto read_chunks = [&](const tag_list_t&tags) {
-			data_reader_le r(data.data(), data.data() + data.size());
+			data_reader_le r(data, data + data_size);
 			a_unordered_map<tag_t, data_reader_le, tag_t> chunks;
 			while (r.left()) {
 				tag_t tag = r.get<std::array<char, 4>>();
@@ -11216,8 +11281,6 @@ struct game_load_functions : state_functions {
 		tag_funcs["OWNR"] = [&](data_reader_le r) {
 			for (size_t i = 0; i < 12; ++i) {
 				st.players[i].controller = r.get<int8_t>();
-				if (st.players[i].controller == state::player_t::controller_open) st.players[i].controller = state::player_t::controller_occupied;
-				if (st.players[i].controller == state::player_t::controller_computer) st.players[i].controller = state::player_t::controller_computer_game;
 			}
 		};
 		tag_funcs["SIDE"] = [&](data_reader_le r) {
@@ -11234,7 +11297,7 @@ struct game_load_functions : state_functions {
 				size_t offset = r.get<uint16_t>();
 				auto t = start;
 				t.skip(offset);
-				char*b = (char*)t.ptr;
+				char* b = (char*)t.ptr;
 				while (t.get<char>());
 				game_st.map_strings[i] = a_string(b, (char*)t.ptr - b - 1);
 				//log("string %d: %s\n", i, game_st.map_strings[i]);
@@ -11296,11 +11359,8 @@ struct game_load_functions : state_functions {
 
 			regions_create();
 		};
-
-		bool bVictoryCondition = false;
-		bool bStartingUnits = false;
-		bool bTournamentModeEnabled = false;
-		bool bAlliesEnabled = true;
+		
+		bool use_map_settings = false;
 
 		tag_funcs["THG2"] = [&](data_reader_le r) {
 			while (r.left()) {
@@ -11319,7 +11379,7 @@ struct game_load_functions : state_functions {
 					if (unit_type == UnitTypes::Special_Right_Upper_Level_Door) owner = 11;
 					if (unit_type == UnitTypes::Special_Pit_Door) owner = 11;
 					if (unit_type == UnitTypes::Special_Right_Pit_Door) owner = 11;
-					if ((!bVictoryCondition && !bStartingUnits && !bTournamentModeEnabled) || owner == 11) {
+					if (use_map_settings || owner == 11) {
 						xcept("create (thingy) unit of type %d", unit_type);
 						if (flags & 0x80) xcept("disable thingy unit");
 					}
@@ -11435,19 +11495,19 @@ struct game_load_functions : state_functions {
 		};
 
 		tag_funcs["UNIS"] = [&](data_reader_le r) {
-			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
+			if (!use_map_settings) xcept("wrong game mode");
 			units(r, false);
 		};
 		tag_funcs["UPGS"] = [&](data_reader_le r) {
-			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
+			if (!use_map_settings) xcept("wrong game mode");
 			upgrades(r, false);
 		};
 		tag_funcs["TECS"] = [&](data_reader_le r) {
-			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
+			if (!use_map_settings) xcept("wrong game mode");
 			techdata(r, false);
 		};
 		tag_funcs["PUNI"] = [&](data_reader_le r) {
-			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
+			if (!use_map_settings) xcept("wrong game mode");
 			auto player_available = r.get_vec<std::array<uint8_t, 228>>(12);
 			auto global_available = r.get_vec<uint8_t>(228);
 			auto player_uses_global_default = r.get_vec<std::array<uint8_t, 228>>(12);
@@ -11458,32 +11518,32 @@ struct game_load_functions : state_functions {
 			}
 		};
 		tag_funcs["UPGR"] = [&](data_reader_le r) {
-			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
+			if (!use_map_settings) xcept("wrong game mode");
 			upgrade_restrictions(r, false);
 		};
 		tag_funcs["PTEC"] = [&](data_reader_le r) {
-			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
+			if (!use_map_settings) xcept("wrong game mode");
 			tech_restrictions(r, false);
 		};
 
 		tag_funcs["UNIx"] = [&](data_reader_le r) {
-			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
+			if (!use_map_settings) xcept("wrong game mode");
 			units(r, true);
 		};
 		tag_funcs["UPGx"] = [&](data_reader_le r) {
-			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
+			if (!use_map_settings) xcept("wrong game mode");
 			upgrades(r, true);
 		};
 		tag_funcs["TECx"] = [&](data_reader_le r) {
-			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
+			if (!use_map_settings) xcept("wrong game mode");
 			techdata(r, true);
 		};
 		tag_funcs["PUPx"] = [&](data_reader_le r) {
-			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
+			if (!use_map_settings) xcept("wrong game mode");
 			upgrade_restrictions(r, true);
 		};
 		tag_funcs["PTEx"] = [&](data_reader_le r) {
-			if (bVictoryCondition || bStartingUnits || bTournamentModeEnabled) xcept("wrong game mode");
+			if (!use_map_settings) xcept("wrong game mode");
 			tech_restrictions(r, true);
 		};
 
@@ -11518,11 +11578,7 @@ struct game_load_functions : state_functions {
 
 				if (unit_type->id == UnitTypes::Special_Start_Location) {
 					game_st.start_locations[owner] = { x, y };
-					// 				int local_player = 0;
-					// 				if (owner == local_player) {
-					// 					int move_screen_to_tile_x = x / 32 >= 10 ? x / 32 - 10 : 0;
-					// 					int move_screen_to_tile_y = y / 32 >= 6 ? y / 32 - 6 : 0;
-					// 				}
+					// todo: some callback to set initial screen position?
 					continue;
 				}
 				auto should_create_units_for_this_player = [&]() {
@@ -11547,8 +11603,8 @@ struct game_load_functions : state_functions {
 					return false;
 				};
 				if (!should_create_units_for_this_player()) continue;
-				if (bStartingUnits && !is_neutral_unit()) continue;
-				if (!bVictoryCondition && !bStartingUnits && !bTournamentModeEnabled) {
+				if (!use_map_settings && !is_neutral_unit()) continue;
+				if (use_map_settings) {
 					// what is player_force?
 					std::array<int, 12> player_force{};
 					if (player_force[owner] && ~unit_type->group_flags & GroupFlags::Neutral) continue;
@@ -11575,6 +11631,11 @@ struct game_load_functions : state_functions {
 				//log("created initial unit %p with id %d\n", u, u - st.units.data());
 
 			}
+			
+			for (unit_t* u : ptr(st.visible_units)) {
+				update_unit_sprite(u);
+			}
+			
 		};
 
 		tag_funcs["UPRP"] = [&](data_reader_le r) {
@@ -11626,38 +11687,6 @@ struct game_load_functions : state_functions {
 			}
 		};
 
-		for (int i = 0; i < 12; ++i) {
-			st.alliances[i].fill(0);
-			st.alliances[i][i] = 1;
-		}
-
-		for (int i = 0; i < 12; ++i) {
-			st.alliances[i][11] = 1;
-			st.alliances[11][i] = 1;
-
-			if (bAlliesEnabled && !bTournamentModeEnabled) {
-				for (int i2 = 0; i2 < 12; ++i2) {
-					if (st.players[i].controller == state::player_t::controller_computer_game && st.players[i2].controller == state::player_t::controller_computer_game) {
-						st.alliances[i][i2] = 2;
-					}
-				}
-			}
-		}
-
-		for (int i = 0; i < 12; ++i) {
-			st.shared_vision[i] = 1 << i;
-			if (st.players[i].controller == state::player_t::controller_rescue_passive || st.players[i].controller == state::player_t::controller_neutral) {
-				for (int i2 = 0; i2 < 12; ++i2) {
-					st.alliances[i][i2] = 1;
-					st.alliances[i2][i] = 1;
-				}
-			}
-		}
-
-		if (!bVictoryCondition && !bStartingUnits && !bTournamentModeEnabled) {
-
-		}
-
 		allow_random = true;
 
 		read_chunks({
@@ -11674,34 +11703,74 @@ struct game_load_functions : state_functions {
 
 		reset();
 
+		for (size_t i = 0; i != 12; ++i) {
+			st.shared_vision[i] = 1 << i;
+			if (st.players[i].controller == state::player_t::controller_rescue_passive || st.players[i].controller == state::player_t::controller_neutral) {
+				for (int i2 = 0; i2 < 12; ++i2) {
+					st.alliances[i][i2] = 1;
+					st.alliances[i2][i] = 1;
+				}
+			}
+		}
+		
+		if (setup_f) {
+			setup_f();
+			use_map_settings = setup_info.use_map_settings;
+		} else {
+			for (size_t i = 0; i != 12; ++i) {
+				if (st.players[i].controller == state::player_t::controller_open) st.players[i].controller = state::player_t::controller_occupied;
+				if (st.players[i].controller == state::player_t::controller_computer) st.players[i].controller = state::player_t::controller_computer_game;
+			}
+		}
+
 		if (version == 59) {
 
-			// todo: check game mode
-			// this is for use map settings
-			tag_list_t tags = {
-				{"STR ", true},
-				{"MTXM", true},
-				{"THG2", true},
-				{"MASK", true},
-				{"UNIS", true},
-				{"UPGS", true},
-				{"TECS", true},
-				{"PUNI", true},
-				{"UPGR", true},
-				{"PTEC", true},
-				{"UNIx", false},
-				{"UPGx", false},
-				{"TECx", false},
-				{"PUPx", false},
-				{"PTEx", false},
-				{"UNIT", true},
-				{"UPRP", true},
-				{"MRGN", true},
-				{"TRIG", true}
-			};
-			read_chunks(tags);
+			if (use_map_settings) {
+				read_chunks({
+					{"STR ", true},
+					{"MTXM", true},
+					{"THG2", true},
+					{"MASK", true},
+					{"UNIS", true},
+					{"UPGS", true},
+					{"TECS", true},
+					{"PUNI", true},
+					{"UPGR", true},
+					{"PTEC", true},
+					{"UNIx", false},
+					{"UPGx", false},
+					{"TECx", false},
+					{"PUPx", false},
+					{"PTEx", false},
+					{"UNIT", true},
+					{"UPRP", true},
+					{"MRGN", true},
+					{"TRIG", true}
+				});
+			} else {
+				read_chunks({
+					{"STR ", true},
+					{"MTXM", true},
+					{"THG2", true},
+					{"UNIT", true}
+				});
+			}
 
 		} else xcept("unsupported map version %d", version);
+		
+		if (!use_map_settings) {
+			for (size_t i = 8; i;) {
+				--i;
+				int controller = st.players[i].controller;
+				int race = st.players[i].race;
+				if (controller != state::player_t::controller_occupied && controller != state::player_t::controller_computer_game) continue;
+				create_starting_units(i, game_st.start_locations[i], race);
+			}
+			for (size_t i = 0; i != 12; ++i) {
+				st.current_minerals[i] = 50;
+				st.total_minerals_gathered[i] = 50;
+			}
+		}
 
 		allow_random = false;
 
@@ -12154,10 +12223,12 @@ void global_init(global_state& st, load_data_file_F&& load_data_file) {
 }
 
 struct game_player {
-	state* st = nullptr;
+private:
 	std::unique_ptr<global_state> uptr_global_st;
 	std::unique_ptr<game_state> uptr_game_st;
 	std::unique_ptr<state> uptr_st;
+	optional<state_functions> opt_funcs;
+public:
 	game_player() = default;
 	template<typename T>
 	explicit game_player(T&& init_arg) {
@@ -12174,25 +12245,36 @@ struct game_player {
 		uptr_global_st = std::make_unique<global_state>();
 		uptr_game_st = std::make_unique<game_state>();
 		uptr_st = std::make_unique<state>();
-		st = uptr_st.get();
-		st->global = uptr_global_st.get();
-		st->game = uptr_game_st.get();
+		state& st = *uptr_st;
+		st.global = uptr_global_st.get();
+		st.game = uptr_game_st.get();
 		global_init(*uptr_global_st, std::forward<load_data_file_F>(load_data_file));
+		set_st(st);
 	}
-	void load_map_file(const a_string& filename) {
-		if (!st) xcept("game_player: not initialized");
-		game_load_functions game_load_funcs(*st);
-		game_load_funcs.load_map_file(filename);
-		state_functions funcs(*st);
-		funcs.process_frame();
-		funcs.process_frame();
+	void load_map_file(const a_string& filename, bool initial_processing = true) {
+		if (!opt_funcs) xcept("game_player: not initialized");
+		game_load_functions game_load_funcs(st());
+		game_load_funcs.load_map_file(std::move(filename));
+		if (initial_processing) {
+			funcs().process_frame();
+			funcs().process_frame();
+		}
 	}
 	void next_frame() {
-		if (!st) xcept("game_player: not initialized");
-		state_functions funcs(*st);
-		funcs.next_frame();
+		if (!opt_funcs) xcept("game_player: not initialized");
+		funcs().next_frame();
+	}
+	void set_st(state& st) {
+		opt_funcs.emplace(st);
+	}
+	state_functions& funcs() {
+		return *opt_funcs;
+	}
+	state& st() {
+		return funcs().st;
 	}
 };
 
 }
 
+#endif

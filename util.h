@@ -127,6 +127,10 @@ struct iterators_range {
 	iterator end() {
 		return end_it;
 	}
+	
+	bool empty() const {
+		return begin_it == end_it;
+	}
 
 };
 
@@ -201,7 +205,7 @@ public:
 		return ptr == rhs.ptr;
 	}
 	bool operator!=(const this_t& rhs) const {
-		return !(*this == rhs);
+		return ptr != rhs.ptr;
 	}
 	bool operator<(const this_t& rhs) const {
 		return ptr < rhs.ptr;
@@ -222,12 +226,83 @@ auto make_transform_iterator(iterator_T&& c, transform_F&& f) {
 	return transform_iterator<iterator_T, transform_F>(std::forward<iterator_T>(c), std::forward<transform_F>(f));
 }
 
+template<typename range_T, typename transform_F>
+auto make_transform_range(range_T&& r, transform_F&& f) {
+	//return make_iterators_range(make_transform_iterator(r.begin(), std::forward<transform_F>(f)), make_transform_iterator(r.end(), std::forward<transform_F>({})));
+	auto begin = make_transform_iterator(r.begin(), std::forward<transform_F>(f));
+	return make_iterators_range(begin, make_transform_iterator(r.end(), std::forward<transform_F>(f)));
+}
+
+template<typename iterator_T, typename predicate_F>
+struct filter_iterator {
+private:
+	typedef filter_iterator this_t;
+	iterator_T ptr;
+	iterator_T end_ptr;
+	predicate_F f;
+public:
+	using iterator_category = std::forward_iterator_tag;
+	using reference = typename std::iterator_traits<iterator_T>::reference;
+	using value_type = typename std::iterator_traits<iterator_T>::value_type;
+	using difference_type = typename std::iterator_traits<iterator_T>::difference_type;
+	using pointer = reference*;
+
+	template<typename arg_iterator_T, typename arg_predicate_F>
+	filter_iterator(arg_iterator_T&& ptr, arg_iterator_T&& end_ptr, arg_predicate_F&& f) : ptr(std::forward<arg_iterator_T>(ptr)), end_ptr(std::forward<arg_iterator_T>(end_ptr)), f(std::forward<arg_predicate_F>(f)) {
+		if (ptr != end_ptr && !f(*ptr)) ++*this;
+	}
+
+	reference operator*() const {
+		return *ptr;
+	}
+	this_t& operator++() {
+		do {
+			++ptr;
+		} while (ptr != end_ptr && !f(*ptr));
+		return *this;
+	}
+	this_t operator++(int) {
+		auto r = *this;
+		++*this;
+		return r;
+	}
+	bool operator==(const this_t& rhs) const {
+		return ptr == rhs.ptr;
+	}
+	bool operator!=(const this_t& rhs) const {
+		return ptr != rhs.ptr;
+	}
+	bool operator<(const this_t& rhs) const {
+		return ptr < rhs.ptr;
+	}
+	bool operator<=(const this_t& rhs) const {
+		return ptr <= rhs.ptr;
+	}
+	bool operator>(const this_t& rhs) const {
+		return ptr > rhs.ptr;
+	}
+	bool operator>=(const this_t& rhs) const {
+		return ptr >= rhs.ptr;
+	}
+};
+
+template<typename iterator_T, typename predicate_F>
+auto make_filter_iterator(iterator_T&& c, iterator_T&& end, predicate_F&& f) {
+	return filter_iterator<iterator_T, predicate_F>(std::forward<iterator_T>(c), std::forward<iterator_T>(end), std::forward<predicate_F>(f));
+}
+
+template<typename range_T, typename predicate_F>
+auto make_filter_range(range_T&& r, predicate_F&& f) {
+	//return make_iterators_range(make_filter_iterator(r.begin(), std::forward<predicate_F>(f)), make_filter_iterator(r.end(), std::forward<predicate_F>({})));
+	auto begin = make_filter_iterator(r.begin(), r.end(), std::forward<predicate_F>(f));
+	return make_iterators_range(begin, make_filter_iterator(r.end(), r.end(), std::forward<predicate_F>(f)));
+}
+
 template<typename range_T>
-auto ptr(range_T&& r) {
-	auto f = [](auto& ref) {
+auto ptr(range_T& r) {
+	return make_transform_range(r, [](auto& ref) {
 		return &ref;
-	};
-	return make_iterators_range(make_transform_iterator(r.begin(), f), make_transform_iterator(r.end(), f));
+	});
 }
 
 template<typename range_T>
@@ -265,6 +340,122 @@ auto get_best_score(cont_T&& cont, score_F&& score) {
 	return get_best_score(cont.begin(), cont.end(), std::forward<score_F>(score));
 }
 
+struct nullopt_t {
+	struct init {
+		constexpr init() {}
+	};
+	constexpr explicit nullopt_t(init) {};
+};
+static constexpr nullopt_t nullopt{nullopt_t::init{}};
+
+struct in_place_tag {
+	struct init {};
+	constexpr explicit in_place_tag(init) {};
+};
+in_place_tag in_place();
+using in_place_t = in_place_tag(&)();
+
+template<typename T>
+struct optional {
+private:
+	bool has_obj = false;
+	typename std::aligned_storage<sizeof(T), alignof(T)>::type buf;
+	T* ptr() {
+		return (T*)&buf;
+	}
+	T& obj() {
+		return *(T*)&buf;
+	}
+	void destroy() {
+		obj().~value_type();
+		has_obj = false;
+	}
+public:
+	using value_type = T;
+	optional() = default;
+	optional(nullopt_t) noexcept {}
+	optional(const optional& n) {
+		*this = n;
+	}
+	optional(optional&& n) noexcept(std::is_nothrow_move_constructible<value_type>::value) {
+		*this == std::move(n);
+	}
+	template<typename... args_T>
+	optional(in_place_t, args_T&&... args) {
+		has_obj = true;
+		new (ptr()) value_type(std::forward<args_T>(args)...);
+	}
+	optional& operator=(nullopt_t) noexcept {
+		if (has_obj) destroy();
+		return *this;
+	}
+	optional& operator=(const optional& n) noexcept(std::is_nothrow_move_assignable<value_type>::value && std::is_nothrow_move_constructible<value_type>::value) {
+		if (!n) *this = nullopt;
+		else {
+			if (has_obj) obj() = n.obj();
+			else {
+				has_obj = true;
+				new (ptr()) value_type(n.obj());
+			}
+		}
+		return *this;
+	}
+	optional& operator=(optional&& n) {
+		if (has_obj) {
+			if (n.has_obj) obj() = std::move(n.obj());
+			else destroy();
+		} else {
+			if (n.has_obj) {
+				new (ptr()) value_type(std::move(obj()));
+				has_obj = true;
+			}
+		}
+		return *this;
+	}
+	template<typename n_T, typename std::enable_if<std::is_same<std::decay_t<n_T>, value_type>::value>::type* = nullptr>
+	optional& operator=(n_T&& n) {
+		if (has_obj) {
+			obj() = std::forward<n_T>(n);
+		} else {
+			new (ptr()) value_type(std::forward<n_T>(n));
+			has_obj = true;
+		}
+		return *this;
+	}
+	const value_type* operator->() const {
+		return ptr();
+	}
+	value_type* operator->() {
+		return ptr;
+	}
+	const value_type& operator*() const& {
+		return obj();
+	}
+	value_type& operator*() & {
+		return obj();
+	}
+	const value_type&& operator*() const&& {
+		return std::move(obj());
+	}
+	value_type&& operator*() && {
+		return std::move(obj());
+	}
+	explicit operator bool() const {
+		return has_obj;
+	}
+	bool has_value() const {
+		return has_obj;
+	}
+	void reset() {
+		if (has_obj) destroy();
+	}
+	template<typename... args_T>
+	void emplace(args_T&&... args) {
+		if (has_obj) obj().~value_type();
+		else has_obj = true;
+		new (ptr()) value_type(std::forward<args_T>(args)...);
+	}
+};
 
 template<size_t bits>
 using int_fastn_t = typename std::conditional<bits <= 8, std::int_fast8_t,
