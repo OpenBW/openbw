@@ -1,6 +1,7 @@
 #ifndef BWGAME_DATA_TYPES_H
 #define BWGAME_DATA_TYPES_H
 
+#include "bwenums.h"
 #include "util.h"
 #include "containers.h"
 
@@ -24,6 +25,55 @@ struct type_container {
 	type_container(type_container&&) = default;
 	type_container& operator=(const type_container&) = delete;
 	type_container& operator=(type_container&&) = default;
+};
+
+template<typename T>
+struct id_type_for;
+template<> struct id_type_for<flingy_type_t> { using type = FlingyTypes; };
+template<> struct id_type_for<unit_type_t> { using type = UnitTypes; };
+template<> struct id_type_for<weapon_type_t> { using type = WeaponTypes; };
+template<> struct id_type_for<upgrade_type_t> { using type = UpgradeTypes; };
+template<> struct id_type_for<tech_type_t> { using type = TechTypes; };
+template<> struct id_type_for<sprite_type_t> { using type = SpriteTypes; };
+template<> struct id_type_for<image_type_t> { using type = ImageTypes; };
+template<> struct id_type_for<order_type_t> { using type = Orders; };
+template<typename T>
+using id_type_for_t = typename id_type_for<typename std::remove_const<T>::type>::type;
+
+template<typename T>
+struct type_id {
+private:
+	using id_T = id_type_for_t<T>;
+	id_T id;
+	T* pointer;
+public:
+	type_id() = default;
+	type_id(T* pointer) : id(pointer ? pointer->id : id_T::None),  pointer(pointer) {}
+	type_id(id_T id) : id(id), pointer(nullptr) {}
+	T* operator->() {
+		return pointer;
+	}
+	const T* operator->() const {
+		return pointer;
+	}
+	T& operator*() {
+		return *pointer;
+	}
+	const T& operator*() const {
+		return *pointer;
+	}
+	explicit operator bool() const {
+		return pointer != nullptr;
+	}
+	operator T*() {
+		return pointer;
+	}
+	operator const T*() const {
+		return pointer;
+	}
+	explicit operator id_T() const {
+		return id;
+	}
 };
 
 struct unit_type_t {
@@ -54,13 +104,13 @@ struct unit_type_t {
 		flag_invincible = 0x20000000,
 	};
 
-	int id;
+	UnitTypes id;
 
-	const flingy_type_t* flingy;
-	unit_type_t* turret_unit_type;
-	unit_type_t* subunit2;
+	type_id<const flingy_type_t> flingy;
+	type_id<unit_type_t> turret_unit_type;
+	type_id<unit_type_t> subunit2;
 	int infestation;
-	const image_type_t* construction_animation;
+	type_id<const image_type_t> construction_animation;
 	int unit_direction;
 	int has_shield;
 	int shield_points;
@@ -68,23 +118,23 @@ struct unit_type_t {
 	int elevation_level;
 	int unknown1;
 	int sublabel;
-	const order_type_t* computer_ai_idle;
-	const order_type_t* human_ai_idle;
-	const order_type_t* return_to_idle;
-	const order_type_t* attack_unit;
-	const order_type_t* attack_move;
-	const weapon_type_t* ground_weapon;
+	type_id<const order_type_t> computer_ai_idle;
+	type_id<const order_type_t> human_ai_idle;
+	type_id<const order_type_t> return_to_idle;
+	type_id<const order_type_t> attack_unit;
+	type_id<const order_type_t> attack_move;
+	type_id<const weapon_type_t> ground_weapon;
 	int max_ground_hits;
-	const weapon_type_t* air_weapon;
+	type_id<const weapon_type_t> air_weapon;
 	int max_air_hits;
 	int ai_internal;
 	flags_t flags;
 	int target_acquisition_range;
 	int sight_range;
-	upgrade_type_t* armor_upgrade;
+	type_id<upgrade_type_t> armor_upgrade;
 	int unit_size;
 	int armor;
-	int right_click_action;
+	type_id<const order_type_t> right_click_action;
 	int ready_sound;
 	int first_what_sound;
 	int last_what_sound;
@@ -156,15 +206,15 @@ struct weapon_type_t {
 		hit_type_air_splash
 	};
 
-	int id;
+	WeaponTypes id;
 
 	int label;
-	const flingy_type_t* flingy;
+	type_id<const flingy_type_t> flingy;
 	int unused;
 	int target_flags;
 	int min_range;
 	int max_range;
-	upgrade_type_t* damage_upgrade;
+	type_id<upgrade_type_t> damage_upgrade;
 	int damage_type;
 	int bullet_type;
 	int lifetime;
@@ -187,7 +237,7 @@ struct weapon_type_t {
 using weapon_types_t = type_container<weapon_type_t>;
 
 struct upgrade_type_t {
-	int id;
+	UpgradeTypes id;
 
 	int mineral_cost_base;
 	int mineral_cost_factor;
@@ -206,7 +256,7 @@ struct upgrade_type_t {
 using upgrade_types_t = type_container<upgrade_type_t>;
 
 struct tech_type_t {
-	int id;
+	TechTypes id;
 
 	int mineral_cost;
 	int gas_cost;
@@ -222,9 +272,9 @@ struct tech_type_t {
 using tech_types_t = type_container<tech_type_t>;
 
 struct flingy_type_t {
-	int id;
+	FlingyTypes id;
 
-	sprite_type_t* sprite;
+	type_id<sprite_type_t> sprite;
 	fp8 top_speed;
 	fp8 acceleration;
 	fp8 halt_distance;
@@ -236,9 +286,9 @@ struct flingy_type_t {
 using flingy_types_t = type_container<flingy_type_t>;
 
 struct sprite_type_t {
-	int id;
+	SpriteTypes id;
 
-	image_type_t* image;
+	type_id<image_type_t> image;
 	int health_bar_size;
 	int unk0;
 	bool visible;
@@ -249,7 +299,7 @@ struct sprite_type_t {
 using sprite_types_t = type_container<sprite_type_t>;
 
 struct image_type_t {
-	int id;
+	ImageTypes id;
 
 	int grp_filename_index;
 	bool has_directional_frames;
@@ -270,7 +320,7 @@ struct image_type_t {
 using image_types_t = type_container<image_type_t>;
 
 struct order_type_t {
-	int id;
+	Orders id;
 
 	int label;
 	int use_weapon_targeting;

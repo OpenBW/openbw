@@ -35,12 +35,12 @@ static inline T value_at(const uint8_t* ptr) {
 	union endian_t {uint32_t a; uint8_t b;};
 	const bool native_little_endian = (endian_t{1}).b == 1;
 	if (little_endian == native_little_endian) {
-		if (((uintptr_t)ptr & (alignof(T) - 1)) == 0) {
-			return *(T*)ptr;
+		if (((uintptr_t)(void*)ptr & (alignof(T) - 1)) == 0) {
+			return *(T*)(void*)ptr;
 		} else {
 			typename std::aligned_storage<sizeof(T), alignof(T)>::type buf;
 			memcpy(&buf, ptr, sizeof(T));
-			return *(T*)&buf;
+			return *(T*)(void*)&buf;
 		}
 	} else {
 		T r = 0;
@@ -66,8 +66,8 @@ static inline void set_value_at(uint8_t* ptr, T value) {
 	union endian_t {uint32_t a; uint8_t b;};
 	const bool native_little_endian = (endian_t{1}).b == 1;
 	if (little_endian == native_little_endian) {
-		if (((uintptr_t)ptr & (alignof(T) - 1)) == 0) {
-			*(T*)ptr = value;
+		if (((uintptr_t)(void*)ptr & (alignof(T) - 1)) == 0) {
+			*(T*)(void*)ptr = value;
 		} else {
 			memcpy(ptr, &value, sizeof(T));
 		}
@@ -939,24 +939,19 @@ static inline data_files_loader data_files_directory(a_string path) {
 	return r;
 }
 
-template<typename to_T, typename from_T, typename std::enable_if<!std::is_pointer<to_T>::value>::type* = nullptr>
-to_T no_warnings_cast(from_T v) {
-	return static_cast<to_T>(v);
-}
-template<typename to_T, typename from_T, typename std::enable_if<std::is_pointer<to_T>::value>::type* = nullptr>
-to_T no_warnings_cast(from_T v) {
-	return reinterpret_cast<to_T>(v);
-}
-
 template<typename to_T, typename from_T>
 struct data_type_cast_helper {
 	to_T operator()(from_T v) {
 		static_assert(std::is_integral<from_T>::value, "from_T must be integral");
-		to_T r = no_warnings_cast<to_T>(v);
+		to_T r = (to_T)v;
 		if ((from_T)(intmax_t)r != v) xcept("value 0x%x of type %s does not fit in type %s", v, typeid(from_T).name(), typeid(to_T).name());
 		return r;
 	}
 };
+template<typename to_T, typename from_T>
+to_T data_type_cast(from_T v) {
+	return data_type_cast_helper<to_T, from_T>()(v);
+}
 template<typename from_T>
 struct data_type_cast_helper<bool, from_T> {
 	bool operator()(from_T v) {
@@ -1001,11 +996,12 @@ struct data_type_cast_helper<fp1, uint8_t> {
 		return fp1::from_raw(v);
 	}
 };
-
-template<typename to_T, typename from_T>
-to_T data_type_cast(from_T v) {
-	return data_type_cast_helper<to_T, from_T>()(v);
-}
+template<typename T, typename from_T>
+struct data_type_cast_helper<type_id<T>, from_T> {
+	type_id<T> operator()(from_T v) {
+		return type_id<T>(data_type_cast<decltype(T::id), from_T>(v));
+	}
+};
 
 template<typename load_T, typename field_T>
 struct read_data {
@@ -1064,7 +1060,7 @@ unit_types_t load_units_dat(const data_T& data) {
 	for (size_t i = 0; i < total_count; ++i) {
 		auto& v = unit_types.vec[i];
 		memset(&v, 0, sizeof(v));
-		v.id = i;
+		v.id = (UnitTypes)i;
 	}
 
 	data_reader_le r(data.data(), data.data() + data.size());
@@ -1141,7 +1137,7 @@ weapon_types_t load_weapons_dat(const data_T& data) {
 	for (size_t i = 0; i < count; ++i) {
 		auto& v = weapon_types.vec[i];
 		memset(&v, 0, sizeof(v));
-		v.id = i;
+		v.id = (WeaponTypes)i;
 	}
 
 	data_reader_le r(data.data(), data.data() + data.size());
@@ -1187,7 +1183,7 @@ upgrade_types_t load_upgrades_dat(const data_T& data) {
 	for (size_t i = 0; i < count; ++i) {
 		auto& v = upgrade_types.vec[i];
 		memset(&v, 0, sizeof(v));
-		v.id = i;
+		v.id = (UpgradeTypes)i;
 	}
 
 	data_reader_le r(data.data(), data.data() + data.size());
@@ -1221,7 +1217,7 @@ tech_types_t load_techdata_dat(const data_T& data) {
 	for (size_t i = 0; i < count; ++i) {
 		auto& v = tech_types.vec[i];
 		memset(&v, 0, sizeof(v));
-		v.id = i;
+		v.id = (TechTypes)i;
 	}
 
 	data_reader_le r(data.data(), data.data() + data.size());
@@ -1252,7 +1248,7 @@ flingy_types_t load_flingy_dat(const data_T& data) {
 	for (size_t i = 0; i < count; ++i) {
 		auto& v = flingy_types.vec[i];
 		memset(&v, 0, sizeof(v));
-		v.id = i;
+		v.id = (FlingyTypes)i;
 	}
 
 	data_reader_le r(data.data(), data.data() + data.size());
@@ -1282,7 +1278,7 @@ sprite_types_t load_sprites_dat(const data_T& data) {
 	for (size_t i = 0; i < count; ++i) {
 		auto& v = sprite_types.vec[i];
 		memset(&v, 0, sizeof(v));
-		v.id = i;
+		v.id = (SpriteTypes)i;
 	}
 
 	data_reader_le r(data.data(), data.data() + data.size());
@@ -1310,7 +1306,7 @@ image_types_t load_images_dat(const data_T& data) {
 	for (size_t i = 0; i < count; ++i) {
 		auto& v = image_types.vec[i];
 		memset(&v, 0, sizeof(v));
-		v.id = i;
+		v.id = (ImageTypes)i;
 	}
 
 	data_reader_le r(data.data(), data.data() + data.size());
@@ -1346,7 +1342,7 @@ order_types_t load_orders_dat(const data_T& data) {
 	for (size_t i = 0; i < count; ++i) {
 		auto& v = order_types.vec[i];
 		memset(&v, 0, sizeof(v));
-		v.id = i;
+		v.id = (Orders)i;
 	}
 
 	data_reader_le r(data.data(), data.data() + data.size());

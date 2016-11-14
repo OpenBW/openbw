@@ -414,7 +414,6 @@ struct unit_t: flingy_t {
 	int last_attacking_player;
 	int secondary_order_timer;
 	int user_action_flags;
-	int current_button_set;
 	bool is_cloaked;
 	int movement_state;
 	static_vector<const unit_type_t*, 5> build_queue;

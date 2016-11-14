@@ -228,7 +228,6 @@ auto make_transform_iterator(iterator_T&& c, transform_F&& f) {
 
 template<typename range_T, typename transform_F>
 auto make_transform_range(range_T&& r, transform_F&& f) {
-	//return make_iterators_range(make_transform_iterator(r.begin(), std::forward<transform_F>(f)), make_transform_iterator(r.end(), std::forward<transform_F>({})));
 	auto begin = make_transform_iterator(r.begin(), std::forward<transform_F>(f));
 	return make_iterators_range(begin, make_transform_iterator(r.end(), std::forward<transform_F>(f)));
 }
@@ -293,7 +292,6 @@ auto make_filter_iterator(iterator_T&& c, iterator_T&& end, predicate_F&& f) {
 
 template<typename range_T, typename predicate_F>
 auto make_filter_range(range_T&& r, predicate_F&& f) {
-	//return make_iterators_range(make_filter_iterator(r.begin(), std::forward<predicate_F>(f)), make_filter_iterator(r.end(), std::forward<predicate_F>({})));
 	auto begin = make_filter_iterator(r.begin(), r.end(), std::forward<predicate_F>(f));
 	return make_iterators_range(begin, make_filter_iterator(r.end(), r.end(), std::forward<predicate_F>(f)));
 }
@@ -352,7 +350,9 @@ struct in_place_tag {
 	struct init {};
 	constexpr explicit in_place_tag(init) {};
 };
-in_place_tag in_place();
+static inline in_place_tag in_place() {
+	std::terminate();
+}
 using in_place_t = in_place_tag(&)();
 
 template<typename T>
@@ -701,6 +701,89 @@ using xy = xy_t<int>;
 using xy_fp8 = xy_t<fp8>;
 
 using rect = rect_t<xy>;
+
+template<typename T, typename index_T, size_t N = (size_t)index_T::None>
+struct type_indexed_array {
+private:
+	using arr_T = std::array<T, N>;
+	arr_T arr;
+public:
+	using value_type = T;
+	using size_type = std::size_t;
+	using difference_type = std::ptrdiff_t;
+	using reference = value_type&;
+	using const_reference = const value_type&;
+	using pointer = value_type*;
+	using const_pointer = const value_type*;
+	using iterator = typename arr_T::iterator;
+	using const_iterator = typename arr_T::const_iterator;
+	using reverse_iterator = typename arr_T::reverse_iterator;
+	using const_reverse_iterator = typename arr_T::const_reverse_iterator;
+	
+	reference at(index_T pos) {
+		return arr.at((size_t)pos);
+	}
+	const_reference at(index_T pos) const {
+		return arr.at((size_t)pos);
+	}
+	reference operator[](index_T pos) {
+		return arr[(size_t)pos];
+	}
+	const_reference operator[](index_T pos) const {
+		return arr[(size_t)pos];
+	}
+	reference front() {
+		return arr.front();
+	}
+	const_reference front() const {
+		return arr.front();
+	}
+	reference back() {
+		return arr.back();
+	}
+	const_reference back() const {
+		return arr.back();
+	}
+	pointer data() noexcept {
+		return arr.data();
+	}
+	const_pointer data() const noexcept {
+		return arr.data();
+	}
+	iterator begin() noexcept {
+		return arr.begin();
+	}
+	const_iterator begin() const noexcept {
+		return arr.begin();
+	}
+	const_iterator cbegin() const noexcept {
+		return arr.cbegin();
+	}
+	iterator end() noexcept {
+		return arr.end();
+	} 
+	const_iterator end() const noexcept {
+		return arr.end();
+	}
+	const_iterator cend() const noexcept {
+		return arr.cend();
+	}
+	bool empty() const noexcept {
+		return arr.empty();
+	}
+	constexpr size_type size() const noexcept {
+		return arr.size();
+	}
+	constexpr size_type max_size() const noexcept {
+		return arr.max_size();
+	}
+	void fill(const_reference value) {
+		arr.fill(value);
+	}
+	void swap(type_indexed_array& n) {
+		arr.swap(n.arr);
+	}
+};
 
 }
 
