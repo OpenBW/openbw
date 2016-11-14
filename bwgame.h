@@ -29,6 +29,41 @@ static const std::array<int, 16 * 2> repulse_adjust_table = {
 
 static const std::array<xy, 4> cardinal_direction_xy = {xy{1, 0}, xy{0, 1}, xy{-1, 0}, xy{0, -1}};
 
+static const xy_fp8 direction_table[256] = {
+	{0_fp8,-256_fp8},{6_fp8,-256_fp8},{13_fp8,-256_fp8},{19_fp8,-255_fp8},{25_fp8,-255_fp8},{31_fp8,-254_fp8},{38_fp8,-253_fp8},{44_fp8,-252_fp8},
+	{50_fp8,-251_fp8},{56_fp8,-250_fp8},{62_fp8,-248_fp8},{68_fp8,-247_fp8},{74_fp8,-245_fp8},{80_fp8,-243_fp8},{86_fp8,-241_fp8},{92_fp8,-239_fp8},
+	{98_fp8,-237_fp8},{104_fp8,-234_fp8},{109_fp8,-231_fp8},{115_fp8,-229_fp8},{121_fp8,-226_fp8},{126_fp8,-223_fp8},{132_fp8,-220_fp8},{137_fp8,-216_fp8},
+	{142_fp8,-213_fp8},{147_fp8,-209_fp8},{152_fp8,-206_fp8},{157_fp8,-202_fp8},{162_fp8,-198_fp8},{167_fp8,-194_fp8},{172_fp8,-190_fp8},{177_fp8,-185_fp8},
+	{181_fp8,-181_fp8},{185_fp8,-177_fp8},{190_fp8,-172_fp8},{194_fp8,-167_fp8},{198_fp8,-162_fp8},{202_fp8,-157_fp8},{206_fp8,-152_fp8},{209_fp8,-147_fp8},
+	{213_fp8,-142_fp8},{216_fp8,-137_fp8},{220_fp8,-132_fp8},{223_fp8,-126_fp8},{226_fp8,-121_fp8},{229_fp8,-115_fp8},{231_fp8,-109_fp8},{234_fp8,-104_fp8},
+	{237_fp8,-98_fp8},{239_fp8,-92_fp8},{241_fp8,-86_fp8},{243_fp8,-80_fp8},{245_fp8,-74_fp8},{247_fp8,-68_fp8},{248_fp8,-62_fp8},{250_fp8,-56_fp8},
+	{251_fp8,-50_fp8},{252_fp8,-44_fp8},{253_fp8,-38_fp8},{254_fp8,-31_fp8},{255_fp8,-25_fp8},{255_fp8,-19_fp8},{256_fp8,-13_fp8},{256_fp8,-6_fp8},
+	{256_fp8,0_fp8},{256_fp8,6_fp8},{256_fp8,13_fp8},{255_fp8,19_fp8},{255_fp8,25_fp8},{254_fp8,31_fp8},{253_fp8,38_fp8},{252_fp8,44_fp8},
+	{251_fp8,50_fp8},{250_fp8,56_fp8},{248_fp8,62_fp8},{247_fp8,68_fp8},{245_fp8,74_fp8},{243_fp8,80_fp8},{241_fp8,86_fp8},{239_fp8,92_fp8},
+	{237_fp8,98_fp8},{234_fp8,104_fp8},{231_fp8,109_fp8},{229_fp8,115_fp8},{226_fp8,121_fp8},{223_fp8,126_fp8},{220_fp8,132_fp8},{216_fp8,137_fp8},
+	{213_fp8,142_fp8},{209_fp8,147_fp8},{206_fp8,152_fp8},{202_fp8,157_fp8},{198_fp8,162_fp8},{194_fp8,167_fp8},{190_fp8,172_fp8},{185_fp8,177_fp8},
+	{181_fp8,181_fp8},{177_fp8,185_fp8},{172_fp8,190_fp8},{167_fp8,194_fp8},{162_fp8,198_fp8},{157_fp8,202_fp8},{152_fp8,206_fp8},{147_fp8,209_fp8},
+	{142_fp8,213_fp8},{137_fp8,216_fp8},{132_fp8,220_fp8},{126_fp8,223_fp8},{121_fp8,226_fp8},{115_fp8,229_fp8},{109_fp8,231_fp8},{104_fp8,234_fp8},
+	{98_fp8,237_fp8},{92_fp8,239_fp8},{86_fp8,241_fp8},{80_fp8,243_fp8},{74_fp8,245_fp8},{68_fp8,247_fp8},{62_fp8,248_fp8},{56_fp8,250_fp8},
+	{50_fp8,251_fp8},{44_fp8,252_fp8},{38_fp8,253_fp8},{31_fp8,254_fp8},{25_fp8,255_fp8},{19_fp8,255_fp8},{13_fp8,256_fp8},{6_fp8,256_fp8},
+	{0_fp8,256_fp8},{-6_fp8,256_fp8},{-13_fp8,256_fp8},{-19_fp8,255_fp8},{-25_fp8,255_fp8},{-31_fp8,254_fp8},{-38_fp8,253_fp8},{-44_fp8,252_fp8},
+	{-50_fp8,251_fp8},{-56_fp8,250_fp8},{-62_fp8,248_fp8},{-68_fp8,247_fp8},{-74_fp8,245_fp8},{-80_fp8,243_fp8},{-86_fp8,241_fp8},{-92_fp8,239_fp8},
+	{-98_fp8,237_fp8},{-104_fp8,234_fp8},{-109_fp8,231_fp8},{-115_fp8,229_fp8},{-121_fp8,226_fp8},{-126_fp8,223_fp8},{-132_fp8,220_fp8},{-137_fp8,216_fp8},
+	{-142_fp8,213_fp8},{-147_fp8,209_fp8},{-152_fp8,206_fp8},{-157_fp8,202_fp8},{-162_fp8,198_fp8},{-167_fp8,194_fp8},{-172_fp8,190_fp8},{-177_fp8,185_fp8},
+	{-181_fp8,181_fp8},{-185_fp8,177_fp8},{-190_fp8,172_fp8},{-194_fp8,167_fp8},{-198_fp8,162_fp8},{-202_fp8,157_fp8},{-206_fp8,152_fp8},{-209_fp8,147_fp8},
+	{-213_fp8,142_fp8},{-216_fp8,137_fp8},{-220_fp8,132_fp8},{-223_fp8,126_fp8},{-226_fp8,121_fp8},{-229_fp8,115_fp8},{-231_fp8,109_fp8},{-234_fp8,104_fp8},
+	{-237_fp8,98_fp8},{-239_fp8,92_fp8},{-241_fp8,86_fp8},{-243_fp8,80_fp8},{-245_fp8,74_fp8},{-247_fp8,68_fp8},{-248_fp8,62_fp8},{-250_fp8,56_fp8},
+	{-251_fp8,50_fp8},{-252_fp8,44_fp8},{-253_fp8,38_fp8},{-254_fp8,31_fp8},{-255_fp8,25_fp8},{-255_fp8,19_fp8},{-256_fp8,13_fp8},{-256_fp8,6_fp8},
+	{-256_fp8,0_fp8},{-256_fp8,-6_fp8},{-256_fp8,-13_fp8},{-255_fp8,-19_fp8},{-255_fp8,-25_fp8},{-254_fp8,-31_fp8},{-253_fp8,-38_fp8},{-252_fp8,-44_fp8},
+	{-251_fp8,-50_fp8},{-250_fp8,-56_fp8},{-248_fp8,-62_fp8},{-247_fp8,-68_fp8},{-245_fp8,-74_fp8},{-243_fp8,-80_fp8},{-241_fp8,-86_fp8},{-239_fp8,-92_fp8},
+	{-237_fp8,-98_fp8},{-234_fp8,-104_fp8},{-231_fp8,-109_fp8},{-229_fp8,-115_fp8},{-226_fp8,-121_fp8},{-223_fp8,-126_fp8},{-220_fp8,-132_fp8},{-216_fp8,-137_fp8},
+	{-213_fp8,-142_fp8},{-209_fp8,-147_fp8},{-206_fp8,-152_fp8},{-202_fp8,-157_fp8},{-198_fp8,-162_fp8},{-194_fp8,-167_fp8},{-190_fp8,-172_fp8},{-185_fp8,-177_fp8},
+	{-181_fp8,-181_fp8},{-177_fp8,-185_fp8},{-172_fp8,-190_fp8},{-167_fp8,-194_fp8},{-162_fp8,-198_fp8},{-157_fp8,-202_fp8},{-152_fp8,-206_fp8},{-147_fp8,-209_fp8},
+	{-142_fp8,-213_fp8},{-137_fp8,-216_fp8},{-132_fp8,-220_fp8},{-126_fp8,-223_fp8},{-121_fp8,-226_fp8},{-115_fp8,-229_fp8},{-109_fp8,-231_fp8},{-104_fp8,-234_fp8},
+	{-98_fp8,-237_fp8},{-92_fp8,-239_fp8},{-86_fp8,-241_fp8},{-80_fp8,-243_fp8},{-74_fp8,-245_fp8},{-68_fp8,-247_fp8},{-62_fp8,-248_fp8},{-56_fp8,-250_fp8},
+	{-50_fp8,-251_fp8},{-44_fp8,-252_fp8},{-38_fp8,-253_fp8},{-31_fp8,-254_fp8},{-25_fp8,-255_fp8},{-19_fp8,-255_fp8},{-13_fp8,-256_fp8},{-6_fp8,-256_fp8}
+};
+
 // Broodwar linked lists insert new elements between the first and second entry.
 template<typename cont_T, typename T>
 static void bw_insert_list(cont_T& cont, T& v) {
@@ -60,9 +95,6 @@ struct global_state {
 	a_vector<grp_t*> image_grp;
 	a_vector<a_vector<a_vector<xy>>> lo_offsets;
 	a_vector<std::array<a_vector<a_vector<xy>>*, 6>> image_lo_offsets;
-
-	std::array<xy_fp8, 256> direction_table;
-	std::array<direction_t, 256> repulse_direction_table;
 
 	a_vector<uint8_t> units_dat;
 	a_vector<uint8_t> weapons_dat;
@@ -852,12 +884,12 @@ struct state_functions {
 		case UnitTypes::Hero_Samir_Duran:
 		case UnitTypes::Hero_Infested_Duran:
 		case UnitTypes::Hero_Infested_Kerrigan:
-			return fp8::integer(10) / 256;
+			return 10_fp8;
 		case UnitTypes::Terran_Wraith:
 		case UnitTypes::Hero_Tom_Kazansky:
-			return fp8::integer(13) / 256;
+			return 13_fp8;
 		default:
-			return fp8::zero();
+			return 0_fp8;
 		}
 	}
 
@@ -886,7 +918,7 @@ struct state_functions {
 			if (u->unit_type->id == UnitTypes::Protoss_Dark_Archon && u->order_type->id == Orders::CompletingArchonSummon && u->order_state) {
 				max_energy = fp8::integer(50);
 			}
-			u->energy = std::min(u->energy + fp8::integer(8) / 256, max_energy);
+			u->energy = std::min(u->energy + 8_fp8, max_energy);
 		}
 	}
 
@@ -904,7 +936,7 @@ struct state_functions {
 		if (u->unit_type->has_shield) {
 			fp8 max_shields = fp8::integer(u->unit_type->shield_points);
 			if (u->shield_points != max_shields) {
-				u->shield_points += fp8::integer(7) / 256;
+				u->shield_points += 7_fp8;
 				if (u->shield_points > max_shields) u->shield_points = max_shields;
 			}
 		}
@@ -921,8 +953,8 @@ struct state_functions {
 		}
 		if (u_completed(u)) {
 			if (ut_regens_hp(u)) {
-				if (u->hp > fp8::zero() && u->hp != u->unit_type->hitpoints) {
-					set_unit_hp(u, u->hp + fp8::integer(4) / 256);
+				if (u->hp > 0_fp8 && u->hp != u->unit_type->hitpoints) {
+					set_unit_hp(u, u->hp + 4_fp8);
 				}
 			}
 			update_unit_energy(u);
@@ -1175,31 +1207,31 @@ struct state_functions {
 	}
 
 	direction_t xy_direction(xy_fp8 pos) const {
-		if (pos.x == fp8::zero()) return pos.y <= fp8::zero() ? direction_t::zero() : direction_t::from_raw(-128);
+		if (pos.x == 0_fp8) return pos.y <= 0_fp8 ? 0_dir : -128_dir;
 		direction_t r = atan(pos.y / pos.x);
-		if (pos.x > fp8::zero()) r += direction_t::from_raw(64);
-		else r = direction_t::from_raw(-64) + r;
+		if (pos.x > 0_fp8) r += 64_dir;
+		else r = -64_dir + r;
 		return r;
 	}
 
 	direction_t xy_direction(xy pos) const {
-		if (pos.x == 0) return pos.y <= 0 ? direction_t::zero() : direction_t::from_raw(-128);
+		if (pos.x == 0) return pos.y <= 0 ? 0_dir : -128_dir;
 		direction_t r = atan(fp8::integer(pos.y) / pos.x);
-		if (pos.x > 0) r = direction_t::from_raw(64) + r;
-		else r = direction_t::from_raw(-64) + r;
+		if (pos.x > 0) r = 64_dir + r;
+		else r = -64_dir + r;
 		return r;
 	}
 
 	xy_fp8 direction_xy(direction_t dir, fp8 length) const {
-		return global_st.direction_table[direction_index(dir)] * length;
+		return direction_table[direction_index(dir)] * length;
 	}
 
 	xy_fp8 direction_xy(direction_t dir, int length) const {
-		return global_st.direction_table[direction_index(dir)] * length;
+		return direction_table[direction_index(dir)] * length;
 	}
 
 	xy_fp8 direction_xy(direction_t dir) const {
-		return global_st.direction_table[direction_index(dir)];
+		return direction_table[direction_index(dir)];
 	}
 
 	size_t direction_index(direction_t dir) const {
@@ -1261,7 +1293,7 @@ struct state_functions {
 	int unit_target_movement_range(const flingy_t* u, const flingy_t* target) const {
 		if (!u_movement_flag(u, 2)) return 0;
 		if (u_movement_flag(target, 2)) {
-			if (fp8::extend(target->next_velocity_direction - u->next_velocity_direction).abs() <= fp8::from_raw(32)) return 0;
+			if (fp8::extend(target->next_velocity_direction - u->next_velocity_direction).abs() <= 32_fp8) return 0;
 		}
 		return unit_halt_distance(u).integer_part();
 	}
@@ -2313,7 +2345,7 @@ struct state_functions {
 				auto* weapon = unit_ground_weapon(u);
 				if (weapon) {
 					auto heading_error = fp8::extend(u->heading - xy_direction(u->next_target_waypoint - u->sprite->position)).abs();
-					if (heading_error < weapon->attack_angle) next = true;
+					if (heading_error <= weapon->attack_angle) next = true;
 				}
 			}
 			if (next) {
@@ -3197,9 +3229,9 @@ struct state_functions {
 			else if (turn < -u->flingy_turn_rate) turn = -u->flingy_turn_rate;
 			u->heading += direction_t::truncate(turn);
 			if (u->flingy_type->id >= (FlingyTypes)0x8d && u->flingy_type->id <= (FlingyTypes)0xab) {
-				u->flingy_turn_rate += fp8::from_raw(1);
+				u->flingy_turn_rate += 1_fp8;
 			} else if (u->flingy_type->id >= (FlingyTypes)0xc9 && u->flingy_type->id <= (FlingyTypes)0xce) {
-				u->flingy_turn_rate += fp8::from_raw(1);
+				u->flingy_turn_rate += 1_fp8;
 			}
 			if (velocity_direction == u->desired_velocity_direction) {
 				if (u->heading == u->desired_velocity_direction) {
@@ -3216,10 +3248,10 @@ struct state_functions {
 	void update_current_speed_towards_waypoint(flingy_t* u) {
 		if (u->flingy_movement_type == 0) {
 			if (unit_is_at_move_target(u)) {
-				if (u->next_speed < fp8::from_raw(192)) {
+				if (u->next_speed < 192_fp8) {
 					if (!u_movement_flag(u, 0x20) && !u_movement_flag(u, 0x10)) {
 						u_unset_movement_flag(u, 4);
-						set_current_speed(u, fp8::zero());
+						set_current_speed(u, 0_fp8);
 						return;
 					}
 				}
@@ -3227,23 +3259,23 @@ struct state_functions {
 		} else if (u->flingy_movement_type == 1) {
 			if (unit_is_at_move_target(u)) {
 				u_unset_movement_flag(u, 4);
-				set_current_speed(u, fp8::zero());
+				set_current_speed(u, 0_fp8);
 				return;
 			}
 		} else if (u->flingy_movement_type == 2) {
 			if (unit_is_at_move_target(u)) {
 				u_unset_movement_flag(u, 4);
-				set_current_speed(u, fp8::zero());
+				set_current_speed(u, 0_fp8);
 			} else {
 				if (!u_movement_flag(u, 1)) {
 					set_current_speed(u, u->next_speed);
 				} else {
 					auto heading_error = fp8::extend(u->heading - u->desired_velocity_direction).abs();
-					if (heading_error >= fp8::from_raw(32)) {
+					if (heading_error >= 32_fp8) {
 						if (u_movement_flag(u, 2)) {
 							u_unset_movement_flag(u, 2);
 							u_unset_movement_flag(u, 4);
-							set_current_speed(u, fp8::zero());
+							set_current_speed(u, 0_fp8);
 						}
 					} else {
 						set_current_speed(u, u->next_speed);
@@ -3261,7 +3293,7 @@ struct state_functions {
 			fp8 turn_rate = u->flingy_turn_rate;
 			fp8 diff = fp8::extend(u->desired_velocity_direction - u->current_velocity_direction).abs();
 
-			unsigned int val = fp8::divide_multiply(diff * 2 + turn_rate - fp8::from_raw(1), turn_rate, u->next_speed).integer_part();
+			unsigned int val = fp8::divide_multiply(diff * 2 + turn_rate - 1_fp8, turn_rate, u->next_speed).integer_part();
 			if (val * 3 / 2 <= (unsigned int)d) accelerate = true;
 		}
 		if (accelerate) {
@@ -3277,7 +3309,7 @@ struct state_functions {
 		fp8 speed = u->current_speed;
 		if (accelerate) speed += u->flingy_acceleration;
 		else speed -= u->flingy_acceleration;
-		if (speed < fp8::zero()) speed = fp8::zero();
+		if (speed < 0_fp8) speed = 0_fp8;
 		else if (speed > u->flingy_top_speed) speed = u->flingy_top_speed;
 		set_current_speed(u, speed);
 	}
@@ -3311,7 +3343,7 @@ struct state_functions {
 
 	void set_movement_values(flingy_t* u, execute_movement_struct& ems) {
 		ems.speed = u->current_speed;
-		if (!u_movement_flag(u, 2) || u->current_speed == fp8::zero()) {
+		if (!u_movement_flag(u, 2) || u->current_speed == 0_fp8) {
 			ems.position = u->position;
 			ems.exact_position = u->exact_position;
 		} else {
@@ -3325,7 +3357,7 @@ struct state_functions {
 				ems.position = to_xy(ems.exact_position);
 			}
 			if (u->flingy_movement_type == 2) {
-				set_current_speed(u, fp8::zero());
+				set_current_speed(u, 0_fp8);
 			}
 		}
 	}
@@ -3598,21 +3630,22 @@ struct state_functions {
 		direction_t repulse_dir = u->repulse_direction;
 		if (!unit_is_at_move_target(u)) {
 			direction_t target_dir = xy_direction(u->move_target.pos - u->position);
-			repulse_dir = target_dir + global_st.repulse_direction_table[direction_index(repulse_dir - target_dir)];
+			size_t index = direction_index(repulse_dir - target_dir);
+			repulse_dir = target_dir + direction_from_index(index % 32 + (index < 128 ? 32 : -64));
 		}
 		auto bb = unit_sprite_bounding_box(u);
 		if (bb.from.x < 32) {
-			if (repulse_dir < direction_t::zero()) repulse_dir = -repulse_dir;
+			if (repulse_dir < 0_dir) repulse_dir = -repulse_dir;
 			u->repulse_flags &= 0xf;
 		} else if ((size_t)bb.to.x > game_st.map_width - 32) {
-			if (repulse_dir > direction_t::zero()) repulse_dir = -repulse_dir;
+			if (repulse_dir > 0_dir) repulse_dir = -repulse_dir;
 			u->repulse_flags &= 0xf;
 		}
 		if (bb.from.y < 32) {
-			if (repulse_dir + direction_t::from_raw(64) >= direction_t::zero()) repulse_dir = -repulse_dir;
+			if (repulse_dir + 64_dir >= 0_dir) repulse_dir = -repulse_dir;
 			u->repulse_flags &= 0xf;
 		} else if ((size_t)bb.to.y > game_st.map_height - 32) {
-			if (repulse_dir + direction_t::from_raw(64) < direction_t::zero()) repulse_dir = -repulse_dir;
+			if (repulse_dir + 64_dir < 0_dir) repulse_dir = -repulse_dir;
 			u->repulse_flags &= 0xf;
 		}
 		u->repulse_direction = repulse_dir;
@@ -3643,13 +3676,13 @@ struct state_functions {
 		size_t index = u->repulse_flags >> 4;
 		xy_fp8 adjust = { fp8::from_raw(repulse_adjust_table[index * 2]), fp8::from_raw(repulse_adjust_table[index * 2 + 1]) };
 		if (repulse.x > adjust.x * 4) repulse.x -= adjust.x;
-		else if (repulse.x > fp8::zero()) repulse.x += adjust.x;
+		else if (repulse.x > 0_fp8) repulse.x += adjust.x;
 		else if (repulse.x < -adjust.x * 4) repulse.x += adjust.x;
-		else if (repulse.x < fp8::zero()) repulse.x -= adjust.x;
+		else if (repulse.x < 0_fp8) repulse.x -= adjust.x;
 		if (repulse.y > adjust.y * 4) repulse.y -= adjust.y;
-		else if (repulse.y > fp8::zero()) repulse.y += adjust.y;
+		else if (repulse.y > 0_fp8) repulse.y += adjust.y;
 		else if (repulse.y < -adjust.y * 4) repulse.y += adjust.y;
-		else if (repulse.y < fp8::zero()) repulse.y -= adjust.y;
+		else if (repulse.y < 0_fp8) repulse.y -= adjust.y;
 		ems.exact_position += repulse;
 		ems.position = to_xy(ems.exact_position);
 		return true;
@@ -5468,7 +5501,7 @@ struct state_functions {
 	}
 
 	void set_unit_immovable(unit_t* u) {
-		set_next_speed(u, fp8::zero());
+		set_next_speed(u, 0_fp8);
 		stop_unit(u);
 		set_unit_move_target(u, u->sprite->position);
 		u_set_status_flag(u, unit_t::status_flag_immovable);
@@ -5502,12 +5535,12 @@ struct state_functions {
 	}
 
 	bool collision_get_slide_free_direction(const unit_t* u, const unit_t* collision_unit, direction_t& slide_free_direction) const {
-		slide_free_direction = direction_t::from_raw(-1);
+		slide_free_direction = -1_dir;
 		if (us_hidden(collision_unit)) return false;
 		auto target_dir = xy_direction(u->next_movement_waypoint - u->sprite->position);
 		auto target_dir_quadrant = direction_index(target_dir) / 64;
 		auto dir_err = fp8::extend(target_dir - u->current_velocity_direction).abs();
-		if (dir_err >= fp8::from_raw(80)) return false;
+		if (dir_err >= 80_fp8) return false;
 		int left_x = collision_unit->unit_finder_bounding_box.from.x - u->unit_type->dimensions.to.x - 1;
 		int right_x = collision_unit->unit_finder_bounding_box.to.x + u->unit_type->dimensions.from.x + 1;
 		int up_y = collision_unit->unit_finder_bounding_box.from.y - u->unit_type->dimensions.to.y - 1;
@@ -5516,42 +5549,42 @@ struct state_functions {
 		switch (cardinal_direction_from_to(u, collision_unit)) {
 		case 0:
 			target_pos.y = down_y;
-			if (target_dir_quadrant == 3) slide_free_direction = direction_t::from_raw(-64);
-			else if (target_dir_quadrant == 0) slide_free_direction = direction_t::from_raw(64);
+			if (target_dir_quadrant == 3) slide_free_direction = -64_dir;
+			else if (target_dir_quadrant == 0) slide_free_direction = 64_dir;
 			break;
 		case 1:
 			target_pos.x = left_x;
-			if (target_dir_quadrant == 0) slide_free_direction = direction_t::from_raw(0);
-			else if (target_dir_quadrant == 1) slide_free_direction = direction_t::from_raw(-128);
+			if (target_dir_quadrant == 0) slide_free_direction = 0_dir;
+			else if (target_dir_quadrant == 1) slide_free_direction = -128_dir;
 			break;
 		case 2:
 			target_pos.y = up_y;
-			if (target_dir_quadrant == 1) slide_free_direction = direction_t::from_raw(64);
-			else if (target_dir_quadrant == 2) slide_free_direction = direction_t::from_raw(-64);
+			if (target_dir_quadrant == 1) slide_free_direction = 64_dir;
+			else if (target_dir_quadrant == 2) slide_free_direction = -64_dir;
 			break;
 		case 3:
 			target_pos.x = right_x;
-			if (target_dir_quadrant == 2) slide_free_direction = direction_t::from_raw(-128);
-			else if (target_dir_quadrant == 3) slide_free_direction = direction_t::from_raw(0);
+			if (target_dir_quadrant == 2) slide_free_direction = -128_dir;
+			else if (target_dir_quadrant == 3) slide_free_direction = 0_dir;
 			break;
 		}
 		for (int i = 0; i != 2; ++i) {
-			if (slide_free_direction == direction_t::from_raw(0)) {
+			if (slide_free_direction == 0_dir) {
 				target_pos.y = up_y;
 				if (!is_blocked(u, target_pos).first) return true;
-				slide_free_direction = direction_t::from_raw(-128);
-			} else if (slide_free_direction == direction_t::from_raw(-128)) {
+				slide_free_direction = -128_dir;
+			} else if (slide_free_direction == -128_dir) {
 				target_pos.y = down_y;
 				if (!is_blocked(u, target_pos).first) return true;
-				slide_free_direction = direction_t::from_raw(0);
-			} else if (slide_free_direction == direction_t::from_raw(64)) {
+				slide_free_direction = 0_dir;
+			} else if (slide_free_direction == 64_dir) {
 				target_pos.x = right_x;
 				if (!is_blocked(u, target_pos).first) return true;
-				slide_free_direction = direction_t::from_raw(-64);
-			} else if (slide_free_direction == direction_t::from_raw(-64)) {
+				slide_free_direction = -64_dir;
+			} else if (slide_free_direction == -64_dir) {
 				target_pos.x = left_x;
 				if (!is_blocked(u, target_pos).first) return true;
-				slide_free_direction = direction_t::from_raw(64);
+				slide_free_direction = 64_dir;
 			}
 		}
 
@@ -5613,7 +5646,7 @@ struct state_functions {
 			going_to_next_waypoint = true;
 			update_unit_movement_values(u, ems);
 			if (check_ground_unit_movement_unit_collision(u, ems) || check_unit_movement_terrain_collision(u, ems)) {
-				set_next_speed(u, fp8::zero());
+				set_next_speed(u, 0_fp8);
 				u->movement_flags = ems.post_movement_flags;
 				update_unit_heading(u, u->current_velocity_direction);
 				if (ems.stopping_movement) {
@@ -5639,9 +5672,9 @@ struct state_functions {
 			return true;
 		}
 		if (!going_to_next_waypoint) {
-			u->next_speed = fp8::zero();
-			if (u->current_speed != fp8::zero()) {
-				u->current_speed = fp8::zero();
+			u->next_speed = 0_fp8;
+			if (u->current_speed != 0_fp8) {
+				u->current_speed = 0_fp8;
 				u->velocity = {};
 			}
 			if (u->sprite->position != u->next_target_waypoint) {
@@ -5796,7 +5829,7 @@ struct state_functions {
 								}
 							}
 						}
-						direction_t dir = u->next_velocity_direction + direction_t::from_raw(16 * lcg_rand(50, -3, 3));
+						direction_t dir = u->next_velocity_direction + 16_dir * lcg_rand(50, -3, 3);
 						fp8 length = fp8::integer(lcg_rand(50, 2, 4) * 4);
 						if (!other_unit_is_moving && u_grounded_building(blocking_unit)) length *= 3;
 						move_to = u->sprite->position + to_xy(direction_xy(dir, length));
@@ -5808,7 +5841,7 @@ struct state_functions {
 							move_to.x += 16 * lcg_rand(50, -2, 2);
 							move_to.y += 16 * lcg_rand(50, -2, 2);
 						} else {
-							dir = xy_direction(u->move_target.pos - u->sprite->position) + direction_t::from_raw(16 * lcg_rand(50, -1, 1));
+							dir = xy_direction(u->move_target.pos - u->sprite->position) + 16_dir * lcg_rand(50, -1, 1);
 							length = fp8::integer(8 + lcg_rand(50, 0, 2) * 4);
 							if (!other_unit_is_moving && u_grounded_building(blocking_unit)) length *= 3;
 							move_to = u->sprite->position + to_xy(direction_xy(dir, length));
@@ -5832,7 +5865,7 @@ struct state_functions {
 
 				auto* r = get_region_at(u->sprite->position);
 				if (r->walkable()) {
-					direction_t dir = xy_direction(to_xy(r->center) - u->sprite->position) + direction_t::from_raw(16 * lcg_rand(50, -2, 2));
+					direction_t dir = xy_direction(to_xy(r->center) - u->sprite->position) + 16_dir * lcg_rand(50, -2, 2);
 					int length = lcg_rand(50, 2, 4) * 8;
 					int center_length = xy_length(to_xy(r->center) - u->sprite->position);
 					if (length > center_length - 1) length = center_length - 1;
@@ -5933,8 +5966,8 @@ struct state_functions {
 		ems.refresh_vision = false;
 		set_unit_move_target(u, u->sprite->position);
 		auto dir_error = u->desired_velocity_direction - u->heading;
-		if (dir_error != direction_t::from_raw(-128)) {
-			if (dir_error >= direction_t::from_raw(-10) && dir_error <= direction_t::from_raw(10)) {
+		if (dir_error != -128_dir) {
+			if (dir_error >= -10_dir && dir_error <= 10_dir) {
 				u_unset_movement_flag(u, 1);
 			}
 		}
@@ -6014,7 +6047,7 @@ struct state_functions {
 		if (collision_unit) {
 			bool fix_collision = false;
 			if (check_unit_movement_terrain_collision(u, ems)) fix_collision = true;
-			else if (u->velocity.x < fp8::from_raw(32) && u->velocity.y < fp8::from_raw(32)) fix_collision = true;
+			else if (u->velocity.x < 32_fp8 && u->velocity.y < 32_fp8) fix_collision = true;
 			else if (ems.speed != u->current_speed) fix_collision = true;
 			else {
 				auto pos = ems.position;
@@ -6128,24 +6161,24 @@ struct state_functions {
 		if (check_unit_movement_terrain_collision(u, ems) || check_unit_movement_unit_collision(u, ems)) {
 			update_unit_pathing_collision(u);
 			if (u->next_velocity_direction == xy_direction(u->next_movement_waypoint - u->sprite->position)) {
-				direction_t slide_free_direction = direction_t::from_raw(-1);
+				direction_t slide_free_direction = -1_dir;
 				xy movement = ems.position - u->sprite->position;
 				int desired_quadrant = direction_index(u->current_velocity_direction) / 64;
 				if (ems.position.x != u->sprite->position.x && (ems.position.y == u->sprite->position.y || check_unit_movement_terrain_collision(u, xy{movement.x, 0}))) {
 					if (movement.x >= 0) {
-						if (desired_quadrant == 0) slide_free_direction = direction_t::from_raw(0);
-						if (desired_quadrant == 1) slide_free_direction = direction_t::from_raw(-128);
+						if (desired_quadrant == 0) slide_free_direction = 0_dir;
+						if (desired_quadrant == 1) slide_free_direction = -128_dir;
 					} else {
-						if (desired_quadrant == 3) slide_free_direction = direction_t::from_raw(0);
-						if (desired_quadrant == 2) slide_free_direction = direction_t::from_raw(-128);
+						if (desired_quadrant == 3) slide_free_direction = 0_dir;
+						if (desired_quadrant == 2) slide_free_direction = -128_dir;
 					}
 				} else {
 					if (movement.y < 0) {
-						if (desired_quadrant == 0) slide_free_direction = direction_t::from_raw(64);
-						if (desired_quadrant == 3) slide_free_direction = direction_t::from_raw(-64);
+						if (desired_quadrant == 0) slide_free_direction = 64_dir;
+						if (desired_quadrant == 3) slide_free_direction = -64_dir;
 					} else {
-						if (desired_quadrant == 1) slide_free_direction = direction_t::from_raw(64);
-						if (desired_quadrant == 2) slide_free_direction = direction_t::from_raw(-64);
+						if (desired_quadrant == 1) slide_free_direction = 64_dir;
+						if (desired_quadrant == 2) slide_free_direction = -64_dir;
 					}
 				}
 				u->path->slide_free_direction = slide_free_direction;
@@ -6267,7 +6300,7 @@ struct state_functions {
 			u->movement_state = movement_states::UM_AtMoveTarget;
 			return false;
 		}
-		set_next_speed(u, fp8::zero());
+		set_next_speed(u, 0_fp8);
 		if (u->path) {
 			free_path(u->path);
 			u->path = nullptr;
@@ -6336,13 +6369,13 @@ struct state_functions {
 			}
 			if (state == 1) {
 				direction_t collision_dir = xy_direction(collision_unit->sprite->position - u->sprite->position);
-				direction_t cmp_dir = direction_t::zero();
+				direction_t cmp_dir = 0_dir;
 				auto index = direction_index(collision_unit->next_velocity_direction);
-				if (index < 32) cmp_dir = direction_t::from_raw(0);
-				else if (index < 96) cmp_dir = direction_t::from_raw(64);
-				else if (index < 160) cmp_dir = direction_t::from_raw(-128);
-				else if (index < 224) cmp_dir = direction_t::from_raw(-64);
-				if (fp8::extend(cmp_dir - collision_dir).abs() > fp8::from_raw(64)) {
+				if (index < 32) cmp_dir = 0_dir;
+				else if (index < 96) cmp_dir = 64_dir;
+				else if (index < 160) cmp_dir = -128_dir;
+				else if (index < 224) cmp_dir = -64_dir;
+				if (fp8::extend(cmp_dir - collision_dir).abs() > 64_fp8) {
 					state = 4;
 				} else {
 					state = 6;
@@ -6368,7 +6401,7 @@ struct state_functions {
 				break;
 			case 5:
 				u->movement_state = movement_states::UM_TurnAndStart;
-				set_next_speed(u, fp8::zero());
+				set_next_speed(u, 0_fp8);
 				break;
 			case 6:
 				u->movement_state = movement_states::UM_WaitFree;
@@ -6394,7 +6427,7 @@ struct state_functions {
 		update_unit_movement_values(u, ems);
 		if (check_unit_movement_unit_collision(u, ems)) {
 			update_unit_pathing_collision(u);
-			set_next_speed(u, fp8::zero());
+			set_next_speed(u, 0_fp8);
 			if (u->next_velocity_direction != xy_direction(u->next_movement_waypoint - u->sprite->position)) {
 				update_unit_heading(u, u->current_velocity_direction);
 			}
@@ -6450,7 +6483,7 @@ struct state_functions {
 		const unit_t* collision_unit = get_unit(u->path->last_collision_unit);
 		const unit_t* next_collision_unit = nullptr;
 		bool force_move_free = false;
-		for (fp8 speed = original_speed; speed > fp8::zero(); speed -= fp8::integer(1)) {
+		for (fp8 speed = original_speed; speed > 0_fp8; speed -= fp8::integer(1)) {
 			u_unset_movement_flag(u, 1);
 			set_current_velocity_direction(u, u->path->slide_free_direction);
 			set_next_speed(u, std::min(speed, fp8::integer(1)));
@@ -6882,12 +6915,12 @@ struct state_functions {
 		}
 		if (tu->unit_type->id == UnitTypes::Terran_Goliath_Turret || tu->unit_type->id == UnitTypes::Hero_Alan_Schezar_Turret) {
 			auto diff = tu->subunit->heading - tu->heading;
-			if (diff == direction_t::from_raw(-128)) {
-				tu->heading = tu->subunit->heading - direction_t::from_raw(96);
-			} else if (diff > direction_t::from_raw(32)) {
-				tu->heading = tu->subunit->heading - direction_t::from_raw(32);
-			} else if (diff < direction_t::from_raw(-32)) {
-				tu->heading = tu->subunit->heading + direction_t::from_raw(32);
+			if (diff == -128_dir) {
+				tu->heading = tu->subunit->heading - 96_dir;
+			} else if (diff > 32_dir) {
+				tu->heading = tu->subunit->heading - 32_dir;
+			} else if (diff < -32_dir) {
+				tu->heading = tu->subunit->heading + 32_dir;
 			}
 		}
 	}
@@ -7532,8 +7565,8 @@ struct state_functions {
 
 	fp8 unit_halt_distance(const flingy_t* u) const {
 		ufp8 speed = u->next_speed.as_unsigned();
-		if (speed == ufp8::zero()) return fp8::zero();
-		if (u->flingy_movement_type != 0) return fp8::zero();
+		if (speed == ufp8::zero()) return 0_fp8;
+		if (u->flingy_movement_type != 0) return 0_fp8;
 		if (speed == u->flingy_type->top_speed.as_unsigned() && u->flingy_acceleration == u->flingy_type->acceleration) {
 			return u->flingy_type->halt_distance;
 		} else {
@@ -7649,7 +7682,7 @@ struct state_functions {
 		b->hit_flags = 0;
 		b->remaining_bounces = 0;
 
-		if (weapon_type->bullet_heading_offset != direction_t::zero()) {
+		if (weapon_type->bullet_heading_offset != 0_dir) {
 			bool clockwise;
 			if (source_unit == st.prev_bullet_source_unit) clockwise = !st.prev_bullet_heading_offset_clockwise;
 			else clockwise = lcg_rand((int)weapon_type->id) & 1;
@@ -7912,23 +7945,23 @@ struct state_functions {
 			case opc_turnccwise:
 				a = *p++;
 				if (move_only) break;
-				if (iscript_unit) set_unit_heading(iscript_unit, iscript_unit->heading - direction_t::from_raw(8 * a));
+				if (iscript_unit) set_unit_heading(iscript_unit, iscript_unit->heading - 8_dir * a);
 				break;
 			case opc_turncwise:
 				a = *p++;
 				if (move_only) break;
-				if (iscript_unit) set_unit_heading(iscript_unit, iscript_unit->heading + direction_t::from_raw(8 * a));
+				if (iscript_unit) set_unit_heading(iscript_unit, iscript_unit->heading + 8_dir * a);
 				break;
 			case opc_turn1cwise:
 				if (move_only) break;
-				if (iscript_unit && !iscript_unit->order_target.unit) set_unit_heading(iscript_unit, iscript_unit->heading + direction_t::from_raw(8));
+				if (iscript_unit && !iscript_unit->order_target.unit) set_unit_heading(iscript_unit, iscript_unit->heading + 8_dir);
 			case opc_turnrand:
 				a = *p++;
 				if (move_only) break;
 				if (lcg_rand(6) % 4 == 1) {
-					if (iscript_unit) set_unit_heading(iscript_unit, iscript_unit->heading - direction_t::from_raw(8 * a));
+					if (iscript_unit) set_unit_heading(iscript_unit, iscript_unit->heading - 8_dir * a);
 				} else {
-					if (iscript_unit) set_unit_heading(iscript_unit, iscript_unit->heading + direction_t::from_raw(8 * a));
+					if (iscript_unit) set_unit_heading(iscript_unit, iscript_unit->heading + 8_dir * a);
 				}
 				break;
 
@@ -7996,7 +8029,7 @@ struct state_functions {
 			case opc_setfldirect:
 				a = *p++;
 				if (move_only) break;
-				if (iscript_unit) set_unit_heading(iscript_unit, direction_t::from_raw(a * 8));
+				if (iscript_unit) set_unit_heading(iscript_unit, 8_dir * a);
 				break;
 
 			case opc_setflspeed:
@@ -8228,7 +8261,7 @@ struct state_functions {
 	bool initialize_flingy(flingy_t* f, const flingy_type_t* flingy_type, xy pos, int owner, direction_t heading) {
 		f->flingy_type = flingy_type;
 		f->movement_flags = 0;
-		f->next_speed = fp8::zero();
+		f->next_speed = 0_fp8;
 		f->flingy_top_speed = flingy_type->top_speed;
 		f->flingy_acceleration = flingy_type->acceleration;
 		f->flingy_turn_rate = flingy_type->turn_rate;
@@ -8241,7 +8274,7 @@ struct state_functions {
 		set_next_target_waypoint(f, pos);
 		f->heading = heading;
 		f->next_velocity_direction = heading;
-		f->hp = fp8::from_raw(1);
+		f->hp = 1_fp8;
 
 		f->sprite = create_sprite(flingy_type->sprite, pos, owner);
 		if (!f->sprite) return false;
@@ -8686,7 +8719,7 @@ struct state_functions {
 	bool initialize_unit_type(unit_t* u, const unit_type_t* unit_type, xy pos, int owner) {
 
 		auto ius = make_thingy_setter(iscript_unit, u);
-		if (!initialize_flingy(u, unit_type->flingy, pos, owner, direction_t::zero())) return false;
+		if (!initialize_flingy(u, unit_type->flingy, pos, owner, 0_dir)) return false;
 
 		u->owner = owner;
 		u->order_type = get_order_type(Orders::Fatal);
@@ -8749,11 +8782,11 @@ struct state_functions {
 
 		if (u->unit_type->build_time == 0) {
 			u->remaining_build_time = 1;
-			u->hp_construction_rate = fp8::integer(1) / 256;
+			u->hp_construction_rate = 1_fp8;
 		} else {
 			u->remaining_build_time = u->unit_type->build_time;
-			u->hp_construction_rate = (u->unit_type->hitpoints - u->unit_type->hitpoints / 10 + fp8::integer(u->unit_type->build_time) / 256 - fp8::integer(1) / 256) / u->unit_type->build_time;
-			if (u->hp_construction_rate == fp8::zero()) u->hp_construction_rate = fp8::integer(1) / 256;
+			u->hp_construction_rate = (u->unit_type->hitpoints - u->unit_type->hitpoints / 10 + fp8::from_raw(u->unit_type->build_time) - 1_fp8) / u->unit_type->build_time;
+			if (u->hp_construction_rate == 0_fp8) u->hp_construction_rate = fp8::integer(1) / 256;
 		}
 		if (u->unit_type->has_shield && u_grounded_building(u)) {
 			fp8 max_shields = fp8::integer(u->unit_type->shield_points);
@@ -8762,7 +8795,7 @@ struct state_functions {
 				u->shield_construction_rate = fp8::integer(1);
 			} else {
 				u->shield_construction_rate = (max_shields - u->shield_points) / u->unit_type->build_time;
-				if (u->shield_construction_rate == fp8::zero()) u->shield_construction_rate = fp8::integer(1);
+				if (u->shield_construction_rate == 0_fp8) u->shield_construction_rate = fp8::integer(1);
 			}
 		}
 		update_unit_speed_upgrades(u);
@@ -9107,7 +9140,7 @@ struct state_functions {
 			if (u_can_turn(u)) {
 				int dir = u->unit_type->unit_direction;
 				if (dir == 32) dir = lcg_rand(36) % 32;
-				set_unit_heading(u, direction_t::from_raw(dir * 8));
+				set_unit_heading(u, 8_dir * dir);
 			}
 			if (u->unit_type->id >= UnitTypes::Special_Floor_Missile_Trap && u->unit_type->id <= UnitTypes::Special_Right_Wall_Flame_Trap) {
 				show_unit(u);
@@ -9827,7 +9860,7 @@ struct state_functions {
 		return st.tech_researched.at(owner).at(tech_id);
 	}
 	bool player_has_upgrade(int owner, UpgradeTypes upgrade_id) const {
-		return st.upgrade_levels[owner][upgrade_id];
+		return st.upgrade_levels[owner][upgrade_id] != 0;
 	}
 	bool unit_is(const unit_t* u, UnitTypes unit_type_id) const {
 		return u->unit_type->id == unit_type_id;
@@ -12206,13 +12239,14 @@ struct game_load_functions : state_functions {
 		
 		if (setup_f) {
 			setup_f();
-			use_map_settings = setup_info.use_map_settings;
 		} else {
 			for (size_t i = 0; i != 12; ++i) {
 				if (st.players[i].controller == state::player_t::controller_open) st.players[i].controller = state::player_t::controller_occupied;
 				if (st.players[i].controller == state::player_t::controller_computer) st.players[i].controller = state::player_t::controller_computer_game;
 			}
 		}
+		
+		use_map_settings = setup_info.use_map_settings;
 
 		if (version == 59) {
 
@@ -12670,47 +12704,7 @@ void global_init(global_state& st, load_data_file_F&& load_data_file) {
 		load_data_file(st.tileset_vf4[i], format("Tileset\\%s.vf4", tileset_names.at(i)));
 		load_data_file(st.tileset_cv5[i], format("Tileset\\%s.cv5", tileset_names.at(i)));
 	}
-
-	// This function returns (int)std::round(std::sin(PI / 128 * i) * 256) for i [0, 63]
-	// using only integer arithmetic.
-	auto int_sin = [&](int x) {
-		int x2 = x*x;
-		int x3 = x2*x;
-		int x4 = x3*x;
-		int x5 = x4*x;
-
-		int64_t a0 = 26980449732;
-		int64_t a1 = 1140609;
-		int64_t a2 = -2785716;
-		int64_t a3 = 2159;
-		int64_t a4 = 58;
-
-		return (int)((x * a0 + x2 * a1 + x3 * a2 + x4 * a3 + x5 * a4 + ((int64_t)1 << 31)) >> 32);
-	};
-
-	// The sin lookup table is hardcoded into Broodwar. We generate it here.
-	for (int i = 0; i <= 64; ++i) {
-		auto v = fp8::from_raw(int_sin(i));
-		st.direction_table[i].x = v;
-		st.direction_table[64 - i].y = -v;
-		st.direction_table[64 + (64 - i)].x = v;
-		st.direction_table[64 + i].y = v;
-		st.direction_table[128 + i].x = -v;
-		st.direction_table[128 + (64 - i)].y = v;
-		st.direction_table[(192 + (64 - i)) % 256].x = -v;
-		st.direction_table[(192 + i) % 256].y = -v;
-	}
-
-	auto direction_from_index = [](size_t index) {
-		int v = index;
-		if (v >= 128) v = -(256 - v);
-		return direction_t::from_raw(v);
-	};
-
-	for (size_t i = 0; i != 256; ++i) {
-		st.repulse_direction_table[i] = direction_from_index(i % 32 + (i < 128 ? 32 : -64));
-	}
-
+	
 }
 
 struct game_player {

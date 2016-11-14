@@ -494,11 +494,8 @@ struct fixed_point {
 		raw_value >>= int_bits<raw_type>::value - total_bits;
 	}
 
-	static fixed_point from_raw(raw_type raw_value) {
-		fixed_point r;
-		r.raw_value = raw_value;
-		r.wrap();
-		return r;
+	static constexpr fixed_point from_raw(raw_type raw_value) {
+		return fixed_point{exact_integer_bits ? (raw_type)((raw_type)(raw_value << (int_bits<raw_type>::value - total_bits)) >> (int_bits<raw_type>::value - total_bits)) : raw_value};
 	}
 
 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
@@ -701,6 +698,14 @@ using xy = xy_t<int>;
 using xy_fp8 = xy_t<fp8>;
 
 using rect = rect_t<xy>;
+
+static inline constexpr fp8 operator ""_fp8(unsigned long long int value) {
+	return fp8::from_raw((fp8::raw_type)value);
+}
+
+static inline constexpr direction_t operator ""_dir(unsigned long long int value) {
+	return direction_t::from_raw((direction_t::raw_type)value);
+}
 
 template<typename T, typename index_T, size_t N = (size_t)index_T::None>
 struct type_indexed_array {
