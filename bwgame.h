@@ -71,11 +71,28 @@ static void bw_insert_list(cont_T& cont, T& v) {
 	else cont.insert(++cont.begin(), v);
 }
 
-enum {
-	race_zerg,
-	race_terran,
-	race_protoss
+enum struct race {
+	zerg,
+	terran,
+	protoss,
+	none
 };
+
+template<typename T>
+struct autocast {
+	T val;
+	operator T() {
+		return val;
+	}
+	T operator->() {
+		return val;
+	}
+	autocast(T val) : val(val) {}
+	template<typename T2, typename std::enable_if<std::is_same<typename std::decay<T2>::type, unit_t>::value>::type* = nullptr>
+	autocast(T2* ptr) : val(ptr->unit_type) {}
+};
+
+using unit_type_autocast = autocast<const unit_type_t*>;
 
 struct global_state {
 
@@ -199,7 +216,7 @@ struct state_base_copyable {
 			controller_computer_defeated
 		};
 		int controller = controller_inactive;
-		int race = race_zerg;
+		race race = race::zerg;
 		int force = 0;
 	};
 	std::array<player_t, 12> players;
@@ -369,11 +386,8 @@ struct state_functions {
 		else i_unset_flag(i, flag);
 	}
 
-	bool ut_flag(const unit_type_t* unit_type, unit_type_t::flags_t flag) const {
-		return (unit_type->flags & flag) != 0;
-	}
-	bool ut_flag(const unit_t* u, unit_type_t::flags_t flag) const {
-		return (u->unit_type->flags & flag) != 0;
+	bool ut_flag(unit_type_autocast ut, unit_type_t::flags_t flag) const {
+		return (ut->flags & flag) != 0;
 	}
 	bool u_status_flag(const unit_t* u, unit_t::status_flags_t flag) const {
 		return (u->status_flags & flag) != 0;
@@ -461,56 +475,56 @@ struct state_functions {
 		return u_status_flag(u, unit_t::status_flag_invincible);
 	}
 
-	bool ut_turret(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_turret);
+	bool ut_turret(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_turret);
 	}
-	bool ut_worker(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_worker);
+	bool ut_worker(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_worker);
 	}
-	bool ut_hero(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_hero);
+	bool ut_hero(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_hero);
 	}
-	bool ut_building(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_building);
+	bool ut_building(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_building);
 	}
-	bool ut_flyer(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_flyer);
+	bool ut_flyer(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_flyer);
 	}
-	bool ut_can_turn(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_can_turn);
+	bool ut_can_turn(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_can_turn);
 	}
-	bool ut_can_move(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_can_move);
+	bool ut_can_move(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_can_move);
 	}
-	bool ut_invincible(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_invincible);
+	bool ut_invincible(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_invincible);
 	}
-	bool ut_two_units_in_one_egg(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_two_units_in_one_egg);
+	bool ut_two_units_in_one_egg(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_two_units_in_one_egg);
 	}
-	bool ut_regens_hp(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_regens_hp);
+	bool ut_regens_hp(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_regens_hp);
 	}
-	bool ut_flying_building(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_flying_building);
+	bool ut_flying_building(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_flying_building);
 	}
-	bool ut_has_energy(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_has_energy);
+	bool ut_has_energy(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_has_energy);
 	}
-	bool ut_resource_depot(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_resource_depot);
+	bool ut_resource_depot(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_resource_depot);
 	}
-	bool ut_resource(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_resource);
+	bool ut_resource(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_resource);
 	}
-	bool ut_initially_cloaked(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_initially_cloaked);
+	bool ut_initially_cloaked(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_initially_cloaked);
 	}
-	bool ut_detector(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_detector);
+	bool ut_detector(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_detector);
 	}
-	bool ut_creep(const unit_t* u) const {
-		return ut_flag(u, unit_type_t::flag_creep);
+	bool ut_creep(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_creep);
 	}
 
 	bool us_selected(const unit_t* u) const {
@@ -695,19 +709,28 @@ struct state_functions {
 		if (u->unit_type->has_shield) shields += u->unit_type->shield_points;
 		return max_visible_hp(u) + shields;
 	}
+	
+	auto loaded_units(const unit_t* u) const {
+		return make_filter_range(make_transform_range(u->loaded_units, [this](auto index) {
+			return this->get_unit(index);
+		}), [](unit_t* u) {
+			return u != nullptr;
+		});
+	}
 
 	size_t unit_space_occupied(const unit_t* u) const {
 		size_t r = 0;
-		for (auto id : u->loaded_units) {
-			unit_t* nu = get_unit(id);
-			if (!nu) continue;
-			r += nu->unit_type->space_required;;
+		for (const unit_t* nu : loaded_units(u)) {
+			r += nu->unit_type->space_required;
 		}
 		return r;
 	}
 
 	int get_unit_strength(unit_t* u, bool ground) const {
-		if (u->unit_type->id == UnitTypes::Zerg_Larva || u->unit_type->id == UnitTypes::Zerg_Egg || u->unit_type->id == UnitTypes::Zerg_Cocoon || u->unit_type->id == UnitTypes::Zerg_Lurker_Egg) return 0;
+		if (unit_is(u, UnitTypes::Zerg_Larva)) return 0;
+		if (unit_is(u, UnitTypes::Zerg_Egg)) return 0;
+		if (unit_is(u, UnitTypes::Zerg_Cocoon)) return 0;
+		if (unit_is(u, UnitTypes::Zerg_Lurker_Egg)) return 0;
 		int vis_hp_shields = visible_hp_plus_shields(u);
 		int max_vis_hp_shields = max_visible_hp_plus_shields(u);
 		if (u_hallucination(u)) {
@@ -715,7 +738,7 @@ struct state_functions {
 		}
 
 		int r = ground ? game_st.unit_ground_strength[u->unit_type->id] : game_st.unit_air_strength[u->unit_type->id];
-		if (u->unit_type->id == UnitTypes::Terran_Bunker) {
+		if (unit_is(u, UnitTypes::Terran_Bunker)) {
 			r = ground ? game_st.unit_ground_strength[UnitTypes::Terran_Marine] : game_st.unit_air_strength[UnitTypes::Terran_Marine];
 			r *= unit_space_occupied(u);
 		}
@@ -915,7 +938,7 @@ struct state_functions {
 			}
 		} else {
 			fp8 max_energy = unit_max_energy(u);
-			if (u->unit_type->id == UnitTypes::Protoss_Dark_Archon && u->order_type->id == Orders::CompletingArchonSummon && u->order_state) {
+			if (unit_is(u, UnitTypes::Protoss_Dark_Archon) && u->order_type->id == Orders::CompletingArchonSummon && u->order_state) {
 				max_energy = fp8::integer(50);
 			}
 			u->energy = std::min(u->energy + 8_fp8, max_energy);
@@ -940,7 +963,7 @@ struct state_functions {
 				if (u->shield_points > max_shields) u->shield_points = max_shields;
 			}
 		}
-		if (u->unit_type->id == UnitTypes::Zerg_Zergling || u->unit_type->id == UnitTypes::Hero_Devouring_One) {
+		if (unit_is(u, UnitTypes::Zerg_Zergling) || unit_is(u, UnitTypes::Hero_Devouring_One)) {
 			if (u->ground_weapon_cooldown == 0) u->order_queue_timer = 0;
 		}
 		u->is_being_healed = false;
@@ -965,8 +988,7 @@ struct state_functions {
 					xcept("orders_SelfDestructing...");
 					return;
 				} else {
-					int gf = u->unit_type->group_flags;
-					if (gf & GroupFlags::Terran && (gf & (GroupFlags::Zerg | GroupFlags::Protoss)) == 0) {
+					if (unit_race(u) == race::terran) {
 						if (u_grounded_building(u) || ut_flying_building(u)) {
 							if (unit_hp_percent(u) <= 33) {
 								xcept("killTargetUnitCheck(...)");
@@ -993,7 +1015,7 @@ struct state_functions {
 	}
 
 	const weapon_type_t* unit_ground_weapon(const unit_t* u) const {
-		if (u->unit_type->id == UnitTypes::Zerg_Lurker && !u_burrowed(u)) return nullptr;
+		if (unit_is(u, UnitTypes::Zerg_Lurker) && !u_burrowed(u)) return nullptr;
 		return u->unit_type->ground_weapon;
 	}
 
@@ -1018,44 +1040,52 @@ struct state_functions {
 	}
 
 	bool unit_is_carrier(const unit_t* u) const {
-		return u->unit_type->id == UnitTypes::Protoss_Carrier || u->unit_type->id == UnitTypes::Hero_Gantrithor;
+		return unit_is(u, UnitTypes::Protoss_Carrier) || unit_is(u, UnitTypes::Hero_Gantrithor);
 	}
 
 	bool unit_is_reaver(const unit_t* u) const {
-		return u->unit_type->id == UnitTypes::Protoss_Reaver || u->unit_type->id == UnitTypes::Hero_Warbringer;
+		return unit_is(u, UnitTypes::Protoss_Reaver) || unit_is(u, UnitTypes::Hero_Warbringer);
 	}
 
 	bool unit_is_queen(const unit_t* u) const {
-		return u->unit_type->id == UnitTypes::Zerg_Queen || u->unit_type->id == UnitTypes::Hero_Matriarch;
+		return unit_is(u, UnitTypes::Zerg_Queen) || unit_is(u, UnitTypes::Hero_Matriarch);
 	}
 
 	bool unit_is_hatchery(const unit_t* u) const {
-		if (u->unit_type->id == UnitTypes::Zerg_Hatchery) return true;
-		if (u->unit_type->id == UnitTypes::Zerg_Lair) return true;
-		if (u->unit_type->id == UnitTypes::Zerg_Hive) return true;
+		if (unit_is(u, UnitTypes::Zerg_Hatchery)) return true;
+		if (unit_is(u, UnitTypes::Zerg_Lair)) return true;
+		if (unit_is(u, UnitTypes::Zerg_Hive)) return true;
 		return false;
 	}
 
 	bool unit_is_ghost(const unit_t* u) const {
-		if (u->unit_type->id == UnitTypes::Terran_Ghost) return true;
-		if (u->unit_type->id == UnitTypes::Hero_Sarah_Kerrigan) return true;
-		if (u->unit_type->id == UnitTypes::Hero_Alexei_Stukov) return true;
-		if (u->unit_type->id == UnitTypes::Hero_Samir_Duran) return true;
-		if (u->unit_type->id == UnitTypes::Hero_Infested_Duran) return true;
+		if (unit_is(u, UnitTypes::Terran_Ghost)) return true;
+		if (unit_is(u, UnitTypes::Hero_Sarah_Kerrigan)) return true;
+		if (unit_is(u, UnitTypes::Hero_Alexei_Stukov)) return true;
+		if (unit_is(u, UnitTypes::Hero_Samir_Duran)) return true;
+		if (unit_is(u, UnitTypes::Hero_Infested_Duran)) return true;
 		return false;
 	}
 
 	bool unit_is_map_revealer(const unit_t* u) const {
-		if (u->unit_type->id == UnitTypes::Spell_Scanner_Sweep) return true;
-		if (u->unit_type->id == UnitTypes::Special_Map_Revealer) return true;
+		if (unit_is(u, UnitTypes::Spell_Scanner_Sweep)) return true;
+		if (unit_is(u, UnitTypes::Special_Map_Revealer)) return true;
 		return false;
 	}
 	
 	bool unit_is_refinery(const unit_t* u) const {
-		if (u->unit_type->id == UnitTypes::Terran_Refinery) return true;
-		if (u->unit_type->id == UnitTypes::Protoss_Assimilator) return true;
-		if (u->unit_type->id == UnitTypes::Zerg_Extractor) return true;
+		if (unit_is(u, UnitTypes::Terran_Refinery)) return true;
+		if (unit_is(u, UnitTypes::Protoss_Assimilator)) return true;
+		if (unit_is(u, UnitTypes::Zerg_Extractor)) return true;
 		return false;
+	}
+	
+	bool unit_is_special_beacon(const unit_t* u) const {
+		return u->unit_type->id >= UnitTypes::Special_Zerg_Beacon && u->unit_type->id <= UnitTypes::Special_Protoss_Flag_Beacon;
+	}
+	
+	bool unit_is_scout(const unit_t* u) const {
+		return unit_is(u, UnitTypes::Protoss_Scout) || unit_is(u, UnitTypes::Hero_Mojo) || unit_is(u, UnitTypes::Hero_Artanis);
 	}
 
 	bool unit_target_is_undetected(const unit_t* u, const unit_t* target) const {
@@ -1144,9 +1174,9 @@ struct state_functions {
 			if (u->order_type->id == Orders::ReturnGas) return false;
 			if (target->order_type->id != Orders::WaitForGas) return false;
 		}
-		if (u->unit_type->id == UnitTypes::Zerg_Larva) {
+		if (unit_is(u, UnitTypes::Zerg_Larva)) {
 			if (!u_grounded_building(target)) return false;
-		} else if (target->unit_type->id == UnitTypes::Zerg_Larva) {
+		} else if (unit_is(target, UnitTypes::Zerg_Larva)) {
 			return false;
 		}
 		return true;
@@ -1253,7 +1283,7 @@ struct state_functions {
 
 	bool unit_target_in_attack_angle(const unit_t* u, const unit_t* target, const weapon_type_t* weapon) const {
 		auto dir = units_direction(u, target);
-		if (u->unit_type->id == UnitTypes::Zerg_Lurker) {
+		if (unit_is(u, UnitTypes::Zerg_Lurker)) {
 			xcept("unit_target_in_attack_angle lurker: fixme?");
 			// For some reason, this field is set here for lurkers, but I would really like u to be const.
 			// todo: figure out if it is necessary.
@@ -1319,12 +1349,44 @@ struct state_functions {
 	}
 
 	unit_t* unit_first_loaded_unit(const unit_t* u) const {
-		for (size_t i = 0; i != u->unit_type->space_provided; ++i) {
-			unit_t* nu = get_unit(u->loaded_units.at(i));
-			if (!nu) continue;
+		for (unit_t* nu : loaded_units(u)) {
 			return nu;
 		}
 		return nullptr;
+	}
+	
+	race unit_race(unit_type_autocast ut) const {
+		if (ut->group_flags & GroupFlags::Zerg) return race::zerg;
+		if (ut->group_flags & GroupFlags::Terran) return race::terran;
+		if (ut->group_flags & GroupFlags::Protoss) return race::protoss;
+		return race::none;
+	}
+	
+	bool unit_provides_space(const unit_t* u) const {
+		if (!u->unit_type->space_provided) return false;
+		if (unit_is(u, UnitTypes::Zerg_Overlord) && !player_has_upgrade(u->owner, UpgradeTypes::Ventral_Sacs)) return false;
+		if (u_hallucination(u)) return false;
+		return true;
+	}
+	
+	size_t unit_space_left(const unit_t* u) const {
+		size_t r = u->unit_type->space_provided;
+		for (const unit_t* nu : loaded_units(u)) {
+			r -= nu->unit_type->space_required;
+		}
+		return r;
+	}
+	
+	bool unit_can_load_target(const unit_t* u, const unit_t* target) const {
+		if (!u_completed(u)) return false;
+		if (is_disabled(u)) return false;
+		if (u_burrowed(target)) return false;
+		if (u->owner != target->owner) return false;
+		if (ut_building(u)) {
+			if (unit_race(target) != race::terran) return false;
+			if (target->unit_type->space_required > 1) return false;
+		}
+		return unit_space_left(u) >= target->unit_type->space_required;
 	}
 
 	size_t unit_interceptor_count(const unit_t* u) const {
@@ -1339,12 +1401,12 @@ struct state_functions {
 	size_t unit_max_interceptor_count(const unit_t* u) const {
 		if (!unit_is_carrier(u)) return 0;
 		if (ut_hero(u)) return 8;
-		return st.upgrade_levels[u->owner][UpgradeTypes::Reaver_Capacity] ? 8 : 4;
+		return player_has_upgrade(u->owner, UpgradeTypes::Carrier_Capacity) ? 8 : 4;
 	}
 	size_t unit_max_scarab_count(const unit_t* u) const {
 		if (!unit_is_reaver(u)) return 0;
 		if (ut_hero(u)) return 10;
-		return st.upgrade_levels[u->owner][UpgradeTypes::Carrier_Capacity] ? 8 : 4;
+		return player_has_upgrade(u->owner, UpgradeTypes::Reaver_Capacity) ? 8 : 4;
 	}
 
 	bool unit_can_attack(const unit_t* u) const {
@@ -1356,17 +1418,17 @@ struct state_functions {
 
 	int unit_target_attack_priority(const unit_t* u, const unit_t* target) const {
 		bool is_loaded_unit = false;
-		if (target->unit_type->id == UnitTypes::Terran_Bunker) {
+		if (unit_is(target, UnitTypes::Terran_Bunker)) {
 			const unit_t* loaded_unit = unit_first_loaded_unit(u);
 			if (loaded_unit) {
 				target = loaded_unit;
 				is_loaded_unit = true;
 			}
 		}
-		if (target->unit_type->id == UnitTypes::Zerg_Larva) return 5;
-		if (target->unit_type->id == UnitTypes::Zerg_Egg) return 5;
-		if (target->unit_type->id == UnitTypes::Zerg_Cocoon) return 5;
-		if (target->unit_type->id == UnitTypes::Zerg_Lurker_Egg) return 5;
+		if (unit_is(target, UnitTypes::Zerg_Larva)) return 5;
+		if (unit_is(target, UnitTypes::Zerg_Egg)) return 5;
+		if (unit_is(target, UnitTypes::Zerg_Cocoon)) return 5;
+		if (unit_is(target, UnitTypes::Zerg_Lurker_Egg)) return 5;
 		int r = 0;
 		if (ut_worker(u)) r += 2;
 		else if (!unit_can_attack_target(u, target)) {
@@ -1696,9 +1758,9 @@ struct state_functions {
 		if (!ut_resource_depot(u)) return false;
 
 		if (u_completed(u)) return true;
-		if (u->unit_type->id == UnitTypes::Zerg_Hive) return true;
-		if (u->unit_type->id == UnitTypes::Zerg_Lair) return true;
-		if (u->unit_type->id == UnitTypes::Zerg_Hatchery && unit_is_morphing_building(u)) return true;
+		if (unit_is(u, UnitTypes::Zerg_Hive)) return true;
+		if (unit_is(u, UnitTypes::Zerg_Lair)) return true;
+		if (unit_is(u, UnitTypes::Zerg_Hatchery) && unit_is_morphing_building(u)) return true;
 		return false;
 	}
 
@@ -1740,19 +1802,14 @@ struct state_functions {
 	bool has_available_supply_for(int owner, const unit_type_t* unit_type, bool show_error = false) const {
 		if (ut_flag(unit_type, (unit_type_t::flags_t)0x1000000)) return true;
 		auto supply_required = unit_type->supply_required;
-		if (ut_flag(unit_type, unit_type_t::flag_two_units_in_one_egg)) supply_required *= 2;
+		if (ut_two_units_in_one_egg(unit_type)) supply_required *= 2;
 		if (supply_required == fp1::zero()) return true;
 		if (unit_type->id == UnitTypes::Zerg_Lurker) {
 			supply_required -= get_unit_type(UnitTypes::Zerg_Hydralisk)->supply_required;
 		}
-		size_t index;
-		if (unit_type->group_flags & GroupFlags::Zerg) {
-			index = race_zerg;
-		} else if (unit_type->group_flags & GroupFlags::Terran) {
-			index = race_terran;
-		} else if (unit_type->group_flags & GroupFlags::Protoss) {
-			index = race_zerg;
-		} else return false;
+		auto race = unit_race(unit_type);
+		if (race == race::none) return false;
+		size_t index = (size_t)race;
 		if (st.supply_used[owner][index] + supply_required > fp1::integer(200)) {
 			// todo: callback for error message/sound?
 			(void)show_error;
@@ -1785,7 +1842,7 @@ struct state_functions {
 		if (u->build_queue.empty() && !has_available_supply_for(u->owner, unit_type, true)) return false;
 		if (!has_available_resources_for(u->owner, unit_type, true)) return false;
 		u->build_queue.push_back(unit_type);
-		if (!ut_flag(unit_type, unit_type_t::flag_building)) {
+		if (!ut_building(unit_type)) {
 			st.current_minerals[u->owner] -= unit_type->mineral_cost;
 			st.current_gas[u->owner] -= unit_type->gas_cost;
 		}
@@ -1804,11 +1861,11 @@ struct state_functions {
 			set_unit_order(u, order_type, position);
 			return;
 		}
-		if (u->unit_type->id == UnitTypes::Zerg_Drone) {
+		if (unit_is(u, UnitTypes::Zerg_Drone)) {
 			if (u->order_type->id == Orders::DroneBuild) return;
 			if (u->order_type->id == Orders::DroneLand && (u_order_not_interruptible(u) || u_iscript_nobrk(u))) return;
 		}
-		if (u->unit_type->id == UnitTypes::Zerg_Nydus_Canal && order_type->id == Orders::BuildNydusExit) {
+		if (unit_is(u, UnitTypes::Zerg_Nydus_Canal) && order_type->id == Orders::BuildNydusExit) {
 			set_unit_order(u, order_type, position);
 			return;
 		}
@@ -1820,7 +1877,7 @@ struct state_functions {
 		if (!has_available_resources_for(u->owner, unit_type, true)) return;
 		set_unit_order(u, order_type, position);
 		if (!u->build_queue.empty()) xcept("place_building: refund build queue");
-		if (ut_building(u) && ut_flag(unit_type, unit_type_t::flag_building)) {
+		if (ut_building(u) && ut_building(unit_type)) {
 			xcept("place_building: fixme addon");
 		} else {
 			build_queue_push(u, unit_type);
@@ -2931,7 +2988,7 @@ struct state_functions {
 			// todo: callback for sound
 			return true;
 		}
-		if (u->unit_type->group_flags & GroupFlags::Terran) {
+		if (unit_race(u) == race::terran) {
 			// todo: some addon stuff
 		}
 		return true;
@@ -2952,7 +3009,7 @@ struct state_functions {
 	
 	void secondary_order_Train(unit_t* u) {
 		if (is_disabled(u)) return;
-		if (u->unit_type->group_flags & GroupFlags::Zerg && u->unit_type->id != UnitTypes::Zerg_Infested_Command_Center) return;
+		if (unit_race(u) == race::zerg && !unit_is(u, UnitTypes::Zerg_Infested_Command_Center)) return;
 		if (u->secondary_order_state == 0 || u->secondary_order_state == 1) {
 			if (u->build_queue.empty()) {
 				set_secondary_order(u, get_order_type(Orders::Nothing));
@@ -2979,7 +3036,7 @@ struct state_functions {
 			if (build_unit) {
 				if (resume_building_unit(build_unit, true)) {
 					if (u_completed(build_unit)) {
-						if (build_unit->unit_type->id == UnitTypes::Terran_Nuclear_Missile) hide_unit(build_unit);
+						if (unit_is(build_unit, UnitTypes::Terran_Nuclear_Missile)) hide_unit(build_unit);
 						else rally_unit(build_unit, u);
 						if (!u->build_queue.empty()) u->build_queue.erase(u->build_queue.begin());
 						u->current_build_unit = nullptr;
@@ -3654,7 +3711,7 @@ struct state_functions {
 	bool apply_repulse_field(unit_t* u, execute_movement_struct& ems) {
 		if (!u_can_move(u)) return false;
 		if (ut_building(u)) return false;
-		if (u->unit_type->id == UnitTypes::Protoss_Interceptor) return false;
+		if (unit_is(u, UnitTypes::Protoss_Interceptor)) return false;
 		if (u_order_not_interruptible(u)) return false;
 		if (u_iscript_nobrk(u)) return false;
 		int strength = st.repulse_field[u->repulse_index];
@@ -3982,10 +4039,10 @@ struct state_functions {
 		if (target != consider_collision_with_unit && !consider_collision_with_moving_units) {
 			if (!unit_is_at_move_target(target)) return false;
 		}
-		if (target->unit_type->id == UnitTypes::Special_Upper_Level_Door) return false;
-		if (target->unit_type->id == UnitTypes::Special_Right_Upper_Level_Door) return false;
-		if (target->unit_type->id == UnitTypes::Special_Pit_Door) return false;
-		if (target->unit_type->id == UnitTypes::Special_Right_Pit_Door) return false;
+		if (unit_is(target, UnitTypes::Special_Upper_Level_Door)) return false;
+		if (unit_is(target, UnitTypes::Special_Right_Upper_Level_Door)) return false;
+		if (unit_is(target, UnitTypes::Special_Pit_Door)) return false;
+		if (unit_is(target, UnitTypes::Special_Right_Pit_Door)) return false;
 		return unit_can_collide_with(u, target);
 	}
 
@@ -5228,8 +5285,7 @@ struct state_functions {
 				}
 			}
 			if (pf.target_unit) {
-				auto tid = pf.target_unit->unit_type->id;
-				if (tid >= UnitTypes::Special_Zerg_Beacon && tid <= UnitTypes::Special_Protoss_Flag_Beacon) {
+				if (unit_is_special_beacon(pf.target_unit)) {
 					pf.target_unit = nullptr;
 				}
 			}
@@ -6740,10 +6796,10 @@ struct state_functions {
 	int unit_sight_range(const unit_t* u, bool ignore_blindness = false) const {
 		if (u_grounded_building(u) && !u_completed(u) && !unit_is_morphing_building(u)) return 4;
 		if (!ignore_blindness && u->is_blind) return 2;
-		if (u->unit_type->id == UnitTypes::Terran_Ghost && st.upgrade_levels[u->owner][UpgradeTypes::Ocular_Implants]) return 11;
-		if (u->unit_type->id == UnitTypes::Zerg_Overlord && st.upgrade_levels[u->owner][UpgradeTypes::Antennae]) return 11;
-		if (u->unit_type->id == UnitTypes::Protoss_Observer && st.upgrade_levels[u->owner][UpgradeTypes::Sensor_Array]) return 11;
-		if (u->unit_type->id == UnitTypes::Protoss_Scout && st.upgrade_levels[u->owner][UpgradeTypes::Apial_Sensors]) return 11;
+		if (unit_is(u, UnitTypes::Terran_Ghost) && player_has_upgrade(u->owner, UpgradeTypes::Ocular_Implants)) return 11;
+		if (unit_is(u, UnitTypes::Zerg_Overlord) && player_has_upgrade(u->owner, UpgradeTypes::Antennae)) return 11;
+		if (unit_is(u, UnitTypes::Protoss_Observer) && player_has_upgrade(u->owner, UpgradeTypes::Sensor_Array)) return 11;
+		if (unit_is(u, UnitTypes::Protoss_Scout) && player_has_upgrade(u->owner, UpgradeTypes::Apial_Sensors)) return 11;
 		return u->unit_type->sight_range;
 	}
 	int unit_sight_range_ignore_blindness(const unit_t* u) const {
@@ -6755,14 +6811,14 @@ struct state_functions {
 			if (unit_is_ghost(u)) return 0;
 		}
 		int bonus = 0;
-		if (u->unit_type->id == UnitTypes::Terran_Marine && st.upgrade_levels[u->owner][UpgradeTypes::U_238_Shells]) bonus = 1;
-		if (u->unit_type->id == UnitTypes::Zerg_Hydralisk && st.upgrade_levels[u->owner][UpgradeTypes::Grooved_Spines]) bonus = 1;
-		if (u->unit_type->id == UnitTypes::Protoss_Dragoon && st.upgrade_levels[u->owner][UpgradeTypes::Singularity_Charge]) bonus = 2;
-		if (u->unit_type->id == UnitTypes::Hero_Fenix_Dragoon) bonus = 2;
-		if (u->unit_type->id == UnitTypes::Terran_Goliath && st.upgrade_levels[u->owner][UpgradeTypes::Charon_Boosters]) bonus = 3;
-		if (u->unit_type->id == UnitTypes::Terran_Goliath_Turret && st.upgrade_levels[u->owner][UpgradeTypes::Charon_Boosters]) bonus = 3;
-		if (u->unit_type->id == UnitTypes::Hero_Alan_Schezar) bonus = 3;
-		if (u->unit_type->id == UnitTypes::Hero_Alan_Schezar_Turret) bonus = 3;
+		if (unit_is(u, UnitTypes::Terran_Marine) && player_has_upgrade(u->owner, UpgradeTypes::U_238_Shells)) bonus = 1;
+		if (unit_is(u, UnitTypes::Zerg_Hydralisk) && player_has_upgrade(u->owner, UpgradeTypes::Grooved_Spines)) bonus = 1;
+		if (unit_is(u, UnitTypes::Protoss_Dragoon) && player_has_upgrade(u->owner, UpgradeTypes::Singularity_Charge)) bonus = 2;
+		if (unit_is(u, UnitTypes::Hero_Fenix_Dragoon)) bonus = 2;
+		if (unit_is(u, UnitTypes::Terran_Goliath) && player_has_upgrade(u->owner, UpgradeTypes::Charon_Boosters)) bonus = 3;
+		if (unit_is(u, UnitTypes::Terran_Goliath_Turret) && player_has_upgrade(u->owner, UpgradeTypes::Charon_Boosters)) bonus = 3;
+		if (unit_is(u, UnitTypes::Hero_Alan_Schezar)) bonus = 3;
+		if (unit_is(u, UnitTypes::Hero_Alan_Schezar_Turret)) bonus = 3;
 		return u->unit_type->target_acquisition_range + bonus;
 	}
 
@@ -6792,17 +6848,13 @@ struct state_functions {
 
 	bool visible_to_everyone(const unit_t* u) const {
 		if (ut_worker(u)) {
-			if (u->worker.powerup && u->worker.powerup->unit_type->id == UnitTypes::Powerup_Flag) return true;
+			if (u->worker.powerup && unit_is(u->worker.powerup, UnitTypes::Powerup_Flag)) return true;
 			else return false;
 		}
-		if (!u->unit_type->space_provided) return false;
-		if (u->unit_type->id == UnitTypes::Zerg_Overlord && !st.upgrade_levels[u->owner][UpgradeTypes::Ventral_Sacs]) return false;
-		if (u_hallucination(u)) return false;
-		for (auto idx : u->loaded_units) {
-			unit_t* lu = get_unit(idx);
-			if (!lu || !lu->sprite) continue;
-			if (!ut_worker(lu)) continue;
-			if (lu->worker.powerup && lu->worker.powerup->unit_type->id == UnitTypes::Powerup_Flag) return true;
+		if (!unit_provides_space(u)) return false;
+		for (const unit_t* lu : loaded_units(u)) {
+			if (!lu->sprite) continue;
+			if (lu->worker.powerup && unit_is(lu->worker.powerup, UnitTypes::Powerup_Flag)) return true;
 		}
 		return false;
 	}
@@ -6887,9 +6939,9 @@ struct state_functions {
 
 	void refresh_unit_vision(unit_t*u) {
 		if (u->owner >= 8 && !u->parasite_flags) return;
-		if (u->unit_type->id == UnitTypes::Terran_Nuclear_Missile) return;
+		if (unit_is(u, UnitTypes::Terran_Nuclear_Missile)) return;
 		int visible_to = 0;
-		if (visible_to_everyone(u) || (u->unit_type->id == UnitTypes::Powerup_Flag && u->order_type->id == Orders::UnusedPowerup)) visible_to = 0xff;
+		if (visible_to_everyone(u) || (unit_is(u, UnitTypes::Powerup_Flag) && u->order_type->id == Orders::UnusedPowerup)) visible_to = 0xff;
 		else {
 			visible_to = st.shared_vision[u->owner] | u->parasite_flags;
 			if (u->parasite_flags) {
@@ -6903,24 +6955,24 @@ struct state_functions {
 		reveal_sight_at(u->sprite->position, unit_sight_range(u), visible_to, u_flying(u));
 	}
 
-	void turn_turret(unit_t* tu, direction_t turn) {
-		if (tu->order_target.unit) u_unset_status_flag(tu, (unit_t::status_flags_t)0x2000000);
+	void turn_turret(unit_t* u, direction_t turn) {
+		if (u->order_target.unit) u_unset_status_flag(u, (unit_t::status_flags_t)0x2000000);
 		else {
-			if (tu->heading == tu->subunit->heading) u_set_status_flag(tu, (unit_t::status_flags_t)0x2000000);
+			if (u->heading == u->subunit->heading) u_set_status_flag(u, (unit_t::status_flags_t)0x2000000);
 		}
-		if (u_status_flag(tu, (unit_t::status_flags_t)0x2000000)) set_unit_heading(tu, tu->subunit->heading);
+		if (u_status_flag(u, (unit_t::status_flags_t)0x2000000)) set_unit_heading(u, u->subunit->heading);
 		else {
-			tu->next_velocity_direction = (tu->next_velocity_direction + turn);
-			tu->heading = tu->next_velocity_direction;
+			u->next_velocity_direction = (u->next_velocity_direction + turn);
+			u->heading = u->next_velocity_direction;
 		}
-		if (tu->unit_type->id == UnitTypes::Terran_Goliath_Turret || tu->unit_type->id == UnitTypes::Hero_Alan_Schezar_Turret) {
-			auto diff = tu->subunit->heading - tu->heading;
+		if (unit_is(u, UnitTypes::Terran_Goliath_Turret) || unit_is(u, UnitTypes::Hero_Alan_Schezar_Turret)) {
+			auto diff = u->subunit->heading - u->heading;
 			if (diff == -128_dir) {
-				tu->heading = tu->subunit->heading - 96_dir;
+				u->heading = u->subunit->heading - 96_dir;
 			} else if (diff > 32_dir) {
-				tu->heading = tu->subunit->heading - 32_dir;
+				u->heading = u->subunit->heading - 32_dir;
 			} else if (diff < -32_dir) {
-				tu->heading = tu->subunit->heading + 32_dir;
+				u->heading = u->subunit->heading + 32_dir;
 			}
 		}
 	}
@@ -7229,9 +7281,6 @@ struct state_functions {
 	}
 
 	void update_units() {
-
-		// place box/target order cursor/whatever
-
 		--st.order_timer_counter;
 		if (!st.order_timer_counter) {
 			st.order_timer_counter = 150;
@@ -7253,21 +7302,21 @@ struct state_functions {
 			}
 		}
 
-		// some_units_loaded_and_disruption_web begin
 		for (unit_t* u : ptr(st.visible_units)) {
 			if (!u_flying(u) || u_status_flag(u, (unit_t::status_flags_t)0x80)) {
-				u_set_status_flag(u, unit_t::status_flag_cannot_attack, false);
-				if (!u_hallucination(u) && (u->unit_type->id != UnitTypes::Zerg_Overlord || st.upgrade_levels[u->owner][UpgradeTypes::Ventral_Sacs]) && u->unit_type->space_provided) {
-					xcept("sub_4EB2F0 loaded unit stuff");
+				u_unset_status_flag(u, unit_t::status_flag_cannot_attack);
+				if (unit_provides_space(u)) {
+					for (unit_t* nu : loaded_units(u)) {
+						u_unset_status_flag(nu, unit_t::status_flag_cannot_attack);
+					}
 				} else if (u->subunit) {
-					u_set_status_flag(u->subunit, unit_t::status_flag_cannot_attack, false);
+					u_unset_status_flag(u->subunit, unit_t::status_flag_cannot_attack);
 				}
 			}
 		}
 		if (st.completed_unit_counts[11][UnitTypes::Spell_Disruption_Web]) {
 			xcept("disruption web stuff");
 		}
-		// some_units_loaded_and_disruption_web end
 
 
 		for (auto i = st.dead_units.begin(); i != st.dead_units.end();) {
@@ -7530,7 +7579,7 @@ struct state_functions {
 		if (u->ensnare_timer) --mod;
 		if (mod < 0) speed /= 2u;
 		if (mod > 0) {
-			if (u->unit_type->id == UnitTypes::Protoss_Scout || u->unit_type->id == UnitTypes::Hero_Mojo || u->unit_type->id == UnitTypes::Hero_Artanis) {
+			if (unit_is_scout(u)) {
 				speed = ufp8::integer(6) + (ufp8::integer(1) - ufp8::integer(1) / 3u);
 			} else {
 				speed += speed / 2u;
@@ -7696,7 +7745,7 @@ struct state_functions {
 
 		b->source_unit = nullptr;
 		if (ut_turret(source_unit)) b->source_unit = source_unit->subunit;
-		if (source_unit->unit_type->id == UnitTypes::Protoss_Scarab) b->source_unit = source_unit->fighter.parent;
+		if (unit_is(source_unit, UnitTypes::Protoss_Scarab)) b->source_unit = source_unit->fighter.parent;
 		if (!b->source_unit) b->source_unit = source_unit;
 
 		if (u_hallucination(source_unit)) b->hit_flags |= 2;
@@ -8313,17 +8362,17 @@ struct state_functions {
 			};
 		};
 		bool cooldown = false;
-		if (u->unit_type->id == UnitTypes::Hero_Devouring_One) cooldown = true;
-		if (u->unit_type->id == UnitTypes::Zerg_Zergling && st.upgrade_levels[u->owner][UpgradeTypes::Adrenal_Glands]) cooldown = true;
+		if (unit_is(u, UnitTypes::Hero_Devouring_One)) cooldown = true;
+		if (unit_is(u, UnitTypes::Zerg_Zergling) && player_has_upgrade(u->owner, UpgradeTypes::Adrenal_Glands)) cooldown = true;
 		bool speed = false;
 		auto speed_upg = speed_upgrade();
 		if (speed_upg != UpgradeTypes::None && player_has_upgrade(u->owner, speed_upg)) speed = true;
-		if (u->unit_type->id == UnitTypes::Hero_Hunter_Killer) speed = true;
-		if (u->unit_type->id == UnitTypes::Hero_Yggdrasill) speed = true;
-		if (u->unit_type->id == UnitTypes::Hero_Fenix_Zealot) speed = true;
-		if (u->unit_type->id == UnitTypes::Hero_Mojo) speed = true;
-		if (u->unit_type->id == UnitTypes::Hero_Artanis) speed = true;
-		if (u->unit_type->id == UnitTypes::Zerg_Lurker) speed = true;
+		if (unit_is(u, UnitTypes::Hero_Hunter_Killer)) speed = true;
+		if (unit_is(u, UnitTypes::Hero_Yggdrasill)) speed = true;
+		if (unit_is(u, UnitTypes::Hero_Fenix_Zealot)) speed = true;
+		if (unit_is(u, UnitTypes::Hero_Mojo)) speed = true;
+		if (unit_is(u, UnitTypes::Hero_Artanis)) speed = true;
+		if (unit_is(u, UnitTypes::Zerg_Lurker)) speed = true;
 		if (cooldown != u_cooldown_upgrade(u) || speed != u_speed_upgrade(u)) {
 			if (cooldown) u->status_flags |= unit_t::status_flag_cooldown_upgrade;
 			if (speed) u->status_flags |= unit_t::status_flag_speed_upgrade;
@@ -8374,26 +8423,26 @@ struct state_functions {
 
 		st.unit_counts[u->owner][u->unit_type->id] += count;
 		auto supply_required = u->unit_type->supply_required;
-		if (u->unit_type->group_flags & GroupFlags::Zerg) {
-			const unit_type_t* ut = u->unit_type;
-			if (ut->id == UnitTypes::Zerg_Egg || ut->id == UnitTypes::Zerg_Cocoon || ut->id == UnitTypes::Zerg_Lurker_Egg) {
-				ut = u->build_queue.at(0);
-				supply_required = ut->supply_required;
+		auto race = unit_race(u);
+		if (race == race::zerg) {
+			if (unit_is(u, UnitTypes::Zerg_Egg) || unit_is(u, UnitTypes::Zerg_Cocoon) || unit_is(u, UnitTypes::Zerg_Lurker_Egg)) {
+				supply_required = u->build_queue.front()->supply_required;
 				if (ut_two_units_in_one_egg(u)) supply_required *= 2;
 			} else {
 				if (ut_two_units_in_one_egg(u) && !u_completed(u)) supply_required *= 2;
 			}
 			st.supply_used[u->owner][0] += supply_required * count;
-		} else if (u->unit_type->group_flags & GroupFlags::Terran) {
+		} else if (race == race::terran) {
 			st.supply_used[u->owner][1] += supply_required * count;
-		} else if (u->unit_type->group_flags & GroupFlags::Protoss) {
+		} else if (race == race::protoss) {
 			st.supply_used[u->owner][2] += supply_required * count;
 		}
 		if (u->unit_type->group_flags & GroupFlags::Factory) st.factory_counts[u->owner] += count;
 		if (u->unit_type->group_flags & GroupFlags::Men) {
 			st.non_building_counts[u->owner] += count;
-		} else if (u->unit_type->group_flags & GroupFlags::Building) st.building_counts[u->owner] += count;
-		else if (u->unit_type->id == UnitTypes::Zerg_Egg || u->unit_type->id == UnitTypes::Zerg_Cocoon || u->unit_type->id == UnitTypes::Zerg_Lurker_Egg) {
+		} else if (u->unit_type->group_flags & GroupFlags::Building) {
+			st.building_counts[u->owner] += count;
+		} else if (unit_is(u, UnitTypes::Zerg_Egg) || unit_is(u, UnitTypes::Zerg_Cocoon) || unit_is(u, UnitTypes::Zerg_Lurker_Egg)) {
 			st.non_building_counts[u->owner] += count;
 		}
 		if (st.unit_counts[u->owner][u->unit_type->id] < 0) st.unit_counts[u->owner][u->unit_type->id] = 0;
@@ -8691,16 +8740,16 @@ struct state_functions {
 	}
 
 	bool unit_is_factory(const unit_t* u) const {
-		if (u->unit_type->id == UnitTypes::Terran_Command_Center) return true;
-		if (u->unit_type->id == UnitTypes::Terran_Barracks) return true;
-		if (u->unit_type->id == UnitTypes::Terran_Factory) return true;
-		if (u->unit_type->id == UnitTypes::Terran_Starport) return true;
-		if (u->unit_type->id == UnitTypes::Zerg_Infested_Command_Center) return true;
-		if (u->unit_type->id == UnitTypes::Zerg_Hatchery) return true;
-		if (u->unit_type->id == UnitTypes::Zerg_Lair) return true;
-		if (u->unit_type->id == UnitTypes::Zerg_Hive) return true;
-		if (u->unit_type->id == UnitTypes::Protoss_Nexus) return true;
-		if (u->unit_type->id == UnitTypes::Protoss_Gateway) return true;
+		if (unit_is(u, UnitTypes::Terran_Command_Center)) return true;
+		if (unit_is(u, UnitTypes::Terran_Barracks)) return true;
+		if (unit_is(u, UnitTypes::Terran_Factory)) return true;
+		if (unit_is(u, UnitTypes::Terran_Starport)) return true;
+		if (unit_is(u, UnitTypes::Zerg_Infested_Command_Center)) return true;
+		if (unit_is(u, UnitTypes::Zerg_Hatchery)) return true;
+		if (unit_is(u, UnitTypes::Zerg_Lair)) return true;
+		if (unit_is(u, UnitTypes::Zerg_Hive)) return true;
+		if (unit_is(u, UnitTypes::Protoss_Nexus)) return true;
+		if (unit_is(u, UnitTypes::Protoss_Gateway)) return true;
 		return false;
 	}
 
@@ -8741,7 +8790,7 @@ struct state_functions {
 		}
 		u->last_attacking_player = 8;
 		u->shield_points = fp8::integer(u->unit_type->shield_points);
-		if (u->unit_type->id == UnitTypes::Protoss_Shield_Battery) u->energy = fp8::integer(100);
+		if (unit_is(u, UnitTypes::Protoss_Shield_Battery)) u->energy = fp8::integer(100);
 		else u->energy = unit_max_energy(u) / 4;
 
 		u->sprite->elevation_level = unit_type->elevation_level;
@@ -8786,7 +8835,7 @@ struct state_functions {
 		} else {
 			u->remaining_build_time = u->unit_type->build_time;
 			u->hp_construction_rate = (u->unit_type->hitpoints - u->unit_type->hitpoints / 10 + fp8::from_raw(u->unit_type->build_time) - 1_fp8) / u->unit_type->build_time;
-			if (u->hp_construction_rate == 0_fp8) u->hp_construction_rate = fp8::integer(1) / 256;
+			if (u->hp_construction_rate == 0_fp8) u->hp_construction_rate = 1_fp8;
 		}
 		if (u->unit_type->has_shield && u_grounded_building(u)) {
 			fp8 max_shields = fp8::integer(u->unit_type->shield_points);
@@ -8875,7 +8924,7 @@ struct state_functions {
 					if (u->building.upgrade_type) xcept("fixme refund upgrade");
 					if (u->building.tech_type) xcept("fixme refund tech");
 					if (!u->build_queue.empty()) xcept("fixme refund build_queue");
-					if (u->unit_type->group_flags & GroupFlags::Zerg) {
+					if (unit_race(u) == race::zerg) {
 						xcept("fixme cancel zerg stuff");
 					}
 				}
@@ -8961,7 +9010,7 @@ struct state_functions {
 		new (&u->build_queue) static_vector<const unit_type_t*, 5>();
 		u->unit_id_generation = (u->unit_id_generation + 1) % (1 << 5);
 		u->wireframe_randomizer = lcg_rand(15);
-		if (ut_turret(u)) u->hp = fp8::integer(1) / 256;
+		if (ut_turret(u)) u->hp = 1_fp8;
 		else u->hp = u->unit_type->hitpoints / 10;
 		if (u_grounded_building(u)) u->order_type = u->unit_type->human_ai_idle;
 		else u->order_type = get_order_type(Orders::Nothing);
@@ -9160,22 +9209,22 @@ struct state_functions {
 			if (ut_flag(u, (unit_type_t::flags_t)0x800)) {
 				return u_grounded_building(target) || ut_flag(target, (unit_type_t::flags_t)0x800);
 			}
-			if (target->unit_type->id == UnitTypes::Terran_Starport) {
-				if (u->unit_type->id == UnitTypes::Terran_Wraith) return true;
-				if (u->unit_type->id == UnitTypes::Terran_Dropship) return true;
-				if (u->unit_type->id == UnitTypes::Terran_Science_Vessel) return true;
-				if (u->unit_type->id == UnitTypes::Terran_Battlecruiser) return true;
-				if (u->unit_type->id == UnitTypes::Terran_Valkyrie) return true;
+			if (unit_is(target, UnitTypes::Terran_Starport)) {
+				if (unit_is(u, UnitTypes::Terran_Wraith)) return true;
+				if (unit_is(u, UnitTypes::Terran_Dropship)) return true;
+				if (unit_is(u, UnitTypes::Terran_Science_Vessel)) return true;
+				if (unit_is(u, UnitTypes::Terran_Battlecruiser)) return true;
+				if (unit_is(u, UnitTypes::Terran_Valkyrie)) return true;
 			}
-			if (target->unit_type->id == UnitTypes::Protoss_Robotics_Facility) {
-				if (u->unit_type->id == UnitTypes::Protoss_Shuttle) return true;
-				if (u->unit_type->id == UnitTypes::Protoss_Observer) return true;
+			if (unit_is(target, UnitTypes::Protoss_Robotics_Facility)) {
+				if (unit_is(u, UnitTypes::Protoss_Shuttle)) return true;
+				if (unit_is(u, UnitTypes::Protoss_Observer)) return true;
 			}
-			if (target->unit_type->id == UnitTypes::Protoss_Stargate) {
-				if (u->unit_type->id == UnitTypes::Protoss_Scout) return true;
-				if (u->unit_type->id == UnitTypes::Protoss_Carrier) return true;
-				if (u->unit_type->id == UnitTypes::Protoss_Arbiter) return true;
-				if (u->unit_type->id == UnitTypes::Protoss_Corsair) return true;
+			if (unit_is(target, UnitTypes::Protoss_Stargate)) {
+				if (unit_is(u, UnitTypes::Protoss_Scout)) return true;
+				if (unit_is(u, UnitTypes::Protoss_Carrier)) return true;
+				if (unit_is(u, UnitTypes::Protoss_Arbiter)) return true;
+				if (unit_is(u, UnitTypes::Protoss_Corsair)) return true;
 			}
 			return u_flying(u) == u_flying(target);
 		};
@@ -9384,12 +9433,9 @@ struct state_functions {
 		if (ut_turret(u)) return;
 
 		st.completed_unit_counts[u->owner][u->unit_type->id] += count;
-		if (u->unit_type->group_flags & GroupFlags::Zerg) {
-			st.supply_available[u->owner][0] += u->unit_type->supply_provided * count;
-		} else if (u->unit_type->group_flags & GroupFlags::Terran) {
-			st.supply_available[u->owner][1] += u->unit_type->supply_provided * count;
-		} else if (u->unit_type->group_flags & GroupFlags::Protoss) {
-			st.supply_available[u->owner][2] += u->unit_type->supply_provided * count;
+		auto race = unit_race(u);
+		if (race != race::none) {
+			st.supply_available[u->owner][(size_t)race] += u->unit_type->supply_provided * count;
 		}
 
 		if (u->unit_type->group_flags & GroupFlags::Factory) {
@@ -9404,20 +9450,20 @@ struct state_functions {
 			if (u->owner != 11) {
 				if (u->unit_type->group_flags & GroupFlags::Men) {
 					bool morphed = false;
-					if (u->unit_type->id == UnitTypes::Zerg_Guardian) morphed = true;
-					if (u->unit_type->id == UnitTypes::Zerg_Devourer) morphed = true;
-					if (u->unit_type->id == UnitTypes::Protoss_Dark_Archon) morphed = true;
-					if (u->unit_type->id == UnitTypes::Protoss_Archon) morphed = true;
-					if (u->unit_type->id == UnitTypes::Zerg_Lurker) morphed = true;
+					if (unit_is(u, UnitTypes::Zerg_Guardian)) morphed = true;
+					if (unit_is(u, UnitTypes::Zerg_Devourer)) morphed = true;
+					if (unit_is(u, UnitTypes::Protoss_Dark_Archon)) morphed = true;
+					if (unit_is(u, UnitTypes::Protoss_Archon)) morphed = true;
+					if (unit_is(u, UnitTypes::Zerg_Lurker)) morphed = true;
 					if (!morphed) st.total_non_buildings_ever_completed[u->owner] += count;
 					st.unit_score[u->owner] += u->unit_type->build_score * count;
 				} else if (u->unit_type->group_flags & GroupFlags::Building) {
 					bool morphed = false;
-					if (u->unit_type->id == UnitTypes::Zerg_Lair) morphed = true;
-					if (u->unit_type->id == UnitTypes::Zerg_Hive) morphed = true;
-					if (u->unit_type->id == UnitTypes::Zerg_Greater_Spire) morphed = true;
-					if (u->unit_type->id == UnitTypes::Zerg_Spore_Colony) morphed = true;
-					if (u->unit_type->id == UnitTypes::Zerg_Sunken_Colony) morphed = true;
+					if (unit_is(u, UnitTypes::Zerg_Lair)) morphed = true;
+					if (unit_is(u, UnitTypes::Zerg_Hive)) morphed = true;
+					if (unit_is(u, UnitTypes::Zerg_Greater_Spire)) morphed = true;
+					if (unit_is(u, UnitTypes::Zerg_Spore_Colony)) morphed = true;
+					if (unit_is(u, UnitTypes::Zerg_Sunken_Colony)) morphed = true;
 					if (!morphed) st.total_buildings_ever_completed[u->owner] += count;
 					st.building_score[u->owner] += u->unit_type->build_score * count;
 				}
@@ -9633,7 +9679,7 @@ struct state_functions {
 	void increment_repulse_field(unit_t* u) {
 		if (!u_can_move(u)) return;
 		if (ut_building(u)) return;
-		if (u->unit_type->id == UnitTypes::Protoss_Interceptor) return;
+		if (unit_is(u, UnitTypes::Protoss_Interceptor)) return;
 		if ((u->repulse_flags & 0xf0) == 0) {
 			unsigned int v = lcg_rand(37);
 			u->repulse_direction = direction_from_index(v & 0xff);
@@ -9650,7 +9696,7 @@ struct state_functions {
 	void decrement_repulse_field(unit_t* u) {
 		if (!u_can_move(u)) return;
 		if (ut_building(u)) return;
-		if (u->unit_type->id == UnitTypes::Protoss_Interceptor) return;
+		if (unit_is(u, UnitTypes::Protoss_Interceptor)) return;
 		auto& v = st.repulse_field.at(u->repulse_index);
 		if (v > 0) --v;
 	}
@@ -9784,22 +9830,22 @@ struct state_functions {
 		}
 		add_completed_unit(u, 1, true);
 		if (ut_initially_cloaked(u)) cloak_unit(u);
-		if (u->unit_type->id == UnitTypes::Spell_Scanner_Sweep || u->unit_type->id == UnitTypes::Special_Map_Revealer) {
+		if (unit_is(u, UnitTypes::Spell_Scanner_Sweep) || unit_is(u, UnitTypes::Special_Map_Revealer)) {
 			xcept("fixme scanner/map revealer");
 		} else {
 			if (us_hidden(u)) {
-				if (u->unit_type->id != UnitTypes::Protoss_Interceptor && u->unit_type->id != UnitTypes::Protoss_Scarab) {
+				if (!unit_is(u, UnitTypes::Protoss_Interceptor) && !unit_is(u, UnitTypes::Protoss_Scarab)) {
 					show_unit(u);
 				}
 			}
 		}
 		bool is_trap = false;
-		if (u->unit_type->id == UnitTypes::Special_Floor_Missile_Trap) is_trap = true;
-		if (u->unit_type->id == UnitTypes::Special_Floor_Gun_Trap) is_trap = true;
-		if (u->unit_type->id == UnitTypes::Special_Wall_Missile_Trap) is_trap = true;
-		if (u->unit_type->id == UnitTypes::Special_Wall_Flame_Trap) is_trap = true;
-		if (u->unit_type->id == UnitTypes::Special_Right_Wall_Missile_Trap) is_trap = true;
-		if (u->unit_type->id == UnitTypes::Special_Right_Wall_Flame_Trap) is_trap = true;
+		if (unit_is(u, UnitTypes::Special_Floor_Missile_Trap)) is_trap = true;
+		if (unit_is(u, UnitTypes::Special_Floor_Gun_Trap)) is_trap = true;
+		if (unit_is(u, UnitTypes::Special_Wall_Missile_Trap)) is_trap = true;
+		if (unit_is(u, UnitTypes::Special_Wall_Flame_Trap)) is_trap = true;
+		if (unit_is(u, UnitTypes::Special_Right_Wall_Missile_Trap)) is_trap = true;
+		if (unit_is(u, UnitTypes::Special_Right_Wall_Flame_Trap)) is_trap = true;
 		if (is_trap) {
 			u->status_flags |= unit_t::status_flag_cloaked | unit_t::status_flag_requires_detector;
 			u->detected_flags = 0x80000000;
@@ -9825,7 +9871,7 @@ struct state_functions {
 			display_last_net_error_for_player(owner);
 			return nullptr;
 		}
-		if (unit_type_spreads_creep(unit_type, true) || ut_flag(unit_type, unit_type_t::flag_creep)) {
+		if (unit_type_spreads_creep(unit_type, true) || ut_creep(unit_type)) {
 			xcept("apply creep");
 		}
 		finish_building_unit(u);
@@ -9862,14 +9908,14 @@ struct state_functions {
 	bool player_has_upgrade(int owner, UpgradeTypes upgrade_id) const {
 		return st.upgrade_levels[owner][upgrade_id] != 0;
 	}
-	bool unit_is(const unit_t* u, UnitTypes unit_type_id) const {
-		return u->unit_type->id == unit_type_id;
+	bool unit_is(unit_type_autocast ut, UnitTypes unit_type_id) const {
+		return ut->id == unit_type_id;
 	}
 	unit_t* unit_addon(const unit_t* u) const {
 		return ut_building(u) ? u->building.addon : nullptr;
 	}
 	bool unit_has_addon(const unit_t* u, UnitTypes unit_type_id) const {
-		return ut_building(u) && u->building.addon && u->building.addon->unit_type->id == unit_type_id;
+		return ut_building(u) && u->building.addon && unit_is(u->building.addon, unit_type_id);
 	}
 	bool unit_is_building_addon(const unit_t* u) const {
 		if (u->secondary_order_type->id == Orders::BuildAddon) {
@@ -11690,11 +11736,11 @@ struct game_load_functions : state_functions {
 		set_mega_tile_flags();
 	}
 	
-	void create_starting_units(int owner, xy position, int race) {
+	void create_starting_units(int owner, xy position, race race) {
 		
 		const unit_type_t* resource_depot_type;
-		if (race == race_zerg) resource_depot_type = get_unit_type(UnitTypes::Zerg_Hatchery);
-		else if (race == race_terran) resource_depot_type = get_unit_type(UnitTypes::Terran_Command_Center);
+		if (race == race::zerg) resource_depot_type = get_unit_type(UnitTypes::Zerg_Hatchery);
+		else if (race == race::terran) resource_depot_type = get_unit_type(UnitTypes::Terran_Command_Center);
 		else resource_depot_type = get_unit_type(UnitTypes::Protoss_Nexus);
 		
 		xy resource_depot_pos = (position - resource_depot_type->placement_size / 2) / 32u * 32u + resource_depot_type->placement_size / 2;
@@ -11713,8 +11759,8 @@ struct game_load_functions : state_functions {
 		}
 		
 		const unit_type_t* worker_type;
-		if (race == race_zerg) worker_type = get_unit_type(UnitTypes::Zerg_Drone);
-		else if (race == race_terran) worker_type = get_unit_type(UnitTypes::Terran_SCV);
+		if (race == race::zerg) worker_type = get_unit_type(UnitTypes::Zerg_Drone);
+		else if (race == race::terran) worker_type = get_unit_type(UnitTypes::Terran_SCV);
 		else worker_type = get_unit_type(UnitTypes::Protoss_Probe);
 		
 		for (size_t i = 0; i != 4; ++i) {
@@ -11809,7 +11855,7 @@ struct game_load_functions : state_functions {
 		};
 		tag_funcs["SIDE"] = [&](data_reader_le r) {
 			for (size_t i = 0; i != 12; ++i) {
-				st.players[i].race = r.get<int8_t>();
+				st.players[i].race = (race)r.get<int8_t>();
 			}
 		};
 		tag_funcs["STR "] = [&](data_reader_le r) {
@@ -12147,7 +12193,7 @@ struct game_load_functions : state_functions {
 				if (valid_properties & 0x10) set_unit_resources(u, resources);
 				// more stuff...
 
-				if (u->unit_type->id == UnitTypes::Zerg_Broodling) {
+				if (unit_is(u, UnitTypes::Zerg_Broodling)) {
 					int timer = u_hallucination(u) ? 1350 : 1800;
 					if (u->remove_timer == 0 || timer < u->remove_timer) u->remove_timer = timer;
 				}
@@ -12287,7 +12333,7 @@ struct game_load_functions : state_functions {
 			for (size_t i = 8; i;) {
 				--i;
 				int controller = st.players[i].controller;
-				int race = st.players[i].race;
+				auto race = st.players[i].race;
 				if (controller != state::player_t::controller_occupied && controller != state::player_t::controller_computer_game) continue;
 				create_starting_units(i, game_st.start_locations[i], race);
 			}
