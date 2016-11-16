@@ -150,21 +150,20 @@ struct replay_player: actions_player {
 		(void)game_name;
 		(void)map_name;
 		
-		std::array<int, 12> player_id;
-		std::array<int, 12> controller;
-		std::array<int, 12> race;
-		std::array<int, 12> force;
+		std::array<int, 12> slot_player_id;
+		std::array<int, 12> slot_controller;
+		std::array<int, 12> slot_race;
+		std::array<int, 12> slot_force;
 		
 		for (size_t i = 0; i != 12; ++i) {
-			size_t slot = gir.get<uint32_t>(); // slot ?
-			if (slot >= 12) xcept("replay_player: invalid slot %u", slot);
-			player_id[slot] = gir.get<uint32_t>(); // player id ?
-			controller[slot] = gir.get<uint8_t>(); // controller
-			race[slot] = gir.get<uint8_t>(); // race
-			force[slot] = gir.get<uint8_t>(); // force
+			gir.get<uint32_t>(); // slot ?
+			slot_player_id[i] = gir.get<uint32_t>(); // player id
+			slot_controller[i] = gir.get<uint8_t>(); // controller
+			slot_race[i] = gir.get<uint8_t>(); // race
+			slot_force[i] = gir.get<uint8_t>(); // force
 			gir.get<std::array<char, 25>>(); // player name
 			
-			funcs().action_st.player_id[slot] = player_id[slot];
+			funcs().action_st.player_id[i] = slot_player_id[i];
 		}
 		
 		gir.get<std::array<uint32_t, 8>>(); // player colors
@@ -183,9 +182,9 @@ struct replay_player: actions_player {
 		game_load_functions game_load_funcs(st());
 		game_load_funcs.load_map_data(map_buffer.data(), map_buffer.size(), [&]() {
 			for (size_t i = 0; i != 12; ++i) {
-				st().players[i].controller = controller[i];
-				st().players[i].race = race[i];
-				st().players[i].force = force[i];
+				st().players[i].controller = slot_controller[i];
+				st().players[i].race = (race)slot_race[i];
+				st().players[i].force = slot_force[i];
 			}
 			st().lcg_rand_state = random_seed;
 		});

@@ -790,6 +790,22 @@ public:
 	}
 };
 
+template<typename T, typename std::enable_if<std::is_unsigned<T>::value>::type* = nullptr>
+T isqrt(T n) {
+	T r = 0;
+	T p = (T)1 << (8 * sizeof(T) - 2);
+	while (p > n) p /= 4u;
+	while (p) {
+		if (n >= r + p) {
+			n -= r + p;
+			r += 2u * p;
+		}
+		r /= 2u;
+		p /= 4u;
+	}
+	return r;
+}
+
 }
 
 #endif

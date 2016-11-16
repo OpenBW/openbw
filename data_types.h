@@ -79,7 +79,7 @@ public:
 struct unit_type_t {
 	enum flags_t : uint32_t {
 		flag_building = 1,
-
+		flag_addon = 2,
 		flag_flyer = 4,
 
 		flag_worker = 8,
@@ -89,7 +89,7 @@ struct unit_type_t {
 		flag_regens_hp = 0x80,
 
 		flag_two_units_in_one_egg = 0x400,
-		
+		flag_powerup = 0x800,
 		flag_resource_depot = 0x1000,
 		flag_resource = 0x2000,
 		
@@ -102,6 +102,7 @@ struct unit_type_t {
 		flag_can_move = 0x8000000,
 		flag_can_turn = 0x10000000,
 		flag_invincible = 0x20000000,
+		flag_mech = 0x40000000
 	};
 
 	UnitTypes id;
@@ -134,7 +135,7 @@ struct unit_type_t {
 	type_id<upgrade_type_t> armor_upgrade;
 	int unit_size;
 	int armor;
-	type_id<const order_type_t> right_click_action;
+	size_t right_click_action;
 	int ready_sound;
 	int first_what_sound;
 	int last_what_sound;

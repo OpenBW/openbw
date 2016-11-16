@@ -434,7 +434,7 @@ struct unit_t: flingy_t {
 	};
 	union {
 		struct {
-			int spider_mine_count;
+			size_t spider_mine_count;
 		} vulture;
 		struct {
 			unit_t* parent;
@@ -484,6 +484,7 @@ struct unit_t: flingy_t {
 		int landing_timer;
 		int creep_timer;
 		int upgrade_level;
+		target_t rally;
 		union {
 			struct {
 				int resource_count;
@@ -495,7 +496,7 @@ struct unit_t: flingy_t {
 				unit_t* exit;
 			} nydus;
 			struct {
-				sprite_t* pylon_aura;
+				std::pair<unit_t*, unit_t*> psi_link;
 			} pylon;
 			struct {
 				unit_t* nuke;
@@ -520,13 +521,6 @@ struct unit_t: flingy_t {
 	int secondary_order_unk_b;
 	unit_t* current_build_unit;
 	std::pair<unit_t*, unit_t*> burrowed_unit_link;
-
-	union {
-		target_t rally;
-		struct {
-			std::pair<unit_t*, unit_t*> psi_link;
-		} pylon;
-	};
 
 	path_t* path;
 	int pathing_collision_counter;

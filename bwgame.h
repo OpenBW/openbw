@@ -487,6 +487,9 @@ struct state_functions {
 	bool ut_building(unit_type_autocast ut) const {
 		return ut_flag(ut, unit_type_t::flag_building);
 	}
+	bool ut_addon(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_addon);
+	}
 	bool ut_flyer(unit_type_autocast ut) const {
 		return ut_flag(ut, unit_type_t::flag_flyer);
 	}
@@ -525,6 +528,12 @@ struct state_functions {
 	}
 	bool ut_creep(unit_type_autocast ut) const {
 		return ut_flag(ut, unit_type_t::flag_creep);
+	}
+	bool ut_mech(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_mech);
+	}
+	bool ut_powerup(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_powerup);
 	}
 
 	bool us_selected(const unit_t* u) const {
@@ -639,6 +648,13 @@ struct state_functions {
 		return pos;
 	}
 	
+	xy restrict_pos_to_map_bounds(xy pos) const {
+		if (pos.x < 0) pos.x = 0;
+		else if (pos.x >= (int)game_st.map_width) pos.x = game_st.map_width - 1;
+		if (pos.y < 0) pos.y = 0;
+		else if (pos.y >= (int)game_st.map_height) pos.y = game_st.map_height - 1;
+		return pos;
+	}
 	
 	bool is_move_target_in_valid_bounds(rect bb) const {
 		return is_in_bounds(bb + rect { { 0, 0 }, { 1, 1 } }, map_bounds() + rect { { 0, 0 }, { 0, -32 } });
@@ -766,17 +782,17 @@ struct state_functions {
 		u->energy = std::min(energy, unit_max_energy(u));
 	}
 
-	bool is_mineral_field(const unit_type_t* unit_type) {
-		if (unit_type->id == UnitTypes::Resource_Mineral_Field) return true;
-		if (unit_type->id == UnitTypes::Resource_Mineral_Field_Type_2) return true;
-		if (unit_type->id == UnitTypes::Resource_Mineral_Field_Type_3) return true;
+	bool unit_is_mineral_field(unit_type_autocast ut) const {
+		if (ut->id == UnitTypes::Resource_Mineral_Field) return true;
+		if (ut->id == UnitTypes::Resource_Mineral_Field_Type_2) return true;
+		if (ut->id == UnitTypes::Resource_Mineral_Field_Type_3) return true;
 		return false;
 	}
 
 	void set_unit_resources(unit_t* u, int resources) {
 		if (!ut_resource(u)) return;
 		u->building.resource.resource_count = resources;
-		if (is_mineral_field(u->unit_type)) {
+		if (unit_is_mineral_field(u)) {
 			int anim = iscript_anims::WorkingToIdle;
 			if (resources < 250) anim = iscript_anims::SpecialState1;
 			else if (resources < 500) anim = iscript_anims::SpecialState2;
@@ -788,7 +804,7 @@ struct state_functions {
 		}
 	}
 
-	bool is_disabled(const unit_t* u) const {
+	bool unit_is_disabled(const unit_t* u) const {
 		if (u_disabled(u)) return true;
 		if (u->lockdown_timer) return true;
 		if (u->stasis_timer) return true;
@@ -809,7 +825,7 @@ struct state_functions {
 	}
 
 	void disable_effect_end(unit_t* u, ImageTypes first, ImageTypes last) {
-		bool still_disabled = is_disabled(u);
+		bool still_disabled = unit_is_disabled(u);
 		if (u->subunit && !still_disabled) {
 			u_unset_status_flag(u, unit_t::status_flag_disabled);
 			set_unit_order(u, u->unit_type->return_to_idle);
@@ -1039,53 +1055,61 @@ struct state_functions {
 		return u_flying(target) ? unit_air_weapon(unit_attacking_unit(u)) : unit_ground_weapon(unit_attacking_unit(u));
 	}
 
-	bool unit_is_carrier(const unit_t* u) const {
-		return unit_is(u, UnitTypes::Protoss_Carrier) || unit_is(u, UnitTypes::Hero_Gantrithor);
+	bool unit_is_carrier(unit_type_autocast ut) const {
+		return unit_is(ut, UnitTypes::Protoss_Carrier) || unit_is(ut, UnitTypes::Hero_Gantrithor);
 	}
 
-	bool unit_is_reaver(const unit_t* u) const {
-		return unit_is(u, UnitTypes::Protoss_Reaver) || unit_is(u, UnitTypes::Hero_Warbringer);
+	bool unit_is_reaver(unit_type_autocast ut) const {
+		return unit_is(ut, UnitTypes::Protoss_Reaver) || unit_is(ut, UnitTypes::Hero_Warbringer);
 	}
 
-	bool unit_is_queen(const unit_t* u) const {
-		return unit_is(u, UnitTypes::Zerg_Queen) || unit_is(u, UnitTypes::Hero_Matriarch);
+	bool unit_is_queen(unit_type_autocast ut) const {
+		return unit_is(ut, UnitTypes::Zerg_Queen) || unit_is(ut, UnitTypes::Hero_Matriarch);
 	}
 
-	bool unit_is_hatchery(const unit_t* u) const {
-		if (unit_is(u, UnitTypes::Zerg_Hatchery)) return true;
-		if (unit_is(u, UnitTypes::Zerg_Lair)) return true;
-		if (unit_is(u, UnitTypes::Zerg_Hive)) return true;
+	bool unit_is_hatchery(unit_type_autocast ut) const {
+		if (unit_is(ut, UnitTypes::Zerg_Hatchery)) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Lair)) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Hive)) return true;
 		return false;
 	}
 
-	bool unit_is_ghost(const unit_t* u) const {
-		if (unit_is(u, UnitTypes::Terran_Ghost)) return true;
-		if (unit_is(u, UnitTypes::Hero_Sarah_Kerrigan)) return true;
-		if (unit_is(u, UnitTypes::Hero_Alexei_Stukov)) return true;
-		if (unit_is(u, UnitTypes::Hero_Samir_Duran)) return true;
-		if (unit_is(u, UnitTypes::Hero_Infested_Duran)) return true;
+	bool unit_is_ghost(unit_type_autocast ut) const {
+		if (unit_is(ut, UnitTypes::Terran_Ghost)) return true;
+		if (unit_is(ut, UnitTypes::Hero_Sarah_Kerrigan)) return true;
+		if (unit_is(ut, UnitTypes::Hero_Alexei_Stukov)) return true;
+		if (unit_is(ut, UnitTypes::Hero_Samir_Duran)) return true;
+		if (unit_is(ut, UnitTypes::Hero_Infested_Duran)) return true;
 		return false;
 	}
 
-	bool unit_is_map_revealer(const unit_t* u) const {
-		if (unit_is(u, UnitTypes::Spell_Scanner_Sweep)) return true;
-		if (unit_is(u, UnitTypes::Special_Map_Revealer)) return true;
-		return false;
-	}
-	
-	bool unit_is_refinery(const unit_t* u) const {
-		if (unit_is(u, UnitTypes::Terran_Refinery)) return true;
-		if (unit_is(u, UnitTypes::Protoss_Assimilator)) return true;
-		if (unit_is(u, UnitTypes::Zerg_Extractor)) return true;
+	bool unit_is_map_revealer(unit_type_autocast ut) const {
+		if (unit_is(ut, UnitTypes::Spell_Scanner_Sweep)) return true;
+		if (unit_is(ut, UnitTypes::Special_Map_Revealer)) return true;
 		return false;
 	}
 	
-	bool unit_is_special_beacon(const unit_t* u) const {
-		return u->unit_type->id >= UnitTypes::Special_Zerg_Beacon && u->unit_type->id <= UnitTypes::Special_Protoss_Flag_Beacon;
+	bool unit_is_refinery(unit_type_autocast ut) const {
+		if (unit_is(ut, UnitTypes::Terran_Refinery)) return true;
+		if (unit_is(ut, UnitTypes::Protoss_Assimilator)) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Extractor)) return true;
+		return false;
 	}
 	
-	bool unit_is_scout(const unit_t* u) const {
-		return unit_is(u, UnitTypes::Protoss_Scout) || unit_is(u, UnitTypes::Hero_Mojo) || unit_is(u, UnitTypes::Hero_Artanis);
+	bool unit_is_special_beacon(unit_type_autocast ut) const {
+		return ut->id >= UnitTypes::Special_Zerg_Beacon && ut->id <= UnitTypes::Special_Protoss_Flag_Beacon;
+	}
+	
+	bool unit_is_scout(unit_type_autocast ut) const {
+		return unit_is(ut, UnitTypes::Protoss_Scout) || unit_is(ut, UnitTypes::Hero_Mojo) || unit_is(ut, UnitTypes::Hero_Artanis);
+	}
+	
+	bool unit_is_vulture(unit_type_autocast ut) const {
+		return unit_is(ut, UnitTypes::Terran_Vulture) || unit_is(ut, UnitTypes::Hero_Jim_Raynor_Vulture);
+	}
+	
+	bool unit_is_nydus(unit_type_autocast ut) const {
+		return unit_is(ut, UnitTypes::Zerg_Nydus_Canal);
 	}
 
 	bool unit_target_is_undetected(const unit_t* u, const unit_t* target) const {
@@ -1126,15 +1150,15 @@ struct state_functions {
 		return is_reachable(u->sprite->position, to);
 	}
 
-	bool cc_can_be_infested(const unit_t* u) const {
-		if (u->unit_type->id != UnitTypes::Terran_Command_Center) return false;
+	bool unit_can_be_infested(const unit_t* u) const {
+		if (!unit_is(u, UnitTypes::Terran_Command_Center)) return false;
 		if (!u_completed(u)) return false;
 		return unit_hp_percent(u) < 50;
 	}
 
 	bool unit_can_attack_target(const unit_t* u, const unit_t* target) const {
 		if (!target) return false;
-		if (is_disabled(u)) return false;
+		if (unit_is_disabled(u)) return false;
 		if (u_invincible(target)) return false;
 		if (us_hidden(target)) return false;
 		if (unit_target_is_undetected(u, target)) return false;
@@ -1144,7 +1168,7 @@ struct state_functions {
 			return is_reachable(u->sprite->position, target->sprite->position);
 		}
 		if (unit_is_queen(u)) {
-			return cc_can_be_infested(target);
+			return unit_can_be_infested(target);
 		}
 		return unit_target_weapon(u, target) != nullptr;
 	}
@@ -1379,7 +1403,7 @@ struct state_functions {
 	
 	bool unit_can_load_target(const unit_t* u, const unit_t* target) const {
 		if (!u_completed(u)) return false;
-		if (is_disabled(u)) return false;
+		if (unit_is_disabled(u)) return false;
 		if (u_burrowed(target)) return false;
 		if (u->owner != target->owner) return false;
 		if (ut_building(u)) {
@@ -1407,6 +1431,11 @@ struct state_functions {
 		if (!unit_is_reaver(u)) return 0;
 		if (ut_hero(u)) return 10;
 		return player_has_upgrade(u->owner, UpgradeTypes::Reaver_Capacity) ? 8 : 4;
+	}
+	
+	size_t unit_spider_mine_count(const unit_t* u) const {
+		if (!unit_is_vulture(u)) return 0;
+		return u->vulture.spider_mine_count;
 	}
 
 	bool unit_can_attack(const unit_t* u) const {
@@ -1737,7 +1766,7 @@ struct state_functions {
 			resource->building.resource.is_being_gathered = false;
 			unit_t* next_unit = nullptr;
 			for (unit_t* queued_unit : reverse(ptr(resource->building.resource.gather_queue))) {
-				if (!is_disabled(queued_unit)) {
+				if (!unit_is_disabled(queued_unit)) {
 					if (queued_unit->order_type->id == Orders::WaitForGas || queued_unit->order_type->id == Orders::WaitForMinerals) {
 						next_unit = queued_unit;
 						break;
@@ -1856,7 +1885,7 @@ struct state_functions {
 		} else return false;
 	}
 	
-	void place_building(unit_t* u, const order_type_t* order_type, xy position, const unit_type_t* unit_type) {
+	void place_building(unit_t* u, const order_type_t* order_type, const unit_type_t* unit_type, xy position) {
 		if (order_type->id == Orders::BuildingLand) {
 			set_unit_order(u, order_type, position);
 			return;
@@ -1884,7 +1913,7 @@ struct state_functions {
 		}
 	}
 	
-	bool can_place_building(int owner, xy pos, const unit_type_t* unit_type) const {
+	bool can_place_building(int owner, const unit_type_t* unit_type, xy pos) const {
 		if (!has_available_supply_for(owner, unit_type, true)) return false;
 		if (!has_available_resources_for(owner, unit_type, true)) return false;
 		// todo: check tiles
@@ -1972,7 +2001,7 @@ struct state_functions {
 			rect area{pos - xy(range, range), pos + xy(range, range)};
 			int ground_height = get_ground_height_at(pos);
 			return find_nearest_unit(pos, area, [&](const unit_t* target) {
-				if (!is_mineral_field(target->unit_type)) return false;
+				if (!unit_is_mineral_field(target)) return false;
 				if (!any_neighbor_tile_unoccupied(target)) return false;
 				if (!is_reachable(u->sprite->position, target->sprite->position)) return false;
 				if (get_ground_height_at(pos) != ground_height) return false;
@@ -1984,7 +2013,7 @@ struct state_functions {
 		};
 
 		unit_t* target = u->order_target.unit;
-		if (!target || !is_mineral_field(target->unit_type)) {
+		if (!target || !unit_is_mineral_field(target)) {
 			xy search_pos = u->sprite->position;
 			if (u->worker.target_resource_position != xy()) {
 				search_pos = u->worker.target_resource_position;
@@ -2052,7 +2081,7 @@ struct state_functions {
 	}
 
 	void order_WaitForMinerals(unit_t* u) {
-		if (u->order_target.unit && is_mineral_field(u->order_target.unit->unit_type)) {
+		if (u->order_target.unit && unit_is_mineral_field(u->order_target.unit)) {
 			if (u->order_state == 0) {
 				wait_for_resource(u, u->order_target.unit);
 			}
@@ -2064,7 +2093,7 @@ struct state_functions {
 	void order_MiningMinerals(unit_t* u) {
 		if (!ut_worker(u)) xcept("MiningMinerals: unit is not a worker");
 		unit_t* target = u->order_target.unit;
-		if (target && is_mineral_field(target->unit_type)) {
+		if (target && unit_is_mineral_field(target)) {
 			set_unit_gathering(u);
 			if (u->order_state == 0) {
 				if (is_facing_next_target_waypoint(u)) {
@@ -2261,7 +2290,7 @@ struct state_functions {
 		} else if (u->order_state == 1) {
 			if (unit_is_at_move_target(u)) {
 				const unit_type_t* unit_type = u->build_queue.front();
-				if (xy_length(to_xy_fp8(u->order_target.pos) - u->exact_position).integer_part() <= 128 && can_place_building(u->owner, u->order_target.pos, unit_type)) {
+				if (xy_length(to_xy_fp8(u->order_target.pos) - u->exact_position).integer_part() <= 128 && can_place_building(u->owner, unit_type, u->order_target.pos)) {
 					st.current_minerals[u->owner] -= unit_type->mineral_cost;
 					st.current_gas[u->owner] -= unit_type->gas_cost;
 					u_unset_status_flag(u, unit_t::status_flag_ground_unit);
@@ -2461,9 +2490,9 @@ struct state_functions {
 			break;
 		}
 
-		if (is_disabled(u) || (!u_can_move(u) && u_cannot_attack(u))) {
+		if (unit_is_disabled(u) || (!u_can_move(u) && u_cannot_attack(u))) {
 			if (u->main_order_timer == 0) u->main_order_timer = 15;
-			if (is_disabled(u)) return;
+			if (unit_is_disabled(u)) return;
 		}
 
 		switch (u->order_type->id) {
@@ -2996,7 +3025,7 @@ struct state_functions {
 	
 	void rally_unit(unit_t* u, const unit_t* factory_unit) {
 		if (!unit_is_factory(factory_unit)) return;
-		auto target = factory_unit->rally;
+		auto target = factory_unit->building.rally;
 		if (target.unit == factory_unit) return;
 		if (target.pos != xy()) {
 			if (target.unit && target.unit->owner == u->owner) {
@@ -3008,7 +3037,7 @@ struct state_functions {
 	}
 	
 	void secondary_order_Train(unit_t* u) {
-		if (is_disabled(u)) return;
+		if (unit_is_disabled(u)) return;
 		if (unit_race(u) == race::zerg && !unit_is(u, UnitTypes::Zerg_Infested_Command_Center)) return;
 		if (u->secondary_order_state == 0 || u->secondary_order_state == 1) {
 			if (u->build_queue.empty()) {
@@ -3061,7 +3090,7 @@ struct state_functions {
 			}
 			return;
 		}
-		if (is_disabled(u)) return;
+		if (unit_is_disabled(u)) return;
 		switch (u->secondary_order_type->id) {
 		case Orders::BuildAddon:
 			xcept("BuildAddon");
@@ -3121,7 +3150,23 @@ struct state_functions {
 	bool unit_dead(const unit_t* u) const {
 		return u->order_type->id == Orders::Die && u->order_state == 1;
 	}
-
+	
+	bool rectangle_can_fit_at(xy pos, int width, int height) const {
+		rect area;
+		area.from.x = pos.x - width / 2;
+		area.from.y = pos.y - width / 2;
+		area.to.x = area.from.x + width + 1;
+		area.to.y = area.from.x + height + 1;
+		if (!is_in_map_bounds(area)) return false;
+		if (!is_walkable(pos)) return false;
+		std::array<int, 4> inner;
+		inner[0] = (height - 1) / 2;
+		inner[1] = -(width - (width / 2) - 1);
+		inner[2] = -(height - (height / 2) - 1);
+		inner[3] = (width - 1) / 2;
+		return can_fit_at(pos, inner);
+	}
+	
 	bool unit_type_can_fit_at(const unit_type_t* unit_type, xy pos) const {
 		if (!is_in_map_bounds(unit_type, pos)) return false;
 		if (!is_walkable(pos)) return false;
@@ -3130,7 +3175,10 @@ struct state_functions {
 		inner[1] = -unit_type->dimensions.to.x;
 		inner[2] = -unit_type->dimensions.to.y;
 		inner[3] = unit_type->dimensions.from.x;
+		return can_fit_at(pos, inner);
+	}
 
+	bool can_fit_at(xy pos, std::array<int, 4> inner) const {
 		auto cmp_u = [&](int v, const regions_t::contour& c) {
 			return v < c.v[0];
 		};
@@ -7152,7 +7200,7 @@ struct state_functions {
 	bool unit_can_detect(const unit_t* u) const {
 		if (!ut_detector(u)) return false;
 		if (!u_completed(u)) return false;
-		if (is_disabled(u)) return false;
+		if (unit_is_disabled(u)) return false;
 		if (u->is_blind) return false;
 		return true;
 	}
@@ -7217,7 +7265,7 @@ struct state_functions {
 			test(u->building.addon);
 		}
 		if (unit_is_factory(u)) {
-			test(u->rally.unit);
+			test(u->building.rally.unit);
 		}
 		if (unit_turret(u)) remove_target_references(unit_turret(u), target);
 		for (auto i = u->order_queue.begin(); i != u->order_queue.end();) {
@@ -8750,6 +8798,8 @@ struct state_functions {
 		if (unit_is(u, UnitTypes::Zerg_Hive)) return true;
 		if (unit_is(u, UnitTypes::Protoss_Nexus)) return true;
 		if (unit_is(u, UnitTypes::Protoss_Gateway)) return true;
+		if (unit_is(u, UnitTypes::Protoss_Stargate)) return true;
+		if (unit_is(u, UnitTypes::Protoss_Robotics_Facility)) return true;
 		return false;
 	}
 
@@ -8817,7 +8867,7 @@ struct state_functions {
 			u->building.resource.resource_iscript = 0;
 			u->building.resource.is_being_gathered = false;
 			u->building.resource.gather_queue.clear();
-		} else if (is_mineral_field(unit_type)) xcept("mineral field is not a resource");
+		} else if (unit_is_mineral_field(unit_type)) xcept("mineral field is not a resource");
 		if (unit_is_ghost(u)) {
 			u->ghost.nuke_dot = nullptr;
 		}
@@ -9533,6 +9583,31 @@ struct state_functions {
 			queue_order_back(u, order_type, target);
 		}
 	}
+	
+	void issue_order(unit_t* u, bool queue, const order_type_t* order_type, order_target_t target) {
+		if (queue && !order_type->can_be_queued) queue = false;
+		if (queue) {
+			switch (order_type->id) {
+			case Orders::Guard:
+			case Orders::PlayerGuard:
+			case Orders::Nothing:
+			case Orders::PickupIdle:
+			case Orders::Patrol:
+			case Orders::Medic:
+				queue = false;
+				break;
+			default:
+				break;
+			}
+		}
+		if (queue) {
+			if (u->order_queue_count < 8 && st.allocated_order_count < 1800) {
+				queue_order_back(u, order_type, target);
+			}
+		} else {
+			set_unit_order(u, order_type, target);
+		}
+	}
 
 	void iscript_run_to_idle(unit_t* u) {
 		u->status_flags &= ~unit_t::status_flag_iscript_nobrk;
@@ -9941,10 +10016,21 @@ struct state_functions {
 	bool unit_is_upgrading(const unit_t* u) const {
 		return ut_building(u) && u->building.upgrade_type;
 	}
+	bool unit_can_move(const unit_t* u) const {
+		if (u_grounded_building(u)) return false;
+		if (u->unit_type->right_click_action == 0) return false;
+		if (u->unit_type->right_click_action == 3) return false;
+		return true;
+	}
+	bool unit_can_hold_position(const unit_t* u) const {
+		if (u->unit_type->right_click_action != 0) return true;
+		if (u_grounded_building(u) && unit_is_factory(u)) return true;
+		return false;
+	}
 	
 	bool unit_can_build(const unit_t* u, const unit_type_t* unit_type) const {
 		if (!u_completed(u)) return false;
-		if (is_disabled(u)) return false;
+		if (unit_is_disabled(u)) return false;
 		if (u_hallucination(u)) return false;
 		int owner = u->owner;
 		if (!game_st.unit_type_allowed[owner][unit_type->id]) return false;
@@ -10116,16 +10202,16 @@ struct state_functions {
 			if (!player_has_completed_unit(owner, UnitTypes::Protoss_Fleet_Beacon)) return false;
 			return true;
 		case UnitTypes::Protoss_Interceptor:
-			if (!unit_is(u, UnitTypes::Protoss_Carrier) && !unit_is(u, UnitTypes::Hero_Gantrithor)) return false;
-			if ((unit_is_carrier(u) && unit_interceptor_count(u) >= unit_max_interceptor_count(u)) || (unit_is_reaver(u) && unit_scarab_count(u) >= unit_max_scarab_count(u))) return false;
+			if (!unit_is_carrier(u)) return false;
+			if (unit_interceptor_count(u) >= unit_max_interceptor_count(u)) return false;
 			return true;
 		case UnitTypes::Protoss_Reaver:
 			if (!unit_is(u, UnitTypes::Protoss_Robotics_Facility)) return false;
 			if (!player_has_completed_unit(owner, UnitTypes::Protoss_Robotics_Support_Bay)) return false;
 			return true;
 		case UnitTypes::Protoss_Scarab:
-			if (!unit_is(u, UnitTypes::Protoss_Reaver) && !unit_is(u, UnitTypes::Hero_Warbringer)) return false;
-			if ((unit_is_carrier(u) && unit_interceptor_count(u) >= unit_max_interceptor_count(u)) || (unit_is_reaver(u) && unit_scarab_count(u) >= unit_max_scarab_count(u))) return false;
+			if (!unit_is_reaver(u)) return false;
+			if (unit_scarab_count(u) >= unit_max_scarab_count(u)) return false;
 			return true;
 		case UnitTypes::Protoss_Observer:
 			if (!unit_is(u, UnitTypes::Protoss_Robotics_Facility)) return false;
@@ -10365,6 +10451,452 @@ struct state_functions {
 			return true;
 		default:
 			return true;
+		}
+	}
+	
+	bool unit_can_receive_order(const unit_t* u, const order_type_t* order) const {
+		if (order->id != Orders::RallyPointUnit && order->id != Orders::RallyPointTile) {
+			if (!u_completed(u)) return false;
+		}
+		if (unit_is_disabled(u)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Lurker) && u_burrowed(u)) {
+			if (order->id != Orders::Unburrowing) return false;
+		}
+		if (unit_is(u, UnitTypes::Terran_SCV) && u->order_type->id == Orders::ConstructingBuilding && order->id != Orders::Stop) return false;
+		if (unit_is_ghost(u) && u->order_type->id == Orders::NukeTrack) return false;
+		if (unit_is(u, UnitTypes::Protoss_Archon) || unit_is(u, UnitTypes::Protoss_Dark_Archon)) {
+			if (u->order_type->id == Orders::CompletingArchonSummon) return false;
+		}
+		return unit_order_allowed(u, order);
+	}
+	
+	bool unit_order_allowed(const unit_t* u, const order_type_t* order) const {
+		switch (order->id) {
+		case Orders::Die:
+			return true;
+		case Orders::Stop:
+			return true;
+		case Orders::Guard:
+			if (u_grounded_building(u)) return false;
+			return true;
+		case Orders::PlayerGuard:
+			if (u_grounded_building(u)) return false;
+			return true;
+		case Orders::TurretGuard:
+			if (!ut_turret(u)) return false;
+			return true;
+		case Orders::BunkerGuard:
+			if (!unit_is(u, UnitTypes::Terran_Bunker)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::Move:
+			if (!unit_can_move(u)) return false;
+			return true;
+		case Orders::InterceptorAttack:
+			if (!unit_is(u, UnitTypes::Protoss_Interceptor)) return false;
+			return true;
+		case Orders::ScarabAttack:
+			if (!unit_is(u, UnitTypes::Protoss_Scarab)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::VultureMine:
+			if (!unit_is(u, UnitTypes::Terran_Vulture_Spider_Mine)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::Carrier:
+			if (!unit_is_carrier(u)) return false;
+			return true;
+		case Orders::Reaver:
+			if (!unit_is_reaver(u)) return false;
+			return true;
+		case Orders::ReaverCarrierMove:
+			if (!unit_is_carrier(u) && !unit_is_reaver(u)) return false;
+			return true;
+		case Orders::CarrierStop:
+			if (!unit_is_carrier(u)) return false;
+			return true;
+		case Orders::ReaverStop:
+			if (!unit_is_reaver(u)) return false;
+			return true;
+		case Orders::CarrierHoldPosition:
+			if (!unit_is_carrier(u)) return false;
+			return true;
+		case Orders::ReaverHoldPosition:
+			if (!unit_is_reaver(u)) return false;
+			return true;
+		case Orders::CarrierAttack:
+			if (!unit_is_carrier(u)) return false;
+			return true;
+		case Orders::ReaverAttack:
+			if (!unit_is_reaver(u)) return false;
+			return true;
+		case Orders::CarrierMoveToAttack:
+			if (!unit_is_carrier(u)) return false;
+			return true;
+		case Orders::ReaverMoveToAttack:
+			if (!unit_is_reaver(u)) return false;
+			return true;
+		case Orders::CarrierIgnore2:
+			if (!unit_is_carrier(u) && !unit_is_reaver(u)) return false;
+			return true;
+		case Orders::CarrierFight:
+			if (!unit_is_carrier(u)) return false;
+			return true;
+		case Orders::ReaverFight:
+			if (!unit_is_reaver(u)) return false;
+			return true;
+		case Orders::Attack1:
+			if (u_grounded_building(u)) return false;
+			return true;
+		case Orders::Attack2:
+			if (u_grounded_building(u)) return false;
+			return true;
+		case Orders::AttackUnit:
+			if (!unit_can_move(u)) return false;
+			return true;
+		case Orders::AttackFixedRange:
+			if (u_grounded_building(u)) return false;
+			return true;
+		case Orders::AttackTile:
+			if (u_grounded_building(u)) return false;
+			return true;
+		case Orders::Hover:
+			if (!unit_can_move(u)) return false;
+			return true;
+		case Orders::AttackMove:
+			if (!unit_can_move(u)) return false;
+			return true;
+		case Orders::AtkMoveEP:
+			if (!unit_can_move(u)) return false;
+			return true;
+		case Orders::StayInRange:
+			if (!unit_can_move(u)) return false;
+			return true;
+		case Orders::TowerGuard:
+			if (!unit_is(u, UnitTypes::Terran_Missile_Turret) && !unit_is(u, UnitTypes::Zerg_Spore_Colony) && !unit_is(u, UnitTypes::Zerg_Sunken_Colony) && !unit_is(u, UnitTypes::Protoss_Photon_Cannon)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::TowerAttack:
+			if (!unit_is(u, UnitTypes::Terran_Missile_Turret) && !unit_is(u, UnitTypes::Zerg_Spore_Colony) && !unit_is(u, UnitTypes::Zerg_Sunken_Colony) && !unit_is(u, UnitTypes::Protoss_Photon_Cannon) && !unit_is(u, UnitTypes::Special_Floor_Gun_Trap) && !unit_is(u, UnitTypes::Special_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Wall_Flame_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Flame_Trap)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::TurretAttack:
+			if (!ut_turret(u)) return false;
+			return true;
+		case Orders::Nothing:
+			return true;
+		case Orders::DroneStartBuild:
+			if (!unit_is(u, UnitTypes::Zerg_Drone)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::DroneBuild:
+			if (!unit_is(u, UnitTypes::Zerg_Drone)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::DroneLand:
+			if (!unit_is(u, UnitTypes::Zerg_Drone)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::PlaceBuilding:
+			if (!unit_is(u, UnitTypes::Terran_SCV)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::PlaceProtossBuilding:
+			if (!unit_is(u, UnitTypes::Protoss_Probe)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::CreateProtossBuilding:
+			if (!unit_is(u, UnitTypes::Protoss_Probe)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::PlaceAddon:
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::RallyPointUnit:
+			if (!u_grounded_building(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::RallyPointTile:
+			if (!u_grounded_building(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::InfestedCommandCenter:
+			if (!unit_is(u, UnitTypes::Terran_Command_Center)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::BuildNydusExit:
+			if (!unit_is(u, UnitTypes::Zerg_Nydus_Canal)) return false;
+			if (unit_is_nydus(u) && u->building.nydus.exit != nullptr) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::QueenHoldPosition:
+			if (!unit_is_queen(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::CastInfestation:
+			if (!unit_is_queen(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::MoveToInfest:
+			if (!unit_is_queen(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::InfestingCommandCenter:
+			if (!unit_is_queen(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::ConstructingBuilding:
+			if (!unit_is(u, UnitTypes::Terran_SCV)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::Repair:
+			if (!unit_is(u, UnitTypes::Terran_SCV)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::MoveToRepair:
+			if (!unit_is(u, UnitTypes::Terran_SCV)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::ZergBirth:
+			if (!unit_is(u, UnitTypes::Zerg_Egg) && !unit_is(u, UnitTypes::Zerg_Cocoon)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::Follow:
+			if (!unit_can_move(u)) return false;
+			return true;
+		case Orders::InterceptorReturn:
+			if (!ut_worker(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::BuildingLand:
+			if (!ut_flying_building(u)) return false;
+			if (u_grounded_building(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::BuildingLiftOff:
+			if (!ut_flying_building(u)) return false;
+			if (!u_grounded_building(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::LiftingOff:
+			if (!ut_flying_building(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::CTFCOP2:
+			if (!unit_is(u, UnitTypes::Special_Zerg_Flag_Beacon) && !unit_is(u, UnitTypes::Special_Terran_Flag_Beacon) && !unit_is(u, UnitTypes::Special_Protoss_Flag_Beacon)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::Larva:
+			if (!unit_is(u, UnitTypes::Zerg_Larva)) return false;
+			return true;
+		case Orders::SpawningLarva:
+			if (unit_is_hatchery(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::Harvest1:
+			if (!ut_worker(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::Harvest2:
+			if (!ut_worker(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::MoveToGas:
+			if (!ut_worker(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::WaitForGas:
+			if (!ut_worker(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::ReturnGas:
+			if (!ut_worker(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::MoveToMinerals:
+			if (!ut_worker(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::WaitForMinerals:
+			if (!ut_worker(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::ReturnMinerals:
+			if (!ut_worker(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::EnterTransport:
+			return true;
+		case Orders::Unload:
+			if (!unit_provides_space(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::MoveUnload:
+			if (!unit_provides_space(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::PickupTransport:
+			if (!unit_provides_space(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::PickupBunker:
+			if (!unit_is(u, UnitTypes::Terran_Bunker)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::PickupIdle:
+			if (!unit_provides_space(u) && !unit_is(u, UnitTypes::Zerg_Overlord)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::PowerupIdle:
+			if (!ut_powerup(u)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::WatchTarget:
+			return true;
+		case Orders::InitCreepGrowth:
+			if (!unit_is(u, UnitTypes::Zerg_Creep_Colony) && !unit_is(u, UnitTypes::Zerg_Hatchery) && !unit_is(u, UnitTypes::Zerg_Lair) && !unit_is(u, UnitTypes::Zerg_Hive)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::StoppingCreepGrowth:
+			if (!unit_is(u, UnitTypes::Zerg_Spore_Colony) && !unit_is(u, UnitTypes::Zerg_Sunken_Colony)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::SpreadCreep:
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::GuardianAspect:
+			if (!unit_is(u, UnitTypes::Zerg_Mutalisk)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::HoldPosition:
+			if (unit_can_hold_position(u)) return false;
+			return true;
+		case Orders::Patrol:
+			if (!unit_can_move(u)) return false;
+			return true;
+		case Orders::RechargeShieldsBattery:
+			if (!unit_is(u, UnitTypes::Protoss_Shield_Battery)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::Scanner:
+			if (!unit_is(u, UnitTypes::Spell_Scanner_Sweep)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::NukeWait:
+			if (!unit_is(u, UnitTypes::Terran_Nuclear_Missile)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::NukeLaunch:
+			if (!unit_is(u, UnitTypes::Terran_Nuclear_Missile)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::NukePaint:
+			if (!unit_is(u, UnitTypes::Terran_Ghost)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::NukeUnit:
+			if (!unit_is(u, UnitTypes::Terran_Nuclear_Missile)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::CastNuclearStrike:
+			if (!unit_is(u, UnitTypes::Terran_Nuclear_Missile)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::NukeTrack:
+			if (!unit_is(u, UnitTypes::Terran_Nuclear_Missile)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::InitializeArbiter:
+			if (!unit_is(u, UnitTypes::Protoss_Arbiter) && !unit_is(u, UnitTypes::Hero_Danimoth)) return false;
+			return true;
+		case Orders::CloakNearbyUnits:
+			if (!unit_is(u, UnitTypes::Protoss_Arbiter) && !unit_is(u, UnitTypes::Hero_Danimoth)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::RightClickAction:
+			return true;
+		case Orders::SuicideUnit:
+			if (!unit_is(u, UnitTypes::Zerg_Infested_Terran)) return false;
+			return true;
+		case Orders::SuicideLocation:
+			if (!unit_is(u, UnitTypes::Zerg_Infested_Terran)) return false;
+			return true;
+		case Orders::SuicideHoldPosition:
+			if (!unit_is(u, UnitTypes::Zerg_Infested_Terran) && !unit_is(u, UnitTypes::Zerg_Scourge)) return false;
+			return true;
+		case Orders::SelfDestructing:
+			if (!unit_is(u, UnitTypes::Protoss_Scarab)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::Critter:
+			if (!unit_is(u, UnitTypes::Critter_Rhynadon) && !unit_is(u, UnitTypes::Critter_Bengalaas) && !unit_is(u, UnitTypes::Critter_Ragnasaur) && !unit_is(u, UnitTypes::Critter_Scantid) && !unit_is(u, UnitTypes::Critter_Kakaru) && !unit_is(u, UnitTypes::Critter_Ursadon)) return false;
+			return true;
+		case Orders::HiddenGun:
+			if (!unit_is(u, UnitTypes::Special_Floor_Gun_Trap) && !unit_is(u, UnitTypes::Special_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Wall_Flame_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Flame_Trap)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::OpenDoor:
+			if (!unit_is(u, UnitTypes::Special_Upper_Level_Door) && !unit_is(u, UnitTypes::Special_Right_Upper_Level_Door) && !unit_is(u, UnitTypes::Special_Pit_Door) && !unit_is(u, UnitTypes::Special_Right_Pit_Door)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::CloseDoor:
+			if (!unit_is(u, UnitTypes::Special_Upper_Level_Door) && !unit_is(u, UnitTypes::Special_Right_Upper_Level_Door) && !unit_is(u, UnitTypes::Special_Pit_Door) && !unit_is(u, UnitTypes::Special_Right_Pit_Door)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::HideTrap:
+			if (!unit_is(u, UnitTypes::Special_Floor_Missile_Trap) && !unit_is(u, UnitTypes::Special_Floor_Gun_Trap) && !unit_is(u, UnitTypes::Special_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Wall_Flame_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Flame_Trap)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::RevealTrap:
+			if (!unit_is(u, UnitTypes::Special_Floor_Missile_Trap) && !unit_is(u, UnitTypes::Special_Floor_Gun_Trap) && !unit_is(u, UnitTypes::Special_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Wall_Flame_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Flame_Trap)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::Medic:
+			if (!unit_is(u, UnitTypes::Terran_Medic)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::MedicHeal:
+			if (!unit_is(u, UnitTypes::Terran_Medic)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::HealMove:
+			if (!unit_is(u, UnitTypes::Terran_Medic)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::MedicHoldPosition:
+			if (!unit_is(u, UnitTypes::Terran_Medic)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		case Orders::CastMindControl:
+			if (!unit_is(u, UnitTypes::Protoss_Dark_Archon)) return false;
+			if (u_hallucination(u)) return false;
+			return true;
+		default:
+			if (u_hallucination(u)) return false;
+			return true;
+		}
+	}
+	
+	bool unit_build_order_valid(const unit_t* u, const order_type_t* order, const unit_type_t* unit_type) const {
+		switch (order->id) {
+		case Orders::DroneStartBuild:
+		case Orders::PlaceBuilding:
+		case Orders::PlaceProtossBuilding:
+		case Orders::CreateProtossBuilding:
+		case Orders::PlaceAddon:
+			if (!unit_can_build(u, unit_type)) return false;
+			if (!unit_can_receive_order(u, order)) return false;
+			return true;
+		case Orders::CTFCOP2:
+			if (st.current_frame > 600) return false;
+			if (!unit_is(u, unit_type->id)) return false;
+			if (!unit_can_receive_order(u, order)) return false;
+		case Orders::BuildNydusExit:
+		case Orders::BuildingLand:
+			if (!unit_is(u, unit_type->id)) return false;
+			if (!unit_can_receive_order(u, order)) return false;
+		default:
+			return false;
 		}
 	}
 
@@ -11431,24 +11963,13 @@ struct game_load_functions : state_functions {
 		unsigned int a = (range / (unsigned)cd) * bullet_count * dmg;
 		unsigned int b = (hp * ((int64_t)(bullet_count*dmg << 11) / cd)) >> 8;
 		// This function calculates (int)(sqrt(x)*7.58)
-		auto sqrt_x_times_7_58 = [&](int x) {
-			if (x <= 0) return 0;
-			int value = 1;
-			while (true) {
-				int f_eval = value * value;
-				int f_derivative = 2 * value;
-				int delta = (f_eval - x + f_derivative - 1) / f_derivative;
-				if (delta == 0) break;
-				while (std::numeric_limits<int>::max() / (value - delta) < (value - delta)) {
-					delta /= 2;
-				}
-				value -= delta;
-			}
-			value = value * 758 / 100;
+		auto sqrt_x_times_7_58 = [&](unsigned x) {
+			if (x == 0) return 0u;
+			unsigned value = isqrt(x) * 758 / 100;
 			size_t n = 8;
 			while (n > 0) {
-				int nv = value + n / 2 + 1;
-				int r = (int)(((int64_t)nv * nv * 10000) / (758 * 758));
+				unsigned nv = value + n / 2 + 1;
+				unsigned r = (unsigned)(((uint64_t)nv * nv * 10000) / (758 * 758));
 				if (r < x) {
 					value = nv;
 					n -= n / 2 + 1;
@@ -11485,8 +12006,8 @@ struct game_load_functions : state_functions {
 			int air_strength = 0;
 			int ground_strength = 0;
 			if (attacking_type->id != UnitTypes::Zerg_Larva && attacking_type->id != UnitTypes::Zerg_Egg && attacking_type->id != UnitTypes::Zerg_Cocoon && attacking_type->id != UnitTypes::Zerg_Lurker_Egg) {
-				if (attacking_type->id == UnitTypes::Protoss_Carrier || attacking_type->id == UnitTypes::Hero_Gantrithor) attacking_type = get_unit_type(UnitTypes::Protoss_Interceptor);
-				else if (attacking_type->id == UnitTypes::Protoss_Reaver || attacking_type->id == UnitTypes::Hero_Warbringer) attacking_type = get_unit_type(UnitTypes::Protoss_Scarab);
+				if (unit_is_carrier(attacking_type)) attacking_type = get_unit_type(UnitTypes::Protoss_Interceptor);
+				else if (unit_is_reaver(attacking_type)) attacking_type = get_unit_type(UnitTypes::Protoss_Scarab);
 				else if (attacking_type->turret_unit_type) attacking_type = attacking_type->turret_unit_type;
 
 				const weapon_type_t* air_weapon = attacking_type->air_weapon;
@@ -12162,7 +12683,7 @@ struct game_load_functions : state_functions {
 				};
 				auto is_neutral_unit = [&]() {
 					if (owner == 11) return true;
-					if (is_mineral_field(unit_type)) return true;
+					if (unit_is_mineral_field(unit_type)) return true;
 					if (unit_type->id == UnitTypes::Resource_Vespene_Geyser) return true;
 					if (unit_type->id == UnitTypes::Critter_Rhynadon) return true;
 					if (unit_type->id == UnitTypes::Critter_Bengalaas) return true;
