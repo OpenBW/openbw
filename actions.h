@@ -150,12 +150,14 @@ struct action_functions: state_functions {
 		xy original_target_pos;
 		xy target_pos;
 		xy move_offset;
-		int flags;
+		bool has_move_offset;
+		bool target_is_in_unit_bounds;
 	};
 	
 	void calc_group_move(group_move_t& g, int owner, xy target_pos, bool can_be_obstructed) {
 		g.original_target_pos = target_pos;
-		g.flags = 0;
+		g.has_move_offset = false;
+		g.target_is_in_unit_bounds = false;
 		
 		rect area{{std::numeric_limits<int>::max(), std::numeric_limits<int>::max()}, {0, 0}};
 		bool any_collision_enabled_units = false;
@@ -193,18 +195,17 @@ struct action_functions: state_functions {
 		}
 		if (n_units >= 2) {
 			if (is_in_inner_bounds(g.original_target_pos, area)) {
-				g.flags = 4;
+				g.target_is_in_unit_bounds = true;
 				g.move_offset = {};
 			} else if (any_collision_enabled_units) {
-				g.flags = 8;
 				if (area.to.x - area.from.x <= 192 && area.to.y - area.from.y <= 192) {
 					g.move_offset = g.original_target_pos - sum_pos / n_units;
-					g.flags |= 3;
+					g.has_move_offset = true;
 				}
 			} else {
 				if (area.to.x - area.from.x <= 256 && area.to.y - area.from.y <= 256) {
 					g.move_offset = g.original_target_pos - sum_pos / n_units;
-					g.flags |= 3;
+					g.has_move_offset = true;
 				}
 			}
 		}
@@ -214,7 +215,7 @@ struct action_functions: state_functions {
 	
 	xy get_group_move_pos(const unit_t* u, xy pos, const group_move_t& g) const {
 		xy target_pos = u->pathing_flags & 1 ? g.target_pos : g.original_target_pos;
-		if (g.flags & 4) {
+		if (g.target_is_in_unit_bounds) {
 			pos = u->sprite->position;
 			if (pos.x <= target_pos.x - 32 || pos.x >= target_pos.x + 32) {
 				pos.x = target_pos.x;
@@ -223,8 +224,10 @@ struct action_functions: state_functions {
 				pos.y = target_pos.y;
 			}
 		} else {
-			if (g.flags & 1) pos.x = u->sprite->position.x + g.move_offset.x;
-			if (g.flags & 2) pos.y = u->sprite->position.y + g.move_offset.y;
+			if (g.has_move_offset) {
+				pos.x = u->sprite->position.x + g.move_offset.x;
+				pos.y = u->sprite->position.y + g.move_offset.y;
+			}
 		}
 		
 		pos = restrict_move_target_to_valid_bounds(u, pos);
@@ -276,6 +279,28 @@ struct action_functions: state_functions {
 	}
 	
 	template<typename units_T>
+	bool action_shift_select(int owner, units_T&& units) {
+		auto& selection = action_st.selection[owner];
+		bool retval = false;
+		for (unit_t* u : units) {
+			if (u) {
+				if (std::find(selection.begin(), selection.end(), u) == selection.end()) {
+					if (!us_hidden(u) && (selection.empty() || unit_can_be_multi_selected(u))) {
+						if (selection.size() >= 12) xcept("attempt to select more than 12 units");
+						selection.push_back(u);
+						retval = true;
+					}
+				}
+			}
+		}
+		return retval;
+	}
+	
+	bool action_shift_select(int owner, unit_t* u) {
+		return action_shift_select(owner, std::array<unit_t*, 1>{u});
+	}
+	
+	template<typename units_T>
 	bool action_deselect(int owner, units_T&& units) {
 		auto& selection = action_st.selection[owner];
 		bool retval = false;
@@ -292,7 +317,7 @@ struct action_functions: state_functions {
 	}
 	
 	bool action_deselect(int owner, unit_t* u) {
-		return action_select(owner, std::array<unit_t*, 1>{u});
+		return action_deselect(owner, std::array<unit_t*, 1>{u});
 	}
 	
 	bool action_train(int owner, const unit_type_t* unit_type) {
@@ -323,7 +348,7 @@ struct action_functions: state_functions {
 		return true;
 	}
 	
-	bool action_right_click(int owner, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
+	bool action_default_order(int owner, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
 		if (target) target_unit_type = nullptr;
 		else if (target_unit_type) {
 			if (player_position_is_visible(owner, pos)) {
@@ -358,6 +383,7 @@ struct action_functions: state_functions {
 			if (order) {
 				if (order->id == Orders::RallyPointUnit) {
 					if (unit_is_factory(u)) {
+						retval = true;
 						if (!target) target = u;
 						u->building.rally.unit = target;
 						u->building.rally.pos = target->sprite->position;
@@ -369,9 +395,13 @@ struct action_functions: state_functions {
 							u->building.rally.unit = nullptr;
 							u->building.rally.pos = pos;
 						}
-					} else if (order->id == Orders::Attack1) {
-						xcept("fixme attack");
 					} else {
+						if (order->id == Orders::Attack1) {
+							if (u->subunit) {
+								issue_order(u->subunit, queue, u->subunit->unit_type->attack_unit, target);
+							}
+							order = u->unit_type->attack_unit;
+						}
 						if (unit_can_receive_order(u, order)) {
 							retval = true;
 							if (target) {
@@ -401,6 +431,124 @@ struct action_functions: state_functions {
 		return retval;
 	}
 	
+	bool action_order(int owner, const order_type_t* order, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
+		switch (order->id) {
+		case Orders::Die:
+		case Orders::InfestedCommandCenter:
+		case Orders::VultureMine:
+		case Orders::DroneStartBuild:
+		case Orders::InfestingCommandCenter:
+		case Orders::PlaceBuilding:
+		case Orders::PlaceProtossBuilding:
+		case Orders::CreateProtossBuilding:
+		case Orders::ConstructingBuilding:
+		case Orders::PlaceAddon:
+		case Orders::BuildNydusExit:
+		case Orders::BuildingLand:
+		case Orders::BuildingLiftOff:
+		case Orders::DroneLiftOff:
+		case Orders::Harvest2:
+		case Orders::MoveToGas:
+		case Orders::WaitForGas:
+		case Orders::HarvestGas:
+		case Orders::MoveToMinerals:
+		case Orders::WaitForMinerals:
+		case Orders::MiningMinerals:
+		case Orders::GatheringInterrupted:
+		case Orders::GatherWaitInterrupted:
+		case Orders::CTFCOP2:
+			return false;
+		default:
+			break;
+		}
+		bool can_be_obstructed = order->can_be_obstructed;
+		group_move_t g;
+		bool has_calculated_group_move = false;
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (order->tech_type == TechTypes::None) {
+				if (!unit_can_receive_order(u, order)) continue;
+			} else {
+				xcept("action_order: fixme tech type");
+			}
+			if (u == target) {
+				if (!unit_order_can_target_self(u, order)) continue;
+			}
+			if (u->order_type->id == Orders::NukeLaunch) continue;
+			if (u->unit_type->right_click_action == 0) {
+				if (u_grounded_building(u) && !unit_is_factory(u)) {
+					auto oid = u->order_type->id;
+					if (oid != Orders::RallyPointUnit && oid != Orders::RallyPointTile && oid != Orders::RechargeShieldsBattery && oid != Orders::PickupBunker) continue;
+				}
+			}
+			if (unit_is(u, UnitTypes::Terran_Medic)) {
+				if (order->id == Orders::AttackMove || order->id == Orders::Attack1) {
+					order = get_order_type(Orders::HealMove);
+				}
+			}
+			const order_type_t* subunit_order = get_order_type(Orders::Nothing);
+			if (order->id == Orders::Attack1) {
+				if (target) order = u->unit_type->attack_unit;
+				else order = u->unit_type->attack_move;
+				if (order->id == Orders::Nothing) continue;
+				if (u->subunit) {
+					if (target) subunit_order = u->subunit->unit_type->attack_unit;
+					else subunit_order = u->subunit->unit_type->attack_move;
+				}
+			}
+			if (order->id == Orders::RallyPointUnit) {
+				if (unit_is_factory(u)) {
+					retval = true;
+					if (!target) target = u;
+					u->building.rally.unit = target;
+					u->building.rally.pos = target->sprite->position;
+				}
+				u->user_action_flags |= 2;
+			} else if (order->id == Orders::RallyPointTile) {
+				if (unit_is_factory(u)) {
+					retval = true;
+					u->building.rally.unit = nullptr;
+					u->building.rally.pos = pos;
+				}
+				u->user_action_flags |= 2;
+			} else {
+				retval = true;
+				if (target) {
+					order_target_t order_target;
+					order_target.unit = target;
+					issue_order(u, queue, order, order_target);
+					if (subunit_order->id != Orders::Nothing) issue_order(u->subunit, queue, subunit_order, order_target);
+				} else {
+					order_target_t order_target;
+					order_target.position = pos;
+					order_target.unit_type = target_unit_type;
+					if (!target_unit_type) {
+						if (!has_calculated_group_move) {
+							has_calculated_group_move = true;
+							calc_group_move(g, owner, pos, can_be_obstructed);
+						}
+						order_target.position = get_group_move_pos(u, pos, g);
+					}
+					issue_order(u, queue, order, order_target);
+					if (subunit_order->id != Orders::Nothing) issue_order(u->subunit, queue, subunit_order, order_target);
+				}
+				u->user_action_flags |= 2;
+			}
+		}
+		return retval;
+	}
+	
+	bool action_stop(int owner, bool queue) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (unit_can_receive_order(u, get_order_type(Orders::Stop))) {
+				retval = true;
+				issue_order(u, queue, get_order_type(Orders::Stop), {});
+			}
+		}
+		return retval;
+	}
+	
 	template<typename reader_T>
 	bool read_action_select(int owner, reader_T&& r) {
 		size_t n = r.template get<uint8_t>();
@@ -411,6 +559,18 @@ struct action_functions: state_functions {
 			units.push_back(get_unit(uid));
 		}
 		return action_select(owner, units);
+	}
+	
+	template<typename reader_T>
+	bool read_action_shift_select(int owner, reader_T&& r) {
+		size_t n = r.template get<uint8_t>();
+		if (n > 12) xcept("invalid selection of %d units", n);
+		static_vector<unit_t*, 12> units;
+		for (size_t i = 0; i != n; ++i) {
+			auto uid = unit_id(r.template get<uint16_t>());
+			units.push_back(get_unit(uid));
+		}
+		return action_shift_select(owner, units);
 	}
 	
 	template<typename reader_T>
@@ -432,14 +592,14 @@ struct action_functions: state_functions {
 	}
 	
 	template<typename reader_T>
-	bool read_action_right_click(int owner, reader_T&& r) {
+	bool read_action_default_order(int owner, reader_T&& r) {
 		int x = r.template get<int16_t>();
 		int y = r.template get<int16_t>();
 		unit_t* target = get_unit(unit_id(r.template get<uint16_t>()));
 		UnitTypes target_unit_type_id = (UnitTypes)r.template get<uint16_t>();
 		const unit_type_t* target_unit_type = target_unit_type_id == UnitTypes::None ? nullptr : get_unit_type(target_unit_type_id);
 		bool queue = r.template get<uint8_t>() != 0;
-		return action_right_click(owner, {x, y}, target, target_unit_type, queue);
+		return action_default_order(owner, {x, y}, target, target_unit_type, queue);
 	}
 	
 	template<typename reader_T>
@@ -453,11 +613,29 @@ struct action_functions: state_functions {
 	template<typename reader_T>
 	bool read_action_build(int owner, reader_T&& r) {
 		auto* order_type = get_order_type((Orders)r.template get<uint8_t>());
-		xy_t<size_t> tile_pos;
-		tile_pos.x = r.template get<uint16_t>();
-		tile_pos.y = r.template get<uint16_t>();
+		size_t tile_x = r.template get<uint16_t>();
+		size_t tile_y = r.template get<uint16_t>();
 		auto* unit_type = get_unit_type((UnitTypes)r.template get<uint16_t>());
-		return action_build(owner, order_type, unit_type, tile_pos);
+		return action_build(owner, order_type, unit_type, {tile_x, tile_y});
+	}
+	
+	template<typename reader_T>
+	bool read_action_stop(int owner, reader_T&& r) {
+		bool queue = r.template get<uint8_t>() != 0;
+		return action_stop(owner, queue);
+	}
+	
+	template<typename reader_T>
+	bool read_action_order(int owner, reader_T&& r) {
+		int x = r.template get<int16_t>();
+		int y = r.template get<int16_t>();
+		unit_t* target = get_unit(unit_id(r.template get<uint16_t>()));
+		UnitTypes target_unit_type_id = (UnitTypes)r.template get<uint16_t>();
+		const unit_type_t* target_unit_type = target_unit_type_id == UnitTypes::None ? nullptr : get_unit_type(target_unit_type_id);
+		Orders order_id = (Orders)r.template get<uint8_t>();
+		const order_type_t* order_type = get_order_type(order_id);
+		bool queue = r.template get<uint8_t>() != 0;
+		return action_order(owner, order_type, {x, y}, target, target_unit_type, queue);
 	}
 	
 	template<typename reader_T>
@@ -470,12 +648,18 @@ struct action_functions: state_functions {
 		switch (action_id) {
 		case 9:
 			return read_action_select(owner, r);
+		case 10:
+			return read_action_shift_select(owner, r);
 		case 11:
 			return read_action_deselect(owner, r);
 		case 12:
 			return read_action_build(owner, r);
 		case 20:
-			return read_action_right_click(owner, r);
+			return read_action_default_order(owner, r);
+		case 21:
+			return read_action_order(owner, r);
+		case 26:
+			return read_action_stop(owner, r);
 		case 31:
 			return read_action_train(owner, r);
 		case 87:

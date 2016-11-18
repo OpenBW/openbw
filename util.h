@@ -297,7 +297,7 @@ auto make_filter_range(range_T&& r, predicate_F&& f) {
 }
 
 template<typename range_T>
-auto ptr(range_T& r) {
+auto ptr(range_T&& r) {
 	return make_transform_range(r, [](auto& ref) {
 		return &ref;
 	});
@@ -366,6 +366,9 @@ private:
 	T& obj() {
 		return *(T*)&buf;
 	}
+	const T& obj() const {
+		return *(T*)&buf;
+	}
 	void destroy() {
 		obj().~value_type();
 		has_obj = false;
@@ -375,10 +378,16 @@ public:
 	optional() = default;
 	optional(nullopt_t) noexcept {}
 	optional(const optional& n) {
-		*this = n;
+		if (n.has_obj) {
+			has_obj = true;
+			new (ptr()) value_type(n.obj());
+		}
 	}
 	optional(optional&& n) noexcept(std::is_nothrow_move_constructible<value_type>::value) {
-		*this == std::move(n);
+		if (n.has_obj) {
+			new (ptr()) value_type(std::move(n.obj()));
+			has_obj = true;
+		}
 	}
 	template<typename... args_T>
 	optional(in_place_t, args_T&&... args) {
@@ -390,7 +399,7 @@ public:
 		return *this;
 	}
 	optional& operator=(const optional& n) noexcept(std::is_nothrow_move_assignable<value_type>::value && std::is_nothrow_move_constructible<value_type>::value) {
-		if (!n) *this = nullopt;
+		if (!n.has_obj) *this = nullopt;
 		else {
 			if (has_obj) obj() = n.obj();
 			else {
@@ -406,7 +415,7 @@ public:
 			else destroy();
 		} else {
 			if (n.has_obj) {
-				new (ptr()) value_type(std::move(obj()));
+				new (ptr()) value_type(std::move(n.obj()));
 				has_obj = true;
 			}
 		}
