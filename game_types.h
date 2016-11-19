@@ -303,7 +303,8 @@ struct bullet_t: flingy_t {
 	int remaining_time;
 	int hit_flags;
 	int remaining_bounces;
-	unit_t* source_unit;
+	int owner;
+	unit_t* bullet_owner_unit;
 	unit_t* prev_bounce_unit;
 	size_t hit_near_target_position_index;
 };
@@ -313,11 +314,12 @@ struct order_target_t {
 	unit_t* unit = nullptr;
 	const unit_type_t* unit_type = nullptr;
 	order_target_t() = default;
-	explicit order_target_t(unit_t* unit) : unit(unit) {}
+	order_target_t(unit_t* unit) : unit(unit) {}
+	order_target_t(xy position, unit_t* unit) : position(position), unit(unit) {}
+	order_target_t(xy position) : position(position) {}
 };
 
 struct order_t: link_base {
-
 	const order_type_t* order_type;
 	order_target_t target;
 };
@@ -355,7 +357,7 @@ struct unit_t: flingy_t {
 		status_flag_flying = 4,
 		status_flag_8 = 8,
 		status_flag_burrowed = 0x10,
-		status_flag_hidden = 0x20,
+		status_flag_in_unit = 0x20,
 
 		status_flag_requires_detector = 0x100,
 		status_flag_cloaked = 0x200,
@@ -403,7 +405,7 @@ struct unit_t: flingy_t {
 	unit_t* auto_target_unit;	
 	unit_t* connected_unit;
 	int order_queue_count;
-	int order_queue_timer;
+	int order_process_timer;
 	int unknown_0x086;
 	int attack_notify_timer;
 	int displayed_unit_id;
@@ -420,7 +422,7 @@ struct unit_t: flingy_t {
 	fp8 energy;
 	int unit_id_generation;
 	const order_type_t* secondary_order_type;
-	int building_overlay_state;
+	int damage_overlay_state;
 	fp8 hp_construction_rate;
 	fp8 shield_construction_rate;
 	int remaining_build_time;
@@ -515,7 +517,7 @@ struct unit_t: flingy_t {
 	int carrying_flags;
 	int wireframe_randomizer;
 	int secondary_order_state;
-	int recent_order_timer;
+	int move_target_timer;
 	uint32_t detected_flags;
 	int secondary_order_unk_a;
 	int secondary_order_unk_b;
@@ -530,7 +532,7 @@ struct unit_t: flingy_t {
 	rect terrain_no_collision_bounds;
 
 	int remove_timer;
-	int defensive_matrix_hp;
+	fp8 defensive_matrix_hp;
 	int defensive_matrix_timer;
 	int stim_timer;
 	int ensnare_timer;

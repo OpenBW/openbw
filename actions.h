@@ -171,7 +171,7 @@ struct action_functions: state_functions {
 			if (pos.x < area.from.x) area.from.x = pos.x;
 			if (pos.x > area.to.x) area.to.x = pos.x;
 			if (pos.y < area.from.y) area.from.y = pos.y;
-			if (pos.x > area.to.y) area.to.y = pos.y;
+			if (pos.y > area.to.y) area.to.y = pos.y;
 			sum_pos += pos;
 			int w = u->unit_type->dimensions.from.x + u->unit_type->dimensions.to.x + 1;
 			int h = u->unit_type->dimensions.from.y + u->unit_type->dimensions.to.y + 1;
@@ -606,7 +606,7 @@ struct action_functions: state_functions {
 	bool read_action_player_leave(int owner, reader_T&& r) {
 		(void)owner;
 		int v = r.template get<int8_t>(); // ?
-		log("player %d leave %d\n", owner, v);
+		(void)v;
 		return true;
 	}
 	

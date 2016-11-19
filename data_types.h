@@ -71,7 +71,7 @@ public:
 	operator const T*() const {
 		return pointer;
 	}
-	explicit operator id_T() const {
+	operator id_T() const {
 		return id;
 	}
 };
@@ -94,9 +94,10 @@ struct unit_type_t {
 		flag_resource = 0x2000,
 		
 		flag_detector = 0x8000,
-
+		
 		flag_creep = 0x20000,
 
+		flag_can_burrow = 0x100000,
 		flag_has_energy = 0x200000,
 		flag_initially_cloaked = 0x400000,
 		flag_can_move = 0x8000000,
@@ -205,6 +206,13 @@ struct weapon_type_t {
 		hit_type_maelstrom,
 		hit_type_23,
 		hit_type_air_splash
+	};
+	enum {
+		damage_type_none,
+		damage_type_explosive,
+		damage_type_concussive,
+		damage_type_normal,
+		damage_type_ignore_armor
 	};
 
 	WeaponTypes id;
@@ -336,9 +344,9 @@ struct order_type_t {
 	bool can_be_obstructed;
 	int unk11;
 	int unused12;
-	int weapon;    // weapon and tech_type could be pointers, but then order_types would 
-	int tech_type; // need to live in game_state. Since I'd like to keep it in global_state,
-	int seq;       // they will remain as ints
+	WeaponTypes weapon;    // weapon and tech_type could be pointers, but then order_types would 
+	TechTypes tech_type;   // need to live in game_state
+	int seq;
 	int highlight;
 	int dep_index;
 	int obscured;
