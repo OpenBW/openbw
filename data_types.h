@@ -95,15 +95,16 @@ struct unit_type_t {
 		
 		flag_detector = 0x8000,
 		
-		flag_creep = 0x20000,
+		flag_requires_creep = 0x20000,
 
+		flag_requires_psionic_matrix = 0x80000,
 		flag_can_burrow = 0x100000,
 		flag_has_energy = 0x200000,
 		flag_initially_cloaked = 0x400000,
 		flag_can_move = 0x8000000,
 		flag_can_turn = 0x10000000,
 		flag_invincible = 0x20000000,
-		flag_mech = 0x40000000
+		flag_mechanical = 0x40000000
 	};
 
 	UnitTypes id;
@@ -332,7 +333,7 @@ struct order_type_t {
 	Orders id;
 
 	int label;
-	int use_weapon_targeting;
+	bool targets_enemies;
 	int background;
 	int unused3;
 	bool valid_for_turret;

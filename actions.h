@@ -71,7 +71,7 @@ struct action_functions: state_functions {
 		if (unit_is_mineral_field(target)) {
 			if ((u->carrying_flags & ~3) == 0) return get_order_type(Orders::MoveToMinerals);
 			else return get_order_type(Orders::Move);
-		} else if (unit_is_refinery(target) && u_completed(target) && target->owner == u->owner) {
+		} else if (unit_can_gather_gas(u, target) || unit_is(target, UnitTypes::Resource_Vespene_Geyser)) {
 			if ((u->carrying_flags & ~3) == 0) return get_order_type(Orders::MoveToGas);
 			else return get_order_type(Orders::Move);
 		} else if (unit_is_active_resource_depot(target) && target->owner == u->owner) {
@@ -131,7 +131,7 @@ struct action_functions: state_functions {
 				bool can_enter = unit_provides_space(target) && unit_can_load_target(target, u);
 				if (!ut_building(target) && can_enter) {
 					return get_order_type(Orders::EnterTransport);
-				} else if (unit_race(target) == race::terran && ut_mech(target) && u_completed(target) && u->hp < u->unit_type->hitpoints) {
+				} else if (unit_race(target) == race::terran && ut_mechanical(target) && u_completed(target) && u->hp < u->unit_type->hitpoints) {
 					return get_order_type(Orders::Repair);
 				} else if (can_enter) {
 					return get_order_type(Orders::EnterTransport);
@@ -169,8 +169,8 @@ struct action_functions: state_functions {
 			if (u->pathing_flags & 1) any_collision_enabled_units = true;
 			xy pos = u->sprite->position;
 			if (pos.x < area.from.x) area.from.x = pos.x;
-			if (pos.x > area.to.x) area.to.x = pos.x;
 			if (pos.y < area.from.y) area.from.y = pos.y;
+			if (pos.x > area.to.x) area.to.x = pos.x;
 			if (pos.y > area.to.y) area.to.y = pos.y;
 			sum_pos += pos;
 			int w = u->unit_type->dimensions.from.x + u->unit_type->dimensions.to.x + 1;
@@ -217,11 +217,15 @@ struct action_functions: state_functions {
 		xy target_pos = u->pathing_flags & 1 ? g.target_pos : g.original_target_pos;
 		if (g.target_is_in_unit_bounds) {
 			pos = u->sprite->position;
-			if (pos.x <= target_pos.x - 32 || pos.x >= target_pos.x + 32) {
-				pos.x = target_pos.x;
+			if (pos.x <= target_pos.x - 32) {
+				pos.x = target_pos.x - 32;
+			} else if (pos.x >= target_pos.x + 32) {
+				pos.x = target_pos.x + 32;
 			}
-			if (pos.y <= target_pos.y - 32 || pos.y >= target_pos.y + 32) {
-				pos.y = target_pos.y;
+			if (pos.y <= target_pos.y - 32) {
+				pos.y = target_pos.y - 32;
+			} else if (pos.y >= target_pos.y + 32) {
+				pos.y = target_pos.y + 32;
 			}
 		} else {
 			if (g.has_move_offset) {
@@ -340,10 +344,10 @@ struct action_functions: state_functions {
 		if (ut_addon(unit_type)) {
 			xcept("action_build: fixme addon");
 		} else {
-			// todo: check tiles
-			log("action_build: fixme\n");
 			xy pos(32 * tile_pos.x + unit_type->placement_size.x / 2, 32 * tile_pos.y + unit_type->placement_size.y / 2);
-			place_building(u, order_type, unit_type, pos);
+			if (can_place_building(u, owner, unit_type, pos, false, false)) {
+				place_building(u, order_type, unit_type, pos);
+			}
 		}
 		return true;
 	}
@@ -549,6 +553,13 @@ struct action_functions: state_functions {
 		return retval;
 	}
 	
+	bool action_cancel_building_unit(int owner) {
+		unit_t* u = get_single_selected_unit(owner);
+		if (!u || u->owner != owner) return false;
+		cancel_building_unit(u);
+		return true;
+	}
+	
 	template<typename reader_T>
 	bool read_action_select(int owner, reader_T&& r) {
 		size_t n = r.template get<uint8_t>();
@@ -639,6 +650,11 @@ struct action_functions: state_functions {
 	}
 	
 	template<typename reader_T>
+	bool read_action_cancel_building_unit(int owner, reader_T&& r) {
+		return action_cancel_building_unit(owner);
+	}
+	
+	template<typename reader_T>
 	bool read_action(reader_T&& r) {
 		int player_id = r.template get<uint8_t>();
 		int action_id = r.template get<uint8_t>();
@@ -658,6 +674,8 @@ struct action_functions: state_functions {
 			return read_action_default_order(owner, r);
 		case 21:
 			return read_action_order(owner, r);
+		case 24:
+			return read_action_cancel_building_unit(owner, r);
 		case 26:
 			return read_action_stop(owner, r);
 		case 31:

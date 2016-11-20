@@ -358,7 +358,7 @@ struct unit_t: flingy_t {
 		status_flag_8 = 8,
 		status_flag_burrowed = 0x10,
 		status_flag_in_unit = 0x20,
-
+		status_flag_40 = 0x40,
 		status_flag_requires_detector = 0x100,
 		status_flag_cloaked = 0x200,
 		status_flag_disabled = 0x400,
@@ -408,7 +408,7 @@ struct unit_t: flingy_t {
 	int order_process_timer;
 	int unknown_0x086;
 	int attack_notify_timer;
-	int displayed_unit_id;
+	const unit_type_t* previous_unit_type;
 	int last_event_timer;
 	int last_event_color;
 	int rank_increase;
@@ -463,7 +463,7 @@ struct unit_t: flingy_t {
 		unit_t* powerup;
 		xy target_resource_position;
 		unit_t* target_resource_unit;
-		int repair_resource_loss_timer;
+		int repair_timer;
 		bool is_gathering;
 		int resources_carried;
 		unit_t* gather_target;

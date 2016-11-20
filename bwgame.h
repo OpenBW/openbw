@@ -417,6 +417,9 @@ struct state_functions {
 	bool u_in_unit(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_in_unit);
 	}
+	bool u_flag_40(const unit_t* u) const {
+		return u_status_flag(u, unit_t::status_flag_40);
+	}
 	bool u_immovable(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_immovable);
 	}
@@ -520,6 +523,9 @@ struct state_functions {
 	bool ut_flying_building(unit_type_autocast ut) const {
 		return ut_flag(ut, unit_type_t::flag_flying_building);
 	}
+	bool ut_requires_psionic_matrix(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_requires_psionic_matrix);
+	}
 	bool ut_can_burrow(unit_type_autocast ut) const {
 		return ut_flag(ut, unit_type_t::flag_can_burrow);
 	}
@@ -538,11 +544,11 @@ struct state_functions {
 	bool ut_detector(unit_type_autocast ut) const {
 		return ut_flag(ut, unit_type_t::flag_detector);
 	}
-	bool ut_creep(unit_type_autocast ut) const {
-		return ut_flag(ut, unit_type_t::flag_creep);
+	bool ut_requires_creep(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_requires_creep);
 	}
-	bool ut_mech(unit_type_autocast ut) const {
-		return ut_flag(ut, unit_type_t::flag_mech);
+	bool ut_mechanical(unit_type_autocast ut) const {
+		return ut_flag(ut, unit_type_t::flag_mechanical);
 	}
 	bool ut_powerup(unit_type_autocast ut) const {
 		return ut_flag(ut, unit_type_t::flag_powerup);
@@ -775,9 +781,7 @@ struct state_functions {
 
 	int get_unit_strength(unit_t* u, bool ground) const {
 		if (unit_is(u, UnitTypes::Zerg_Larva)) return 0;
-		if (unit_is(u, UnitTypes::Zerg_Egg)) return 0;
-		if (unit_is(u, UnitTypes::Zerg_Cocoon)) return 0;
-		if (unit_is(u, UnitTypes::Zerg_Lurker_Egg)) return 0;
+		if (unit_is_egg(u)) return 0;
 		int vis_hp_shields = visible_hp_plus_shields(u);
 		int max_vis_hp_shields = max_visible_hp_plus_shields(u);
 		if (u_hallucination(u)) {
@@ -1192,6 +1196,10 @@ struct state_functions {
 		if (unit_is(ut, UnitTypes::Zerg_Extractor)) return true;
 		return false;
 	}
+	
+	bool unit_is_non_flag_beacon(unit_type_autocast ut) const {
+		return ut->id >= UnitTypes::Special_Zerg_Beacon && ut->id <= UnitTypes::Special_Protoss_Beacon;
+	}
 
 	bool unit_is_special_beacon(unit_type_autocast ut) const {
 		return ut->id >= UnitTypes::Special_Zerg_Beacon && ut->id <= UnitTypes::Special_Protoss_Flag_Beacon;
@@ -1224,6 +1232,13 @@ struct state_functions {
 	bool unit_is_arbiter(unit_type_autocast ut) const {
 		if (unit_is(ut, UnitTypes::Protoss_Arbiter)) return true;
 		if (unit_is(ut, UnitTypes::Hero_Danimoth)) return true;
+		return false;
+	}
+	
+	bool unit_is_egg(unit_type_autocast ut) const {
+		if (unit_is(ut, UnitTypes::Zerg_Egg)) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Cocoon)) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Lurker_Egg)) return true;
 		return false;
 	}
 
@@ -1593,9 +1608,7 @@ struct state_functions {
 			}
 		}
 		if (unit_is(target, UnitTypes::Zerg_Larva)) return 5;
-		if (unit_is(target, UnitTypes::Zerg_Egg)) return 5;
-		if (unit_is(target, UnitTypes::Zerg_Cocoon)) return 5;
-		if (unit_is(target, UnitTypes::Zerg_Lurker_Egg)) return 5;
+		if (unit_is_egg(target)) return 5;
 		int r = 0;
 		if (ut_worker(target)) r += 2;
 		else if (!unit_can_attack_target(target, u)) {
@@ -1776,14 +1789,13 @@ struct state_functions {
 		u->worker.gather_target = target;
 		u->worker.is_gathering = true;
 		if (u->order_type->id == Orders::WaitForGas) {
-			queue_order_front(u, get_order_type(Orders::HarvestGas), target);
+			queue_order_front(u, get_order_type(Orders::HarvestGas), {target->sprite->position, target});
 		} else {
 			queue_order_front(u, get_order_type(Orders::GatheringInterrupted), {});
-			queue_order_front(u, get_order_type(Orders::MiningMinerals), target);
-			order_done(u);
-			return true;
+			queue_order_front(u, get_order_type(Orders::MiningMinerals), {target->sprite->position, target});
 		}
-		return false;
+		order_done(u);
+		return true;
 	}
 
 	void wait_for_resource(unit_t* u, unit_t* target) {
@@ -2017,6 +2029,69 @@ struct state_functions {
 			return true;
 		} else return false;
 	}
+	
+	void refund_unit_costs(int owner, const unit_type_t* unit_type) {
+		st.current_minerals[owner] += unit_type->mineral_cost;
+		st.current_gas[owner] += unit_type->gas_cost;
+	}
+	
+	void partially_refund_unit_costs(int owner, const unit_type_t* unit_type) {
+		st.current_minerals[owner] += unit_type->mineral_cost * 3 / 4;
+		st.current_gas[owner] += unit_type->gas_cost * 3 / 4;
+	}
+	
+	void cancel_building_unit(unit_t* u) {
+		if (!u->sprite) return;
+		if (u->order_type->id == Orders::Die) return;
+		if (u_completed(u)) return;
+		if (unit_is(u, UnitTypes::Zerg_Guardian)) return;
+		if (unit_is(u, UnitTypes::Zerg_Lurker)) return;
+		if (unit_is(u, UnitTypes::Zerg_Devourer)) return;
+		if (unit_is(u, UnitTypes::Zerg_Mutalisk)) return;
+		if (unit_is(u, UnitTypes::Zerg_Hydralisk)) return;
+		if (unit_is_nydus(u) && !u->building.nydus.exit) return;
+		if (u_grounded_building(u)) {
+			if (unit_race(u) == race::zerg) {
+				xcept("cancel_building_unit: zerg fixme");
+				return;
+			}
+			partially_refund_unit_costs(u->owner, u->unit_type);
+		} else {
+			const unit_type_t* refund_type = u->unit_type;
+			if (unit_is_egg(u)) refund_type = u->build_queue.front();
+			refund_unit_costs(u->owner, refund_type);
+		}
+		const unit_type_t* morph_to = nullptr;
+		if (unit_is(u, UnitTypes::Zerg_Cocoon)) {
+			morph_to = get_unit_type(UnitTypes::Zerg_Mutalisk);
+		} else if (unit_is(u, UnitTypes::Zerg_Lurker_Egg)) {
+			morph_to = get_unit_type(UnitTypes::Zerg_Hydralisk);
+		}
+		if (morph_to) {
+			xcept("cancel_building_unit: morph fixme");
+		} else {
+			if (unit_is(u, UnitTypes::Terran_Nuclear_Missile) && u->connected_unit) {
+				if (unit_is_ghost(u->connected_unit)) {
+					u->connected_unit->ghost.nuke_dot = nullptr;
+				}
+				u->connected_unit->order_state = 0;
+			}
+			kill_unit(u);
+		}
+	}
+	
+	void cancel_build_queue(unit_t* u, size_t index) {
+		if (index >= u->build_queue.size()) return;
+		const unit_type_t* unit_type = u->build_queue[index];
+		u->build_queue.erase(u->build_queue.begin() + index);
+		if (index != 0 || !u->current_build_unit) {
+			if (!ut_building(unit_type)) {
+				refund_unit_costs(u->owner, unit_type);
+			}
+		} else {
+			cancel_building_unit(u->current_build_unit);
+		}
+	}
 
 	void place_building(unit_t* u, const order_type_t* order_type, const unit_type_t* unit_type, xy position) {
 		if (order_type->id == Orders::BuildingLand) {
@@ -2038,19 +2113,123 @@ struct state_functions {
 		if (!has_available_supply_for(u->owner, unit_type, true)) return;
 		if (!has_available_resources_for(u->owner, unit_type, true)) return;
 		set_unit_order(u, order_type, position);
-		if (!u->build_queue.empty()) xcept("place_building: refund build queue");
+		if (!u->build_queue.empty()) {
+			for (size_t i = 5; i;) {
+				--i;
+				cancel_build_queue(u, i);
+			}
+		}
 		if (ut_building(u) && ut_building(unit_type)) {
 			xcept("place_building: fixme addon");
 		} else {
 			build_queue_push(u, unit_type);
 		}
 	}
-
-	bool can_place_building(int owner, const unit_type_t* unit_type, xy pos) const {
+	
+	bool player_has_supply_and_resources_for(int owner, const unit_type_t* unit_type) {
 		if (!has_available_supply_for(owner, unit_type, true)) return false;
 		if (!has_available_resources_for(owner, unit_type, true)) return false;
-		// todo: check tiles
-		log("can_place_building: fixme\n");
+		return true;
+	}
+	
+	unit_t* get_building_at_center_position(xy pos, const unit_type_t* unit_type) const {
+		for (unit_t* n : find_units_noexpand({pos, pos + xy(game_st.max_unit_width, game_st.max_unit_height)})) {
+			if (n->unit_type == unit_type && n->sprite->position / 32 == pos / 32) {
+				return n;
+			}
+		}
+		return nullptr;
+	}
+
+	bool can_place_building(const unit_t* u, int owner, const unit_type_t* unit_type, xy pos, bool check_undetected_units, bool check_invisible_units) const {
+		xy_t<size_t> tile_pos;
+		tile_pos.x = (pos.x - unit_type->placement_size.x / 2) / 32;
+		tile_pos.y = (pos.y - unit_type->placement_size.y / 2) / 32;
+		xy_t<size_t> tile_size;
+		tile_size.x = unit_type->placement_size.x / 32u;
+		tile_size.y = unit_type->placement_size.y / 32u;
+		if (tile_pos.x >= game_st.map_tile_width) return false;
+		if (tile_pos.y >= game_st.map_tile_height) return false;
+		if (tile_pos.x + tile_size.x > game_st.map_tile_width) return false;
+		if (tile_pos.y + tile_size.y > game_st.map_tile_height) return false;
+		if (u && !u_flying(u) && !u_grounded_building(u) && !is_reachable(u, xy(tile_pos.x * 32, tile_pos.y * 32))) return false;
+		
+		int visibility_mask = 1 << owner;
+		
+		if (unit_is_refinery(unit_type)) {
+			xy gas_pos(tile_pos.x * 32, tile_pos.y * 32);
+			gas_pos += get_unit_type(UnitTypes::Resource_Vespene_Geyser)->placement_size / 2;
+			return get_building_at_center_position(gas_pos, get_unit_type(UnitTypes::Resource_Vespene_Geyser)) != nullptr;
+		}
+		if (ut_requires_psionic_matrix(unit_type)) {
+			xcept("can_place_building: fixme psi matrix");
+		}
+		if (u && unit_is_nydus(unit_type)) {
+			xcept("can_place_building: fixme nydus");
+		} else if (ut_requires_creep(unit_type)) {
+			xcept("can_place_building: fixme creep");
+		} else {
+			bool check_unk4 = !unit_is_non_flag_beacon(unit_type);
+			bool is_resource_depot = ut_resource_depot(unit_type);
+			int flags_mask = tile_t::flag_partially_walkable | tile_t::flag_unbuildable;
+			
+			for (size_t y = tile_pos.y; y != tile_pos.y + tile_size.y; ++y) {
+				for (size_t x = tile_pos.x; x != tile_pos.x + tile_size.x; ++x) {
+					auto& tile = st.tiles[y * game_st.map_tile_width + x];
+					if (tile.explored & visibility_mask) return false;
+					if (tile.visible & visibility_mask || (tile.flags & flags_mask) == 0 || (check_unk4 && tile.flags & tile_t::flag_unk4)) {
+						if (is_resource_depot) {
+							xcept("can_place_building: fixme resource depot");
+						}
+					}
+				}
+			}
+		}
+		
+		for (size_t y = tile_pos.y; y != tile_pos.y + tile_size.y; ++y) {
+			for (size_t x = tile_pos.x; x != tile_pos.x + tile_size.x; ++x) {
+				auto& tile = st.tiles[y * game_st.map_tile_width + x];
+				if (check_invisible_units || (tile.visible & visibility_mask) == 0) {
+					if (tile.flags & tile_t::flag_occupied) {
+						if (!u) return false;
+						if (!u_grounded_building(u)) return false;
+						if (unit_is_nydus(u)) return false;
+						if (us_hidden(u)) return false;
+						if (u->unit_finder_bounding_box.from.x >= int(x * 32 + 32)) return false;
+						if (u->unit_finder_bounding_box.to.x <= int(x * 32)) return false;
+						if (u->unit_finder_bounding_box.from.y >= int(y * 32 + 32)) return false;
+						if (u->unit_finder_bounding_box.to.y <= int(y * 32)) return false;
+					}
+				}
+			}
+		}
+		
+		bool is_addon = ut_addon(unit_type);
+		
+		rect search_bb = unit_type_inner_bounding_box(unit_type, xy(tile_pos.x * 32, tile_pos.y * 32) + unit_type->placement_size / 2);
+		for (const unit_t* n : find_units_noexpand(search_bb)) {
+			if (n == u) continue;
+			if (is_addon && u_can_move(n)) continue;
+			if (u_flying(n)) continue;
+			if (u_grounded_building(n)) continue;
+			if (unit_is(n, UnitTypes::Spell_Dark_Swarm)) continue;
+			if (unit_is(n, UnitTypes::Spell_Disruption_Web)) continue;
+			if (u && !check_undetected_units && unit_target_is_undetected(u, n)) continue;
+			
+			for (size_t y = tile_pos.y; y != tile_pos.y + tile_size.y; ++y) {
+				for (size_t x = tile_pos.x; x != tile_pos.x + tile_size.x; ++x) {
+					auto& tile = st.tiles[y * game_st.map_tile_width + x];
+					if (check_invisible_units || (tile.visible & visibility_mask) == 0) {
+						if (n->unit_finder_bounding_box.from.x >= int(x * 32 + 32)) continue;
+						if (n->unit_finder_bounding_box.to.x <= int(x * 32)) continue;
+						if (n->unit_finder_bounding_box.from.y >= int(y * 32 + 32)) continue;
+						if (n->unit_finder_bounding_box.to.y <= int(y * 32)) continue;
+						return false;
+					}
+				}
+			}
+		}
+		
 		return true;
 	}
 
@@ -2323,7 +2502,201 @@ struct state_functions {
 		u->air_weapon_cooldown = cooldown;
 		sprite_run_anim(u->sprite, anim);
 	}
-
+	
+	void set_unit_owner(unit_t* u, int owner, bool increment_score) {
+		if (u->owner == owner) return;
+		bool is_morphing = unit_is_morphing_building(u);
+		if (is_morphing) {
+			u_set_status_flag(u, unit_t::status_flag_completed);
+		}
+		increment_unit_counts(u, -1);
+		if (u_completed(u)) add_completed_unit(u, -1, false);
+		st.player_units[u->owner].remove(*u);
+		u->owner = owner;
+		st.player_units[owner].push_front(*u);
+		increment_unit_counts(u, 1);
+		if (u_completed(u)) add_completed_unit(u, 1, increment_score);
+		if (is_morphing) u_unset_status_flag(u, unit_t::status_flag_completed);
+		
+		if (u->order_target.unit && u->order_type->targets_enemies && !unit_target_is_enemy(u, u->order_target.unit)) {
+			u->order_target.unit = nullptr;
+		}
+		for (unit_t* n : ptr(st.visible_units)) {
+			n = unit_attacking_unit(n);
+			if (n->order_target.unit == u && n->order_type->targets_enemies && !unit_target_is_enemy(n, u)) {
+				n->order_target.unit = nullptr;
+			}
+		}
+		for (unit_t* n : ptr(st.hidden_units)) {
+			n = unit_attacking_unit(n);
+			if (n->order_target.unit == u && n->order_type->targets_enemies && !unit_target_is_enemy(n, u)) {
+				n->order_target.unit = nullptr;
+			}
+		}
+		if (u->subunit) set_unit_owner(u->subunit, owner, increment_score);
+		update_unit_speed_upgrades(u);
+		if (ut_worker(u) && u->worker.gather_target && unit_is(u->worker.gather_target, UnitTypes::Powerup_Flag)) {
+			if (owner >= 8 || owner == u->worker.gather_target->owner) drop_carried_items(u);
+		}
+	}
+	
+	void set_sprite_owner(unit_t* u, int owner) {
+		if (u->sprite->owner != owner) u->sprite->owner = owner;
+		if (u->subunit && u->subunit->sprite->owner != owner) u->subunit->sprite->owner = owner;
+	}
+	
+	void reinitialize_unit_type(unit_t* u, const unit_type_t* unit_type) {
+		if (ut_worker(u) && u->worker.gather_target) {
+			if (u->worker.is_gathering) {
+				gather_queue_next(u, u->worker.gather_target);
+			} else {
+				u->worker.gather_target->building.resource.gather_queue.remove(*u);
+				u->worker.gather_target = nullptr;
+			}
+		}
+		xy position = u->sprite->position;
+		auto prev_unit_type = u->unit_type;
+		auto prev_hp = u->hp;
+		auto prev_order_type = u->order_type;
+		auto prev_order_target = u->order_target;
+		auto prev_order_state = u->order_state;
+		auto prev_sprite_owner = u->sprite->owner;
+		int prev_resources = ut_resource(u) ? u->building.resource.resource_count : 0;
+		u->previous_unit_type = prev_unit_type;
+		u->previous_hp = std::max(prev_hp.integer_part(), 1);
+		destroy_sprite(u->sprite);
+		u->sprite = nullptr;
+		if (u->path) {
+			free_path(u->path);
+			u->path = nullptr;
+		}
+		if (!initialize_unit_type(u, unit_type, position, u->owner)) xcept("reinitialize_unit_type: initialize_unit_type failed");
+		int prev_max_hp = prev_unit_type->hitpoints.integer_part();
+		int hp = prev_max_hp ? prev_hp.integer_part() * u->unit_type->hitpoints.integer_part() / prev_max_hp : 0;
+		if (hp == 0) hp = 1;;
+		u->hp = fp8::integer(hp);
+		u->air_strength = get_unit_strength(u, false);
+		u->ground_strength = get_unit_strength(u, true);
+		u->sprite->owner = prev_sprite_owner;
+		u_unset_status_flag(u, unit_t::status_flag_disabled);
+		u_unset_status_flag(u, unit_t::status_flag_iscript_nobrk);
+		u_set_status_flag(u, unit_t::status_flag_order_not_interruptible, !prev_order_type->can_be_interrupted);
+		u->order_type = prev_order_type;
+		u->order_target = prev_order_target;
+		u->order_state = prev_order_state;
+		if (u_grounded_building(u) && !u->build_queue.empty()) u->build_queue.erase(u->build_queue.begin());
+		if (ut_resource(u)) set_unit_resources(u, prev_resources);
+	}
+	
+	void morph_unit(unit_t* u, const unit_type_t* unit_type) {
+		int visibility = u->sprite->visibility_flags;
+		if (!us_hidden(u)) {
+			unit_finder_remove(u);
+			if (u_grounded_building(u)) set_unit_tiles_unoccupied(u, u->sprite->position);
+			if (u_flying(u)) decrement_repulse_field(u);
+		}
+		bool requires_detector = u_requires_detector(u);
+		bool cloaked = u_cloaked(u);
+		int data1;
+		int data2;
+		if (requires_detector || cloaked) {
+			data1 = u->sprite->main_image->modifier_data1;
+			data2 = u->sprite->main_image->modifier_data2;
+		}
+		increment_unit_counts(u, -1);
+		if (u_completed(u)) add_completed_unit(u, -1, true);
+		reinitialize_unit_type(u, unit_type);
+		increment_unit_counts(u, 1);
+		if (u_completed(u)) add_completed_unit(u, 1, true);
+		if (requires_detector || cloaked) {
+			set_sprite_cloak_modifier(u->sprite, requires_detector, cloaked, data1, data2);
+		}
+		set_sprite_visibility(u->sprite, visibility);
+		if (u_completed(u) && (requires_detector || cloaked)) {
+			set_secondary_order(u, get_order_type(Orders::Nothing));
+			u_unset_status_flag(u, unit_t::status_flag_requires_detector);
+			u_unset_status_flag(u, unit_t::status_flag_cloaked);
+		}
+		xy new_pos = restrict_move_target_to_valid_bounds(u, u->sprite->position);
+		if (new_pos != u->sprite->position) move_unit(u, new_pos);
+		if (!us_hidden(u)) {
+			unit_finder_insert(u);
+			if (u_grounded_building(u)) set_unit_tiles_occupied(u, u->sprite->position);
+			check_unit_collision(u);
+			if (u_flying(u)) increment_repulse_field(u);
+		}
+		if (u->subunit) {
+			requires_detector = u_requires_detector(u->subunit);
+			cloaked = u_cloaked(u->subunit);
+			int data1;
+			int data2;
+			if (requires_detector || cloaked) {
+				data1 = u->subunit->sprite->main_image->modifier_data1;
+				data2 = u->subunit->sprite->main_image->modifier_data2;
+			}
+			auto ius = make_thingy_setter(iscript_unit, u->subunit);
+			reinitialize_unit_type(u, unit_type);
+			if (requires_detector || cloaked) {
+				set_sprite_cloak_modifier(u->subunit->sprite, requires_detector, cloaked, data1, data2);
+			}
+			set_image_offset(u->sprite->main_image, get_image_lo_offset(u->sprite->main_image, 2, 0));
+			set_sprite_visibility(u->subunit->sprite, u->sprite->visibility_flags);
+		}
+	}
+	
+	unit_t* build_refinery(const unit_t* u, const unit_type_t* unit_type) {
+		unit_t* target = u->order_target.unit;
+		if (!target) target = get_building_at_center_position(u->order_target.pos, get_unit_type(UnitTypes::Resource_Vespene_Geyser));
+		add_completed_unit(target, -1, true);
+		u_unset_status_flag(target, unit_t::status_flag_completed);
+		set_unit_owner(target, u->owner, false);
+		set_sprite_owner(target, u->owner);
+		morph_unit(target, unit_type);
+		create_image(get_image_type(ImageTypes::IMAGEID_Vespene_Geyser2), target->sprite, {}, image_order_below);
+		target->hp = unit_type->hitpoints / 10;
+		return target;
+	}
+	
+	bool unit_can_gather_gas(const unit_t* u, const unit_t* target) const {
+		if (!ut_worker(u)) return false;
+		if (!unit_is_refinery(target)) return false;
+		if (!u_completed(target)) return false;
+		if (target->owner != u->owner) return false;
+		return true;
+	}
+	
+	bool find_gas_exit_position(const unit_t* u, const unit_t* gas, xy& pos, direction_t& heading) {
+		const unit_t* resource_depot = find_nearest_active_resource_depot(u);
+		if (!resource_depot) {
+			auto r = find_unit_placement(u, pos, true);
+			pos = r.second;
+			return r.first;
+		}
+		heading = xy_direction(resource_depot->sprite->position - gas->sprite->position);
+		xy offset = to_xy(direction_xy(heading - 64_dir, 32));
+		xy from_pos = gas->sprite->position + offset;
+		xy to_pos = resource_depot->sprite->position + offset;
+		
+		auto bb = unit_sprite_inner_bounding_box(gas);
+		bb.from -= u->unit_type->dimensions.to + xy(1, 1);
+		bb.to += u->unit_type->dimensions.from + xy(1, 1);
+		get_unique_sided_positions_within_bounds(from_pos, to_pos, bb);
+		auto r = find_unit_placement(u, to_pos, bb, true);
+		if (!r.first) r = find_unit_placement(u, to_pos, true);
+		pos = r.second;
+		return r.first;
+	}
+	
+	bool is_at_next_target_waypoint_or_within_attack_angle(const unit_t* u) const {
+		if (u->position == u->next_target_waypoint) return true;
+		auto* weapon = unit_ground_weapon(u);
+		if (weapon) {
+			auto heading_error = fp8::extend(u->heading - xy_direction(u->next_target_waypoint - u->sprite->position)).abs();
+			if (heading_error <= weapon->attack_angle) return true;
+		}
+		return false;
+	}
+	
 	void order_SelfDestructing(unit_t* u) {
 		kill_unit(u);
 	}
@@ -2485,7 +2858,7 @@ struct state_functions {
 	}
 
 	void order_MiningMinerals(unit_t* u) {
-		if (!ut_worker(u)) xcept("MiningMinerals: unit is not a worker");
+		if (!ut_worker(u)) xcept("order_MiningMinerals: unit is not a worker");
 		unit_t* target = u->order_target.unit;
 		if (target && unit_is_mineral_field(target)) {
 			set_unit_gathering(u);
@@ -2684,7 +3057,7 @@ struct state_functions {
 		} else if (u->order_state == 1) {
 			if (unit_is_at_move_target(u)) {
 				const unit_type_t* unit_type = u->build_queue.front();
-				if (xy_length(to_xy_fp8(u->order_target.pos) - u->exact_position).integer_part() <= 128 && can_place_building(u->owner, unit_type, u->order_target.pos)) {
+				if (xy_length(to_xy_fp8(u->order_target.pos) - u->exact_position).integer_part() <= 128 && player_has_supply_and_resources_for(u->owner, unit_type) && can_place_building(u, u->owner, unit_type, u->order_target.pos, true, false)) {
 					st.current_minerals[u->owner] -= unit_type->mineral_cost;
 					st.current_gas[u->owner] -= unit_type->gas_cost;
 					u_unset_status_flag(u, unit_t::status_flag_ground_unit);
@@ -2696,7 +3069,7 @@ struct state_functions {
 						queue_order_front(u, get_order_type(Orders::ResetCollision), {});
 					}
 					unit_t* build_unit;
-					if (unit_type->id == UnitTypes::Terran_Refinery) xcept("fixme build refinery");
+					if (unit_type->id == UnitTypes::Terran_Refinery) build_unit = build_refinery(u, unit_type);
 					else build_unit = create_unit(unit_type, u->order_target.pos, u->owner);
 					u->build_queue.erase(u->build_queue.begin());
 					if (build_unit) {
@@ -2745,12 +3118,12 @@ struct state_functions {
 			if (target) {
 				target->connected_unit = nullptr;
 				// todo: callback for sound?
-				if (ut_building(target) && target->owner == u->owner && unit_is_refinery(target)) {
+				if (unit_can_gather_gas(u, target)) {
 					set_unit_order(u, get_order_type(Orders::Harvest1), target);
 				} else {
 					order_done(u);
 				}
-			}
+			} else order_done(u);
 		};
 		if (!target || !ut_building(target)) {
 			done();
@@ -2766,7 +3139,7 @@ struct state_functions {
 			}
 			if (unit_is_at_move_target(u)) {
 				if (unit_is_at_move_target(u)) {
-					if (u_immovable(u) || (target->connected_unit != u && target->connected_unit->order_target.unit == target)) {
+					if (u_immovable(u) || (target->connected_unit && target->connected_unit != u && target->connected_unit->order_target.unit == target)) {
 						order_done(u);
 					} else {
 						target->connected_unit = u;
@@ -2819,16 +3192,7 @@ struct state_functions {
 				u->order_state = 7;
 			}
 		} else if (u->order_state == 7) {
-			bool next = false;
-			if (u->position == u->next_target_waypoint) next = true;
-			else {
-				auto* weapon = unit_ground_weapon(u);
-				if (weapon) {
-					auto heading_error = fp8::extend(u->heading - xy_direction(u->next_target_waypoint - u->sprite->position)).abs();
-					if (heading_error <= weapon->attack_angle) next = true;
-				}
-			}
-			if (next) {
+			if (is_at_next_target_waypoint_or_within_attack_angle(u)) {
 				u->main_order_timer = 30 + (lcg_rand(10) & 63);
 				sprite_run_anim(u->sprite, iscript_anims::AlmostBuilt);
 				u->order_state = 8;
@@ -2854,6 +3218,7 @@ struct state_functions {
 		u_unset_status_flag(u, unit_t::status_flag_gathering);
 		u_unset_status_flag(u, unit_t::status_flag_no_collide);
 		u_set_status_flag(u, unit_t::status_flag_ground_unit);
+		check_unit_collision(u);
 		if (u->path) {
 			free_path(u->path);
 			u->path = nullptr;
@@ -2861,7 +3226,7 @@ struct state_functions {
 		u->movement_state = movement_states::UM_Init;
 		if (u->sprite->elevation_level < 12) u->pathing_flags |= 1;
 		else u->pathing_flags &= ~1;
-		if (!u->order_queue.empty()) set_queued_order(u, false, u->unit_type->return_to_idle, {});
+		if (u->order_queue.empty()) set_queued_order(u, false, u->unit_type->return_to_idle, {});
 		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
 		order_done(u);
 	}
@@ -2938,6 +3303,228 @@ struct state_functions {
 			attack_unit_fire_weapon(u);
 		}
 	}
+	
+	void order_MoveToGas(unit_t* u) {
+		if (u->carrying_flags && (u->carrying_flags & 3) == 0) {
+			stop_unit(u);
+			set_next_target_waypoint(u, u->move_target.pos);
+			order_done(u);
+			return;
+		}
+		set_unit_gathering(u);
+		unit_t* target = u->order_target.unit;
+		if (u->order_state == 0) {
+			if (!target) {
+				stop_unit(u);
+				set_next_target_waypoint(u, u->move_target.pos);
+				order_done(u);
+			} else if (!unit_is_mineral_field(target)) {
+				move_to_target_reset(u, target);
+				u->worker.target_resource_position = u->order_target.pos;
+				u->worker.target_resource_unit = target;
+				u->order_state = 3;
+			} else {
+				queue_order_front(u, get_order_type(Orders::MoveToMinerals), {u->order_target.pos, target});
+				order_done(u);
+			}
+		} else if (u->order_state == 3) {
+			if (unit_is_at_move_target(u)) {
+				if (!target || !unit_can_gather_gas(u, target)) {
+					stop_unit(u);
+					set_next_target_waypoint(u, u->move_target.pos);
+					order_done(u);
+				} else {
+					if (u_immovable(u)) u->order_state = 0;
+					else if (u->carrying_flags & 1) set_unit_order(u, get_order_type(Orders::ReturnGas));
+					else {
+						queue_order_front(u, get_order_type(Orders::WaitForGas), {target->sprite->position, target});
+						order_done(u);
+					}
+				}
+			}
+		}
+	}
+	
+	void order_WaitForGas(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		if (target && unit_can_gather_gas(u, target) && (u->carrying_flags == 0 || u->carrying_flags & 3)) {
+			if (u->order_state == 0) {
+				wait_for_resource(u, target);
+			}
+		} else {
+			stop_unit(u);
+			set_next_target_waypoint(u, u->move_target.pos);
+			order_done(u);
+			return;
+		}
+	}
+	
+	void order_HarvestGas(unit_t* u) {
+		if (!ut_worker(u)) xcept("order_HarvestGas: unit is not a worker");
+		unit_t* target = u->order_target.unit;
+		if (!us_hidden(u) || (target && unit_can_gather_gas(u, target) && (u->carrying_flags == 0 || u->carrying_flags & 3))) {
+			set_unit_gathering(u);
+			if (u->order_state == 0) {
+				hide_unit(u);
+				u->order_state = 5;
+				u->main_order_timer = 37;
+			} else if (u->order_state == 5) {
+				if (u->main_order_timer == 0) {
+					xy pos;
+					direction_t heading = u->heading;
+					if (find_gas_exit_position(u, target, pos, heading)) {
+						set_unit_heading(u, heading);
+						move_unit(u, pos);
+						show_unit(u);
+						if (target) unit_gather_resources_from(u, target);
+						if (u->worker.gather_target) gather_queue_next(u, u->worker.gather_target);
+						remove_one_order(u, get_order_type(Orders::ResetHarvestCollision));
+						if (u->order_queue.empty()) {
+							if (u->carrying_flags & 1) {
+								set_queued_order(u, false, get_order_type(Orders::ReturnGas), {});
+							} else {
+								set_queued_order(u, false, u->unit_type->return_to_idle, {});
+							}
+						}
+						queue_order_front(u, get_order_type(Orders::ResetHarvestCollision), {});
+						u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+						order_done(u);
+					} else {
+						u->main_order_timer = 18;
+					}
+				}
+			}
+		} else {
+			stop_unit(u);
+			u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+			order_done(u);
+			if (u->worker.gather_target) gather_queue_next(u, u->worker.gather_target);
+		}
+	}
+	
+	void order_Repair(unit_t* u) {
+		if (!ut_worker(u)) xcept("order_Repair: unit is not a worker");
+		unit_t* target = u->order_target.unit;
+		if (!target || target->hp >= target->unit_type->hitpoints || target->stasis_timer || u_flag_40(target) || !ut_mechanical(target) || !u_completed(target)) {
+			sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
+			order_done(u);
+			if (target && !u_flag_40(target)) target->connected_unit = nullptr;
+			return;
+		}
+		if (unit_race(target) != race::terran) {
+			sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
+			order_done(u);
+			return;
+		}
+		
+		int mineral_cost;
+		int gas_cost;
+		int time_cost;
+		auto calc_repair_costs = [&]() {
+			int target_mineral_cost = target->unit_type->mineral_cost;
+			int target_gas_cost = target->unit_type->gas_cost;
+			int highest_cost = std::max(target_mineral_cost, target_gas_cost);
+			if (highest_cost) {
+				auto target_max_hp = target->unit_type->hitpoints;
+				time_cost = target_max_hp.raw_value * 3 / (highest_cost * target->hp_construction_rate.raw_value);
+				if (time_cost) {
+					if (target_mineral_cost == target_gas_cost) {
+						mineral_cost = 1;
+						gas_cost = 1;
+					} else if (target_mineral_cost > target_gas_cost) {
+						mineral_cost = 1;
+						gas_cost = 0;
+					} else {
+						mineral_cost = 0;
+						gas_cost = 1;
+					}
+				} else {
+					if (target_mineral_cost) {
+						mineral_cost = target_mineral_cost * target->hp_construction_rate.raw_value / (target_max_hp.raw_value * 3);
+						if (mineral_cost == 0) mineral_cost = 1;
+					} else mineral_cost = 0;
+					if (target_gas_cost) {
+						gas_cost = target_gas_cost * target->hp_construction_rate.raw_value / (target_max_hp.raw_value * 3);
+						if (gas_cost == 0) gas_cost = 1;
+					} else gas_cost = 0;
+					time_cost = 1;
+				}
+			} else {
+				mineral_cost = 0;
+				gas_cost = 0;
+				time_cost = 0xffff;
+			}
+		};
+		auto repair = [&]() {
+			if (u->worker.repair_timer == 0) {
+				calc_repair_costs();
+				if (st.current_minerals[u->owner] >= mineral_cost && st.current_gas[u->owner] >= mineral_cost) {
+					u->worker.repair_timer = time_cost;
+					st.current_minerals[u->owner] -= mineral_cost;
+					st.current_gas[u->owner] -= gas_cost;
+				} else {
+					// todo: callback for error/sound
+					sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
+					order_done(u);
+					return;
+				}
+			} else --u->worker.repair_timer;
+			set_unit_hp(target, target->hp + u->hp_construction_rate);
+			if (target->hp >= target->unit_type->hitpoints) {
+				sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
+				order_done(u);
+				if (target && !u_flag_40(target)) target->connected_unit = nullptr;
+			}
+		};
+		
+		if (u->order_state == 0 || u->order_state == 1) {
+			if (u->order_state == 0) {
+				// todo: callback for error/sound if not enough resources
+				u->worker.repair_timer = 0;
+				u->order_state = 1;
+			}
+			if (u_completed(target)) {
+				move_to_target_reset(u, target);
+				u->order_target.pos = target->sprite->position;
+				u->order_state = 6;
+			} else {
+				set_unit_order(u, get_order_type(Orders::ConstructingBuilding), target);
+			}
+		} else if (u->order_state == 6) {
+			if (!unit_is_at_move_target(u)) {
+				try_follow_unit(u, target);
+			} else {
+				if (unit_target_in_range(u, target, 5)) {
+					set_next_target_waypoint(u, target->sprite->position);
+					u->order_target.pos = target->sprite->position;
+					u->order_state = 7;
+					repair();
+				} else {
+					u->order_state = 1;
+				}
+			}
+		} else if (u->order_state == 7) {
+			if (unit_target_in_range(u, target, 5)) {
+				set_next_target_waypoint(u, target->sprite->position);
+				u->order_target.pos = target->sprite->position;
+				if (is_at_next_target_waypoint_or_within_attack_angle(u)) {
+					sprite_run_anim(u->sprite, iscript_anims::AlmostBuilt);
+					u->order_state = 8;
+				}
+			} else {
+				u->order_state = 1;
+			}
+			repair();
+		} else if (u->order_state == 8) {
+			set_next_target_waypoint(u, target->sprite->position);
+			u->order_target.pos = target->sprite->position;
+			if (!unit_target_in_range(u, target, 5) || target->order_type->id == Orders::LiftingOff) {
+				sprite_run_anim(u->sprite, iscript_anims::GndAttkToIdle);
+				u->order_state = 1;
+			}
+			repair();
+		} else repair();
+	}
 
 	void execute_main_order(unit_t* u) {
 		switch (u->order_type->id) {
@@ -2982,7 +3569,7 @@ struct state_functions {
 			order_ConstructingBuilding(u);
 			break;
 		case Orders::Repair:
-			xcept("Repair");
+			order_Repair(u);
 			break;
 		case Orders::ZergBirth:
 			xcept("ZergBirth");
@@ -3149,9 +3736,6 @@ struct state_functions {
 		case Orders::PlaceProtossBuilding:
 			xcept("PlaceProtossBuilding");
 			break;
-		case Orders::Repair:
-			xcept("Repair");
-			break;
 		case Orders::MoveToRepair:
 			xcept("MoveToRepair");
 			break;
@@ -3228,19 +3812,19 @@ struct state_functions {
 			xcept("SpawningLarva");
 			break;
 		case Orders::Harvest1:
-			xcept("Harvest1");
+			order_MoveToGas(u);
 			break;
 		case Orders::Harvest2:
 			xcept("Harvest2");
 			break;
 		case Orders::MoveToGas:
-			xcept("MoveToGas");
+			order_MoveToGas(u);
 			break;
 		case Orders::WaitForGas:
-			xcept("WaitForGas");
+			order_WaitForGas(u);
 			break;
 		case Orders::HarvestGas:
-			xcept("HarvestGas");
+			order_HarvestGas(u);
 			break;
 		case Orders::ReturnGas:
 			order_ReturnGas(u);
@@ -4562,7 +5146,6 @@ struct state_functions {
 	}
 
 	void pathfinder_find_short_path(pathfinder& pf, xy target, const regions_t::region* target_region) const {
-
 		bool target_is_destination = target == pf.destination;
 		bool target_region_walkable = target_region && target_region->walkable();
 
@@ -4911,7 +5494,8 @@ struct state_functions {
 						is_goal = true;
 					}
 				}
-			} else if (pos == target) is_goal = true;
+			}
+			if (pos == target) is_goal = true;
 			if (is_goal) {
 				flags = 0xff;
 				w.has_found_goal = true;
@@ -7581,7 +8165,7 @@ struct state_functions {
 			xcept("hidden InfestingCommandCenter");
 			return;
 		case Orders::HarvestGas:
-			xcept("hidden HarvestGas");
+			order_HarvestGas(u);
 			return;
 		case Orders::PowerupIdle:
 			xcept("hidden PowerupIdle");
@@ -9024,6 +9608,15 @@ struct state_functions {
 				p = program_data + state.return_address;
 				break;
 
+			case opc_creategasoverlays:
+				a = *p++;
+				if (noop) break;
+				if (iscript_unit && ut_resource(iscript_unit)) {
+					ImageTypes image_id = iscript_unit->building.resource.resource_count ? ImageTypes::IMAGEID_Vespene_Geyser_Smoke1 : ImageTypes::IMAGEID_Vespene_Geyser_Smoke1_Overlay;
+					image_id = (ImageTypes)((size_t)image_id + a);
+					create_image(get_image_type(image_id), image->sprite, image->offset + get_image_lo_offset(image, 2, a), image_order_top);
+				}
+				break;
 			case opc_pwrupcondjmp:
 				a = *p++;
 				if (image->sprite && image->sprite->main_image != image) {
@@ -9362,7 +9955,7 @@ struct state_functions {
 		auto supply_required = u->unit_type->supply_required;
 		auto race = unit_race(u);
 		if (race == race::zerg) {
-			if (unit_is(u, UnitTypes::Zerg_Egg) || unit_is(u, UnitTypes::Zerg_Cocoon) || unit_is(u, UnitTypes::Zerg_Lurker_Egg)) {
+			if (unit_is_egg(u)) {
 				supply_required = u->build_queue.front()->supply_required;
 				if (ut_two_units_in_one_egg(u)) supply_required *= 2;
 			} else {
@@ -9379,7 +9972,7 @@ struct state_functions {
 			st.non_building_counts[u->owner] += count;
 		} else if (u->unit_type->group_flags & GroupFlags::Building) {
 			st.building_counts[u->owner] += count;
-		} else if (unit_is(u, UnitTypes::Zerg_Egg) || unit_is(u, UnitTypes::Zerg_Cocoon) || unit_is(u, UnitTypes::Zerg_Lurker_Egg)) {
+		} else if (unit_is_egg(u)) {
 			st.non_building_counts[u->owner] += count;
 		}
 		if (st.unit_counts[u->owner][u->unit_type->id] < 0) st.unit_counts[u->owner][u->unit_type->id] = 0;
@@ -9730,8 +10323,8 @@ struct state_functions {
 		u->secondary_order_timer = 0;
 
 		if (!iscript_execute_sprite(u->sprite)) {
-			xcept("initialize_unit_type: iscript removed the sprite (if this throws, then Broodwar would crash)");
 			u->sprite = nullptr;
+			return false;
 		}
 		u->last_attacking_player = 8;
 		u->shield_points = fp8::integer(u->unit_type->shield_points);
@@ -9757,14 +10350,35 @@ struct state_functions {
 			u->building.creep_timer = 0;
 			u->building.upgrade_level = 0;
 		}
+		bool building_union_used = false;
 		if (ut_resource(u)) {
+			if (building_union_used) xcept("building union already used");
+			building_union_used = true;
 			u->building.resource.resource_count = 0;
 			u->building.resource.resource_iscript = 0;
 			u->building.resource.is_being_gathered = false;
 			u->building.resource.gather_queue.clear();
 		} else if (unit_is_mineral_field(unit_type)) xcept("mineral field is not a resource");
+		bool unit_union_used = false;
 		if (unit_is_ghost(u)) {
+			if (unit_union_used) xcept("unit union already used");
+			unit_union_used = true;
 			u->ghost.nuke_dot = nullptr;
+		}
+		if (unit_is_vulture(u)) {
+			if (unit_union_used) xcept("unit union already used");
+			unit_union_used = true;
+			u->vulture.spider_mine_count = 0;
+		}
+		
+		if (ut_worker(u)) {
+			u->worker.powerup = nullptr;
+			u->worker.target_resource_position = {};
+			u->worker.target_resource_unit = nullptr;
+			u->worker.repair_timer = 0;
+			u->worker.is_gathering = false;
+			u->worker.resources_carried = 0;
+			u->worker.gather_target = nullptr;
 		}
 
 		u->path = nullptr;
@@ -9830,7 +10444,7 @@ struct state_functions {
 				break;
 			}
 		}
-		//if (!u->loaded_units.empty()) xcept("fixme kill loaded units");
+		if (!loaded_units(u).empty()) xcept("fixme kill loaded units");
 		for (unit_t* n : ptr(st.visible_units)) {
 			remove_target_references(n, u);
 		}
@@ -9930,7 +10544,7 @@ struct state_functions {
 		u->order_process_timer = 0;
 		u->unknown_0x086 = 0;
 		u->attack_notify_timer = 0;
-		u->displayed_unit_id = 0;
+		u->previous_unit_type = nullptr;
 		u->last_event_timer = 0;
 		u->last_event_color = 0;
 		u->rank_increase = 0;
@@ -9989,9 +10603,6 @@ struct state_functions {
 			set_construction_graphic(u, true);
 			set_sprite_visibility(u->sprite, 0);
 		} else {
-			if (unit_type->id==UnitTypes::Terran_Vulture || unit_type->id==UnitTypes::Hero_Jim_Raynor_Vulture) {
-				u->vulture.spider_mine_count = 0;
-			}
 			u->sprite->flags |= sprite_t::flag_hidden;
 			set_sprite_visibility(u->sprite, 0);
 		}
@@ -10245,7 +10856,7 @@ struct state_functions {
 				if (is_inner_bb_move_target_in_valid_bounds(search_bb)) {
 					const unit_t* n = find_unit(search_bb, blocking_unit_pred);
 					if (n) {
-						int dec = search_bb.to.y - (n->sprite->position.y - n->unit_type->dimensions.from.y);
+						int dec = search_bb.to.y - (n->sprite->position.y - n->unit_type->dimensions.from.y - 1);
 						dec += (8 - ((y - dec) & 7)) & 7;
 						search_bb.from.y -= dec;
 						search_bb.to.y -= dec;
@@ -10276,7 +10887,7 @@ struct state_functions {
 				if (is_inner_bb_move_target_in_valid_bounds(search_bb)) {
 					const unit_t* n = find_unit(search_bb, blocking_unit_pred);
 					if (n) {
-						int dec = search_bb.to.x - (n->sprite->position.x - n->unit_type->dimensions.from.x);
+						int dec = search_bb.to.x - (n->sprite->position.x - n->unit_type->dimensions.from.x - 1);
 						dec += (8 - ((x - dec) & 7)) & 7;
 						search_bb.from.x -= dec;
 						search_bb.to.x -= dec;
@@ -10493,6 +11104,9 @@ struct state_functions {
 	}
 
 	void issue_order(unit_t* u, bool queue, const order_type_t* order_type, order_target_t target) {
+		if (target.unit) {
+			target.position = target.unit->sprite->position;
+		}
 		if (queue && !order_type->can_be_queued) queue = false;
 		if (queue) {
 			switch (u->order_type->id) {
@@ -10721,7 +11335,6 @@ struct state_functions {
 
 	void hide_unit(unit_t* u) {
 		if (us_hidden(u)) return;
-		xcept("hide_unit");
 		for (unit_t* n : ptr(st.visible_units)) {
 			remove_target_references(n, u);
 		}
@@ -10805,12 +11418,12 @@ struct state_functions {
 
 	void complete_unit(unit_t* u) {
 
-		if (ut_flyer(u)) {
+		if (ut_two_units_in_one_egg(u)) {
 			increment_unit_counts(u, -1);
-			u->status_flags |= unit_t::status_flag_completed;
+			u_set_status_flag(u, unit_t::status_flag_completed);
 			increment_unit_counts(u, 1);
 		} else {
-			u->status_flags |= unit_t::status_flag_completed;
+			u_set_status_flag(u, unit_t::status_flag_completed);
 		}
 		add_completed_unit(u, 1, true);
 		if (ut_initially_cloaked(u)) cloak_unit(u);
@@ -10855,7 +11468,7 @@ struct state_functions {
 			display_last_error_for_player(owner);
 			return nullptr;
 		}
-		if (unit_type_spreads_creep(unit_type, true) || ut_creep(unit_type)) {
+		if (unit_type_spreads_creep(unit_type, true) || ut_requires_creep(unit_type)) {
 			xcept("apply creep");
 		}
 		finish_building_unit(u);
@@ -12923,7 +13536,7 @@ struct game_load_functions : state_functions {
 			const unit_type_t* attacking_type = unit_type;
 			int air_strength = 0;
 			int ground_strength = 0;
-			if (attacking_type->id != UnitTypes::Zerg_Larva && attacking_type->id != UnitTypes::Zerg_Egg && attacking_type->id != UnitTypes::Zerg_Cocoon && attacking_type->id != UnitTypes::Zerg_Lurker_Egg) {
+			if (attacking_type->id != UnitTypes::Zerg_Larva && !unit_is_egg(attacking_type)) {
 				if (unit_is_carrier(attacking_type)) attacking_type = get_unit_type(UnitTypes::Protoss_Interceptor);
 				else if (unit_is_reaver(attacking_type)) attacking_type = get_unit_type(UnitTypes::Protoss_Scarab);
 				else if (attacking_type->turret_unit_type) attacking_type = attacking_type->turret_unit_type;
@@ -13189,7 +13802,7 @@ struct game_load_functions : state_functions {
 		}
 		unit_t* resource_depot = create_completed_unit(resource_depot_type, resource_depot_pos, owner);
 		if (resource_depot) {
-			if (unit_type_spreads_creep(resource_depot_type, true) || ut_creep(resource_depot)) {
+			if (unit_type_spreads_creep(resource_depot_type, true) || ut_requires_creep(resource_depot)) {
 				xcept("create_starting_units: fixme creep");
 			}
 		}
@@ -14178,14 +14791,6 @@ private:
 	optional<state_functions> opt_funcs;
 public:
 	game_player() = default;
-//	game_player(const game_player&) = delete;
-//	game_player(game_player&& n) {
-//		uptr_global_st = std::move(n.uptr_global_st);
-//		uptr_game_st = std::move(n.uptr_game_st);
-//		uptr_st = std::move(n.uptr_st);
-//		if (n.opt_funcs) set_st(n.st());
-//		else opt_funcs.reset();
-//	}
 
 	template<typename T>
 	explicit game_player(T&& init_arg) {

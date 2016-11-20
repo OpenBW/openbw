@@ -1350,7 +1350,7 @@ order_types_t load_orders_dat(const data_T& data) {
 	auto& arr = order_types.vec;
 
 	rawr(uint16_t, label, count);
-	rawr(uint8_t, use_weapon_targeting, count);
+	rawr(uint8_t, targets_enemies, count);
 	rawr(uint8_t, background, count);
 	rawr(uint8_t, unused3, count);
 	rawr(uint8_t, valid_for_turret, count);
