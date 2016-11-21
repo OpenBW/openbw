@@ -13168,6 +13168,8 @@ struct game_load_functions : state_functions {
 			game_st.regions.regions.resize(new_region_count);
 
 			refresh_regions();
+			
+			game_st.regions.split_regions.clear();
 
 			for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 				for (size_t x = 0; x != game_st.map_tile_width; ++x) {
@@ -13318,6 +13320,8 @@ struct game_load_functions : state_functions {
 		};
 
 		auto create_contours = [&]() {
+
+			game_st.regions.contours = {};
 
 			size_t next_x = 0;
 			size_t next_y = 0;
@@ -13855,22 +13859,25 @@ struct game_load_functions : state_functions {
 		using tag_list_t = a_vector<std::pair<tag_t, bool>>;
 		auto read_chunks = [&](const tag_list_t&tags) {
 			data_reader_le r(data, data + data_size);
-			a_unordered_map<tag_t, data_reader_le, tag_t> chunks;
+			a_unordered_multimap<tag_t, data_reader_le, tag_t> chunks;
 			while (r.left()) {
 				tag_t tag = r.get<std::array<char, 4>>();
 				uint32_t len = r.get<uint32_t>();
+				if (len > r.left()) break;
 				const uint8_t* chunk_data = r.ptr;
 				r.skip(len);
-				chunks[tag] = { chunk_data, r.ptr };
+				chunks.emplace(tag, data_reader_le{chunk_data, r.ptr});
 			}
 			for (auto& v : tags) {
 				tag_t tag = std::get<0>(v);
-				auto i = chunks.find(tag);
-				if (i == chunks.end()) {
+				auto i = chunks.equal_range(tag);
+				if (i.first == chunks.end()) {
 					if (std::get<1>(v)) xcept("map is missing required chunk '%s'", tagstr(tag));
 				} else {
 					if (!tag_funcs[tag]) xcept("tag '%s' is missing a function", tagstr(tag));
-					tag_funcs[tag](i->second);
+					for (auto i2 = i.first; i2 != i.second; ++i2) {
+						tag_funcs[tag](i2->second);
+					}
 				}
 			}
 		};
@@ -13908,10 +13915,14 @@ struct game_load_functions : state_functions {
 			for (size_t i = 0; i != num; ++i) {
 				size_t offset = r.get<uint16_t>();
 				auto t = start;
-				t.skip(offset);
-				char* b = (char*)t.ptr;
-				while (t.get<char>());
-				game_st.map_strings[i] = a_string(b, (char*)t.ptr - b - 1);
+				if (offset < t.left()) {
+					t.skip(offset);
+					char* b = (char*)t.ptr;
+					while (t.get<char>());
+					game_st.map_strings[i] = a_string(b, (char*)t.ptr - b - 1);
+				} else {
+					game_st.map_strings[i] = "<invalid string offset>";
+				}
 			}
 		};
 		tag_funcs["SPRP"] = [&](data_reader_le r) {
@@ -13943,13 +13954,18 @@ struct game_load_functions : state_functions {
 
 
 		tag_funcs["MTXM"] = [&](data_reader_le r) {
-			auto gfx_tiles_data = r.get_vec<uint16_t>(game_st.map_tile_width * game_st.map_tile_height);
-			game_st.gfx_tiles.resize(gfx_tiles_data.size());
-			for (size_t i = 0; i != gfx_tiles_data.size(); ++i) {
-				game_st.gfx_tiles[i] = tile_id(gfx_tiles_data[i]);
+			game_st.gfx_tiles.resize(game_st.map_tile_width * game_st.map_tile_height);
+			for (size_t i = 0; r.left(); ++i) {
+				if (r.left() == 1) {
+					game_st.gfx_tiles.at(i).raw_value &= 0xff00;
+					game_st.gfx_tiles.at(i).raw_value |= r.get<uint8_t>();
+					break;
+				}
+				game_st.gfx_tiles.at(i) = tile_id(r.get<uint16_t>());
 			}
 			for (size_t i = 0; i != game_st.gfx_tiles.size(); ++i) {
 				tile_id tile_id = game_st.gfx_tiles[i];
+				if (tile_id.group_index() >= game_st.cv5.size()) tile_id = {};
 				size_t megatile_index = game_st.cv5.at(tile_id.group_index()).mega_tile_index[tile_id.subtile_index()];
 				int cv5_flags = game_st.cv5.at(tile_id.group_index()).flags & ~(tile_t::flag_walkable | tile_t::flag_unwalkable | tile_t::flag_very_high | tile_t::flag_middle | tile_t::flag_high | tile_t::flag_partially_walkable);
 				st.tiles_mega_tile_index[i] = (uint16_t)megatile_index;
@@ -13975,17 +13991,18 @@ struct game_load_functions : state_functions {
 
 		tag_funcs["THG2"] = [&](data_reader_le r) {
 			while (r.left()) {
-				UnitTypes unit_type = (UnitTypes)r.get<uint16_t>();
+				int id = r.get<uint16_t>();
 				int x = r.get<uint16_t>();
 				int y = r.get<uint16_t>();
-				(void)x; (void)y;
 				int owner = r.get<uint8_t>();
 				r.get<uint8_t>();
 				r.get<uint8_t>();
 				int flags = r.get<uint8_t>();
 				if (flags & 0x10) {
-					xcept("create thingy of type %d", (int)unit_type);
+					const sprite_type_t* sprite_type = get_sprite_type((SpriteTypes)id);
+					create_thingy(sprite_type, {x, y}, owner);
 				} else {
+					auto unit_type = (UnitTypes)id;
 					if (unit_type == UnitTypes::Special_Upper_Level_Door) owner = 11;
 					if (unit_type == UnitTypes::Special_Right_Upper_Level_Door) owner = 11;
 					if (unit_type == UnitTypes::Special_Pit_Door) owner = 11;
@@ -14293,6 +14310,13 @@ struct game_load_functions : state_functions {
 				r.skip(2400);
 			}
 		};
+		
+		tag_funcs["COLR"] = [&](data_reader_le r) {
+			// todo
+			for (size_t i = 0; i != 8; ++i) {
+				r.get<uint8_t>();
+			}
+		};
 
 		allow_random = true;
 
@@ -14332,7 +14356,6 @@ struct game_load_functions : state_functions {
 		use_map_settings = setup_info.use_map_settings;
 
 		if (version == 59) {
-
 			if (use_map_settings) {
 				read_chunks({
 					{"STR ", true},
@@ -14363,7 +14386,34 @@ struct game_load_functions : state_functions {
 					{"UNIT", true}
 				});
 			}
-
+		} else if (version == 205) {
+			if (use_map_settings) {
+				read_chunks({
+					{"STR ", true},
+					{"MTXM", true},
+					{"THG2", true},
+					{"MASK", true},
+					{"UNIx", true},
+					{"UPGx", true},
+					{"TECx", true},
+					{"PUNI", true},
+					{"PUPx", true},
+					{"PTEx", true},
+					{"UNIT", true},							
+					{"UPRP", true},
+					{"MRGN", true},
+					{"TRIG", true},
+					{"COLR", true},
+				});
+			} else {
+				read_chunks({
+					{"STR ", true},
+					{"MTXM", true},
+					{"THG2", true},
+					{"UNIT", true},
+					{"COLR", true}
+				});
+			}
 		} else xcept("unsupported map version %d", version);
 
 		if (!use_map_settings) {
