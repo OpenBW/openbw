@@ -434,7 +434,7 @@ enum struct Orders : int {
 	InterceptorReturn,
 	DroneLand,
 	BuildingLand,
-	BuildingLiftOff,
+	BuildingLiftoff,
 	DroneLiftOff,
 	LiftingOff,
 	ResearchTech,

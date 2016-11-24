@@ -146,8 +146,7 @@ struct unit_type_t {
 	int first_yes_sound;
 	int last_yes_sound;
 	xy placement_size;
-	int addon_horizontal;
-	int addon_vertical;
+	xy addon_position;
 	rect dimensions;
 	int portrait;
 	int mineral_cost;
@@ -253,8 +252,8 @@ struct upgrade_type_t {
 	int mineral_cost_factor;
 	int gas_cost_base;
 	int gas_cost_factor;
-	int research_time_base;
-	int research_time_factor;
+	int time_cost_base;
+	int time_cost_factor;
 	int unknown;
 	int icon;
 	int label;

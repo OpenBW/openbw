@@ -269,7 +269,7 @@ struct file_reader {
 	}
 
 	void seek(size_t offset) {
-		if (fseek(f, offset, SEEK_SET)) xcept("file_reader: %s: failed to seek to offset %d", filename, offset);
+		if ((size_t)(long)offset != offset || fseek(f, (long)offset, SEEK_SET)) xcept("file_reader: %s: failed to seek to offset %d", filename, offset);
 	}
 
 	bool eof() {
@@ -737,10 +737,10 @@ struct mpq_archive_file_reader {
 		if (current_sector == compressed_sectors.size() - 2) current_sector_size = be.size % sector_size;
 
 		if (sector_data_size == current_sector_size && sector_data_size <= sector_size) {
-			if (be.flags & 0x10000) make_encrypted_reader(r, sector_data_size, key + current_sector, crypt_table).get_bytes(sector_data.data(), sector_data_size);
+			if (be.flags & 0x10000) make_encrypted_reader(r, sector_data_size, key + (uint32_t)current_sector, crypt_table).get_bytes(sector_data.data(), sector_data_size);
 			else r.get_bytes(sector_data.data(), sector_data_size);
 		} else {
-			if (be.flags & 0x10000) get_data(make_encrypted_reader(r, sector_data_size, key + current_sector, crypt_table));
+			if (be.flags & 0x10000) get_data(make_encrypted_reader(r, sector_data_size, key + (uint32_t)current_sector, crypt_table));
 			else get_data(r);
 			if (compression_method == 8) decompress(compressed_data.data(), sector_data_size, sector_data.data(), current_sector_size);
 			else xcept("mpq: %s: unsupported compression method %d", filename, compression_method);
@@ -1048,6 +1048,7 @@ void read_array(reader_T& r, size_t num, ptr_F&& ptr_f) {
 }
 
 #define rawr(load_type, name, num) read_array<load_type>(r, num, [&](size_t index) {return &arr[index].name;})
+#define rawro(load_type, name, num, offset) read_array<load_type>(r, num, [&](size_t index) {return &arr[offset + index].name;})
 
 template<typename data_T>
 unit_types_t load_units_dat(const data_T& data) {
@@ -1070,7 +1071,7 @@ unit_types_t load_units_dat(const data_T& data) {
 	rawr(uint8_t, flingy, total_count);
 	rawr(uint16_t, turret_unit_type, total_count);
 	rawr(uint16_t, subunit2, total_count);
-	rawr(uint16_t, infestation, buildings_count);
+	rawro(uint16_t, infestation, buildings_count, units_count);
 	rawr(uint32_t, construction_animation, total_count);
 	rawr(uint8_t, unit_direction, total_count);
 	rawr(uint8_t, has_shield, total_count);
@@ -1104,8 +1105,7 @@ unit_types_t load_units_dat(const data_T& data) {
 	rawr(uint16_t, first_yes_sound, units_count);
 	rawr(uint16_t, last_yes_sound, units_count);
 	rawr(int16_t, placement_size, total_count);
-	rawr(uint16_t, addon_horizontal, buildings_count);
-	rawr(uint16_t, addon_vertical, buildings_count);
+	rawro(int16_t, addon_position, buildings_count, units_count);
 	rawr(int16_t, dimensions, total_count);
 	rawr(uint16_t, portrait, total_count);
 	rawr(uint16_t, mineral_cost, total_count);
@@ -1194,8 +1194,8 @@ upgrade_types_t load_upgrades_dat(const data_T& data) {
 	rawr(uint16_t, mineral_cost_factor, count);
 	rawr(uint16_t, gas_cost_base, count);
 	rawr(uint16_t, gas_cost_factor, count);
-	rawr(uint16_t, research_time_base, count);
-	rawr(uint16_t, research_time_factor, count);
+	rawr(uint16_t, time_cost_base, count);
+	rawr(uint16_t, time_cost_factor, count);
 	rawr(uint16_t, unknown, count);
 	rawr(uint16_t, icon, count);
 	rawr(uint16_t, label, count);
@@ -1374,6 +1374,7 @@ order_types_t load_orders_dat(const data_T& data) {
 	return order_types;
 }
 
+#undef rawro
 #undef rawr
 
 }

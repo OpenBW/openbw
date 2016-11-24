@@ -8,12 +8,11 @@ namespace bwgame {
 struct action_state {
 	std::array<int, 12> player_id{};
 	
-	const uint8_t* actions_data_begin = nullptr;
-	const uint8_t* actions_data_end = nullptr;
-	const uint8_t* actions_data = nullptr;
+	size_t actions_data_position = 0;
 	int next_action_frame = 0;
 	
-	std::array<static_vector<unit_t*, 12>, 12> selection{};
+	std::array<static_vector<unit_t*, 12>, 8> selection{};
+	std::array<std::array<static_vector<unit_id, 12>, 10>, 8> control_groups{};
 };
 
 struct action_functions: state_functions {
@@ -39,13 +38,15 @@ struct action_functions: state_functions {
 		return true;
 	}
 	
-	unit_t* selected_unit(unit_t* u) const {
-		return u && u->sprite && !unit_dead(u) ? u : nullptr;
+	auto selected_units(int owner) const {
+		return make_filter_range(action_st.selection.at(owner), [this](unit_t* u) {
+			return u && !unit_dead(u);
+		});
 	}
 	
-	auto selected_units(int owner) const {
-		return make_filter_range(make_transform_range(action_st.selection[owner], [this](unit_t* u) {
-			return selected_unit(u);
+	auto control_group(int owner, size_t group_n) const {
+		return make_filter_range(make_transform_range(action_st.control_groups.at(owner).at(group_n), [this](unit_id u) {
+			return get_unit(u);
 		}), [](unit_t* u) {
 			return u != nullptr;
 		});
@@ -64,6 +65,14 @@ struct action_functions: state_functions {
 		auto i = sel.begin();
 		if (std::next(i) != sel.end()) return nullptr;
 		return *i;
+	}
+	
+	virtual void on_unit_deselect(unit_t* u) override final {
+		for (size_t i = 0; i != 8; ++i) {
+			auto& selection = action_st.selection.at(i);
+			auto it = std::find(selection.begin(), selection.end(), u);
+			if (it != selection.end()) selection.erase(it);
+		}
 	}
 	
 	const order_type_t* get_default_gather_order(const unit_t* u, const unit_t* target) const {
@@ -89,7 +98,7 @@ struct action_functions: state_functions {
 		case 1:
 			if (u_grounded_building(u)) return nullptr;
 			else if (target) {
-				if (unit_is_special_beacon(target)) return nullptr;
+				if (unit_is_special_beacon(target) || ut_powerup(target)) return get_order_type(Orders::Move);
 				else if (unit_target_is_enemy(u, target)) return get_order_type(Orders::Attack1);
 				else if (unit_provides_space(target) && unit_can_load_target(target, u)) return get_order_type(Orders::EnterTransport);
 				else if (u_burrowed(u)) return get_order_type(Orders::Move);
@@ -129,9 +138,7 @@ struct action_functions: state_functions {
 				}
 			} else if (!unit_target_is_enemy(u, target)) {
 				bool can_enter = unit_provides_space(target) && unit_can_load_target(target, u);
-				if (!ut_building(target) && can_enter) {
-					return get_order_type(Orders::EnterTransport);
-				} else if (unit_race(target) == race::terran && ut_mechanical(target) && u_completed(target) && u->hp < u->unit_type->hitpoints) {
+				if ((ut_building(target) || !can_enter) && unit_race(target) == race::terran && ut_mechanical(target) && u_completed(target) && target->hp < target->unit_type->hitpoints) {
 					return get_order_type(Orders::Repair);
 				} else if (can_enter) {
 					return get_order_type(Orders::EnterTransport);
@@ -164,7 +171,7 @@ struct action_functions: state_functions {
 		size_t n_units = 0;
 		xy sum_pos;
 		unsigned units_area = 0;
-		for (unit_t* u : selected_units(owner)) {
+		for (const unit_t* u : selected_units(owner)) {
 			++n_units;
 			if (u->pathing_flags & 1) any_collision_enabled_units = true;
 			xy pos = u->sprite->position;
@@ -180,15 +187,32 @@ struct action_functions: state_functions {
 		if (n_units == 0) return;
 		
 		if (any_collision_enabled_units && can_be_obstructed) {
+			auto find_target = [&](rect bb, xy source_pos) {
+				auto* source_region = get_region_at(source_pos);
+				auto* target_region = get_region_at(target_pos);
+				if (!is_walkable(target_pos) || source_region->group_index != target_region->group_index) {
+					pathfinder pf;
+					if (pathfinder_find_long_path(pf, source_pos, target_pos)) target_region = pf.long_path.back();
+				}
+				target_pos = pathfinder_adjust_destination(target_region, target_pos);
+				target_pos = pathfinder_adjust_target_pos(bb, target_pos).second;
+			};
+
 			if (n_units == 1) {
 				unit_t* u = get_first_selected_unit(owner);
 				if (!unit_type_can_fit_at(u->unit_type, target_pos)) {
-					xcept("waa can't fit");
+					const unit_t* u = *selected_units(owner).begin();
+					find_target(unit_type_inner_bounding_box(u->unit_type), u->sprite->position);
 				}
 			} else {
-				int units_area_square_width = isqrt(units_area);
+				int units_area_square_width = isqrt(units_area * 2);
 				if (!rectangle_can_fit_at(target_pos, units_area_square_width, units_area_square_width)) {
-					xcept("waa can't multi fit");
+					rect bb;
+					bb.from.x = -units_area_square_width / 2;
+					bb.from.y = -units_area_square_width / 2;
+					bb.to.x = bb.from.x + units_area_square_width;
+					bb.to.y = bb.from.y + units_area_square_width;
+					find_target(bb, sum_pos / (int)n_units);
 				}
 			}
 			target_pos = restrict_pos_to_map_bounds(target_pos);
@@ -199,12 +223,12 @@ struct action_functions: state_functions {
 				g.move_offset = {};
 			} else if (any_collision_enabled_units) {
 				if (area.to.x - area.from.x <= 192 && area.to.y - area.from.y <= 192) {
-					g.move_offset = g.original_target_pos - sum_pos / n_units;
+					g.move_offset = g.original_target_pos - sum_pos / (int)n_units;
 					g.has_move_offset = true;
 				}
 			} else {
 				if (area.to.x - area.from.x <= 256 && area.to.y - area.from.y <= 256) {
-					g.move_offset = g.original_target_pos - sum_pos / n_units;
+					g.move_offset = g.original_target_pos - sum_pos / (int)n_units;
 					g.has_move_offset = true;
 				}
 			}
@@ -250,10 +274,12 @@ struct action_functions: state_functions {
 		if (step_distance < 2) step_distance = distance_to_target;
 		for (int distance = step_distance; distance <= distance_to_target; distance += step_distance) {
 			xy npos = pos + (target_pos - pos) * distance / distance_to_target;
-			auto* npos_region = get_region_at(npos);
-			if (npos_region == source_region) return npos;
-			for (auto* n : source_region->walkable_neighbors) {
-				if (n == npos_region) return npos;
+			if (unit_type_can_fit_at(u->unit_type, npos)) {
+				auto* npos_region = get_region_at(npos);
+				if (npos_region == source_region) return npos;
+				for (auto* n : source_region->walkable_neighbors) {
+					if (n == npos_region) return npos;
+				}
 			}
 		}
 		return target_pos;
@@ -261,14 +287,14 @@ struct action_functions: state_functions {
 	
 	template<typename units_T>
 	bool action_select(int owner, units_T&& units) {
-		auto& selection = action_st.selection[owner];
+		auto& selection = action_st.selection.at(owner);
 		selection.clear();
 		bool retval = false;
 		for (unit_t* u : units) {
 			if (u && u->unit_type->id != UnitTypes::Terran_Nuclear_Missile) {
 				if (std::find(selection.begin(), selection.end(), u) == selection.end()) {
 					if (!us_hidden(u) && (selection.empty() || unit_can_be_multi_selected(u))) {
-						if (selection.size() >= 12) xcept("attempt to select more than 12 units");
+						if (selection.size() == 12) xcept("attempt to select more than 12 units");
 						selection.push_back(u);
 						retval = true;
 					}
@@ -284,13 +310,13 @@ struct action_functions: state_functions {
 	
 	template<typename units_T>
 	bool action_shift_select(int owner, units_T&& units) {
-		auto& selection = action_st.selection[owner];
+		auto& selection = action_st.selection.at(owner);
 		bool retval = false;
 		for (unit_t* u : units) {
 			if (u) {
 				if (std::find(selection.begin(), selection.end(), u) == selection.end()) {
 					if (!us_hidden(u) && (selection.empty() || unit_can_be_multi_selected(u))) {
-						if (selection.size() >= 12) xcept("attempt to select more than 12 units");
+						if (selection.size() == 12) xcept("attempt to select more than 12 units");
 						selection.push_back(u);
 						retval = true;
 					}
@@ -306,7 +332,7 @@ struct action_functions: state_functions {
 	
 	template<typename units_T>
 	bool action_deselect(int owner, units_T&& units) {
-		auto& selection = action_st.selection[owner];
+		auto& selection = action_st.selection.at(owner);
 		bool retval = false;
 		for (unit_t* u : units) {
 			if (u) {
@@ -340,11 +366,19 @@ struct action_functions: state_functions {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
 		if (u->owner != owner) return false;
-		if (!unit_build_order_valid(u, order_type, unit_type)) return false;
+		if (!unit_build_order_valid(u, order_type, unit_type, owner)) return false;
 		if (ut_addon(unit_type)) {
-			xcept("action_build: fixme addon");
+			xy pos(int(32 * tile_pos.x + unit_type->placement_size.x / 2), int(32 * tile_pos.y + unit_type->placement_size.y / 2));
+			if (can_place_building(u, owner, unit_type, pos, false, false)) {
+				xy builder_pos(int(32 * tile_pos.x + u->unit_type->placement_size.x / 2), int(32 * tile_pos.y + u->unit_type->placement_size.y / 2));
+				builder_pos.x -= unit_type->addon_position.x / 32 * 32;
+				builder_pos.y -= unit_type->addon_position.y / 32 * 32;
+				if (can_place_building(u, owner, u->unit_type, builder_pos, false, false)) {
+					place_building(u, order_type, unit_type, builder_pos);
+				}
+			}
 		} else {
-			xy pos(32 * tile_pos.x + unit_type->placement_size.x / 2, 32 * tile_pos.y + unit_type->placement_size.y / 2);
+			xy pos(int(32 * tile_pos.x + unit_type->placement_size.x / 2), int(32 * tile_pos.y + unit_type->placement_size.y / 2));
 			if (can_place_building(u, owner, unit_type, pos, false, false)) {
 				place_building(u, order_type, unit_type, pos);
 			}
@@ -353,10 +387,11 @@ struct action_functions: state_functions {
 	}
 	
 	bool action_default_order(int owner, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
+		if (!is_in_map_bounds(pos)) return false;
 		if (target) target_unit_type = nullptr;
 		else if (target_unit_type) {
 			if (player_position_is_visible(owner, pos)) {
-				target = find_unit({pos - xy(96, 96), pos + xy(97, 97)}, [&](unit_t* n) {
+				target = find_unit_noexpand({pos - xy(96, 96), pos + xy(96, 96)}, [&](unit_t* n) {
 					if (n->unit_type != target_unit_type) return false;
 					if (n->sprite->position.x + n->unit_type->placement_size.x / 2 - (unsigned)pos.x >= (unsigned)n->unit_type->placement_size.x) return false;
 					if (n->sprite->position.y + n->unit_type->placement_size.y / 2 - (unsigned)pos.y >= (unsigned)n->unit_type->placement_size.y) return false;
@@ -406,7 +441,7 @@ struct action_functions: state_functions {
 							}
 							order = u->unit_type->attack_unit;
 						}
-						if (unit_can_receive_order(u, order)) {
+						if (unit_can_receive_order(u, order, owner)) {
 							retval = true;
 							if (target) {
 								order_target_t order_target;
@@ -436,6 +471,7 @@ struct action_functions: state_functions {
 	}
 	
 	bool action_order(int owner, const order_type_t* order, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
+		if (!is_in_map_bounds(pos)) return false;
 		switch (order->id) {
 		case Orders::Die:
 		case Orders::InfestedCommandCenter:
@@ -449,7 +485,7 @@ struct action_functions: state_functions {
 		case Orders::PlaceAddon:
 		case Orders::BuildNydusExit:
 		case Orders::BuildingLand:
-		case Orders::BuildingLiftOff:
+		case Orders::BuildingLiftoff:
 		case Orders::DroneLiftOff:
 		case Orders::Harvest2:
 		case Orders::MoveToGas:
@@ -471,7 +507,7 @@ struct action_functions: state_functions {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (order->tech_type == TechTypes::None) {
-				if (!unit_can_receive_order(u, order)) continue;
+				if (!unit_can_receive_order(u, order, owner)) continue;
 			} else {
 				xcept("action_order: fixme tech type");
 			}
@@ -545,7 +581,7 @@ struct action_functions: state_functions {
 	bool action_stop(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
-			if (unit_can_receive_order(u, get_order_type(Orders::Stop))) {
+			if (unit_can_receive_order(u, get_order_type(Orders::Stop), owner)) {
 				retval = true;
 				issue_order(u, queue, get_order_type(Orders::Stop), {});
 			}
@@ -557,6 +593,141 @@ struct action_functions: state_functions {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u || u->owner != owner) return false;
 		cancel_building_unit(u);
+		return true;
+	}
+	
+	bool action_cancel_build_queue(int owner, size_t slot) {
+		unit_t* u = get_single_selected_unit(owner);
+		if (!u || u->owner != owner) return false;
+		if (!u_completed(u)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Larva)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Mutalisk)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Hydralisk)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Hatchery)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Lair)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Spire)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Creep_Colony)) return false;
+		if (u->build_queue.empty()) return false;
+		if (slot == 254) slot = u->build_queue.size() - 1;
+		if (slot >= u->build_queue.size()) return false;
+		cancel_build_queue(u, slot);
+		return true;
+	}
+	
+	bool action_control_group(int owner, size_t group_n, int subaction) {
+		bool retval = false;
+		if (subaction == 1) {
+			auto& group = action_st.control_groups.at(owner).at(group_n);
+			if (!group.empty()) {
+				auto& selection = action_st.selection.at(owner);
+				selection.clear();
+				for (size_t i = 0; i != group.size(); ++i) {
+					unit_t* u = get_unit(group[i]);
+					if (u && !us_hidden(u) && (group.size() == 1 || unit_can_be_multi_selected(u))) {
+						selection.push_back(u);
+						retval = true;
+					} else {
+						if (i != group.size() - 1) std::swap(group[i], group[group.size() - 1]);
+						group.pop_back();
+						--i;
+					}
+				}
+			}
+		} else if (subaction == 0 || subaction == 2) {
+			auto& group = action_st.control_groups.at(owner).at(group_n);
+			if (subaction == 0) {
+				group.clear();
+			} else {
+				if (!group.empty()) {
+					unit_t* u = get_unit(group[0]);
+					if (u && !unit_dead(u) && !unit_can_be_multi_selected(u)) return false;
+				}
+			}
+			for (unit_t* u : selected_units(owner)) {
+				if (u->owner != owner) continue;
+				auto uid = get_unit_id(u);
+				if (group.empty() || unit_can_be_multi_selected(u)) {
+					auto i = std::find(group.begin(), group.end(), uid);
+					if (i == group.end()) {
+						if (group.size() == 12) xcept("attempt to control group more than 12 units");
+						group.push_back(uid);
+						retval = true;
+					}
+				}
+			}
+		} else xcept("action_control_group: unknown subaction %d", subaction);
+		return retval;
+	}
+	
+	bool action_unload_all(int owner, bool queue) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (!unit_can_receive_order(u, get_order_type(Orders::Unload), owner)) continue;
+			if (loaded_units(u).empty()) continue;
+			issue_order(u, queue, get_order_type(Orders::Unload), {});
+		}
+		return retval;
+	}
+	
+	bool action_liftoff(int owner, xy pos) {
+		if (!is_in_map_bounds(pos)) return false;
+		unit_t* u = get_single_selected_unit(owner);
+		if (!u) return false;
+		if (unit_is_researching(u) || unit_is_upgrading(u)) return false;
+		if (!unit_can_receive_order(u, get_order_type(Orders::BuildingLiftoff), owner)) return false;
+		set_unit_order(u, get_order_type(Orders::BuildingLiftoff), pos);
+		set_queued_order(u, false, u->unit_type->return_to_idle, pos - xy(0, 42));
+		return true;
+	}
+	
+	bool action_research(int owner, const tech_type_t* tech) {
+		unit_t* u = get_single_selected_unit(owner);
+		if (!u) return false;
+		if (!unit_can_research(u, tech, u->owner)) return false;
+		if (!has_available_resources_for(u->owner, tech, true)) return false;
+		st.current_minerals[u->owner] -= tech->mineral_cost;
+		st.current_gas[u->owner] -= tech->gas_cost;
+		u->building.researching_type = tech;
+		u->building.upgrade_research_time = tech->research_time;
+		st.tech_researching[u->owner][tech->id] = true;
+		sprite_run_anim(u->sprite, iscript_anims::IsWorking);
+		set_unit_order(u, get_order_type(Orders::ResearchTech));
+		return true;
+	}
+	
+	bool action_cancel_research(int owner) {
+		unit_t* u = get_single_selected_unit(owner);
+		if (!u || u->owner != owner) return false;
+		if (!ut_building(u)) return false;
+		if (!u_completed(u)) return false;
+		if (!unit_is_researching(u)) return false;
+		cancel_research(u);
+		return true;
+	}
+	
+	bool action_upgrade(int owner, const upgrade_type_t* upgrade) {
+		unit_t* u = get_single_selected_unit(owner);
+		if (!u) return false;
+		if (!unit_can_upgrade(u, upgrade, u->owner)) return false;
+		if (!has_available_resources_for(u->owner, upgrade, true)) return false;
+		st.current_minerals[u->owner] -= upgrade_mineral_cost(owner, upgrade);
+		st.current_gas[u->owner] -= upgrade_gas_cost(owner, upgrade);
+		u->building.upgrading_type = upgrade;
+		u->building.upgrade_research_time = upgrade_time_cost(owner, upgrade);
+		u->building.upgrading_level = player_upgrade_level(owner, upgrade->id) + 1;
+		st.upgrade_upgrading[u->owner][upgrade->id] = true;
+		sprite_run_anim(u->sprite, iscript_anims::IsWorking);
+		set_unit_order(u, get_order_type(Orders::Upgrade));
+		return true;
+	}
+	
+	bool action_cancel_upgrade(int owner) {
+		unit_t* u = get_single_selected_unit(owner);
+		if (!u || u->owner != owner) return false;
+		if (!ut_building(u)) return false;
+		if (!u_completed(u)) return false;
+		if (!unit_is_upgrading(u)) return false;
+		cancel_upgrade(u);
 		return true;
 	}
 	
@@ -655,6 +826,55 @@ struct action_functions: state_functions {
 	}
 	
 	template<typename reader_T>
+	bool read_action_cancel_build_queue(int owner, reader_T&& r) {
+		size_t slot = r.template get<uint16_t>();
+		return action_cancel_build_queue(owner, slot);
+	}
+	
+	template<typename reader_T>
+	bool read_action_control_group(int owner, reader_T&& r) {
+		int subaction = r.template get<uint8_t>();
+		size_t group_n = r.template get<uint8_t>();
+		if (group_n > 10) return false;
+		return action_control_group(owner, group_n, subaction);
+	}
+	
+	template<typename reader_T>
+	bool read_action_unload_all(int owner, reader_T&& r) {
+		bool queue = r.template get<uint8_t>() != 0;
+		return action_unload_all(owner, queue);
+	}
+	
+	template<typename reader_T>
+	bool read_action_liftoff(int owner, reader_T&& r) {
+		int x = r.template get<int16_t>();
+		int y = r.template get<int16_t>();
+		return action_liftoff(owner, xy(x, y));
+	}
+	
+	template<typename reader_T>
+	bool read_action_research(int owner, reader_T&& r) {
+		const tech_type_t* tech = get_tech_type((TechTypes)r.template get<uint8_t>());
+		return action_research(owner, tech);
+	}
+	
+	template<typename reader_T>
+	bool read_action_cancel_research(int owner, reader_T&& r) {
+		return action_cancel_research(owner);
+	}
+	
+	template<typename reader_T>
+	bool read_action_upgrade(int owner, reader_T&& r) {
+		const upgrade_type_t* upgrade = get_upgrade_type((UpgradeTypes)r.template get<uint8_t>());
+		return action_upgrade(owner, upgrade);
+	}
+	
+	template<typename reader_T>
+	bool read_action_cancel_upgrade(int owner, reader_T&& r) {
+		return action_cancel_upgrade(owner);
+	}
+	
+	template<typename reader_T>
 	bool read_action(reader_T&& r) {
 		int player_id = r.template get<uint8_t>();
 		int action_id = r.template get<uint8_t>();
@@ -670,6 +890,8 @@ struct action_functions: state_functions {
 			return read_action_deselect(owner, r);
 		case 12:
 			return read_action_build(owner, r);
+		case 19:
+			return read_action_control_group(owner, r);
 		case 20:
 			return read_action_default_order(owner, r);
 		case 21:
@@ -680,6 +902,20 @@ struct action_functions: state_functions {
 			return read_action_stop(owner, r);
 		case 31:
 			return read_action_train(owner, r);
+		case 32:
+			return read_action_cancel_build_queue(owner, r);
+		case 40:
+			return read_action_unload_all(owner, r);
+		case 47:
+			return read_action_liftoff(owner, r);
+		case 48:
+			return read_action_research(owner, r);
+		case 49:
+			return read_action_cancel_research(owner, r);
+		case 50:
+			return read_action_upgrade(owner, r);
+		case 51:
+			return read_action_cancel_upgrade(owner, r);
 		case 87:
 			return read_action_player_leave(owner, r);
 		default:
@@ -693,22 +929,23 @@ struct action_functions: state_functions {
 		return read_action(r);
 	}
 	
-	void execute_actions() {
+	void execute_actions(uint8_t* actions_data_begin, uint8_t* actions_data_end) {
 		if (st.current_frame != action_st.next_action_frame) return;
-		while (action_st.actions_data != action_st.actions_data_end) {
-			data_loading::data_reader_le r(action_st.actions_data, action_st.actions_data_end);
+		while (action_st.actions_data_position != size_t(actions_data_end - actions_data_begin)) {
+			data_loading::data_reader_le r(actions_data_begin + action_st.actions_data_position, actions_data_end);
 			int frame = r.get<int32_t>();
 			if (frame != st.current_frame) {
 				action_st.next_action_frame = frame;
 				return;
 			}
 			size_t actions_size = r.get<uint8_t>();
-			const uint8_t* end = r.ptr + actions_size;
-			data_loading::data_reader_le r2(r.ptr, end);
+			const uint8_t* ptr = r.get_n(actions_size);
+			const uint8_t* end = ptr + actions_size;
+			data_loading::data_reader_le r2(ptr, end);
 			while (r2.ptr != end) {
 				read_action(r2);
 			}
-			action_st.actions_data = end;
+			action_st.actions_data_position = end - actions_data_begin;
 		}
 	}
 	
@@ -723,12 +960,6 @@ public:
 	actions_player() = default;
 	explicit actions_player(state& st) : opt_funcs(in_place, st, action_st) {}
 	
-	void set_actions_data_buffer() {
-		action_st.actions_data_begin = actions_data_buffer.data();
-		action_st.actions_data_end = actions_data_buffer.data() + actions_data_buffer.size();
-		action_st.actions_data = action_st.actions_data_begin;
-	}
-	
 	void set_st(state& st) {
 		opt_funcs.emplace(st, action_st);
 	}
@@ -740,7 +971,7 @@ public:
 	}
 	
 	void execute_actions() {
-		funcs().execute_actions();
+		funcs().execute_actions(actions_data_buffer.data(), actions_data_buffer.data() + actions_data_buffer.size());
 	}
 	
 	action_functions& funcs() {

@@ -60,7 +60,7 @@ struct xy_t {
 		xy_t r(*this);
 		return r /= n;
 	}
-	xy_t&operator/=(const xy_t& n) {
+	xy_t& operator/=(const xy_t& n) {
 		x /= n.x;
 		y /= n.y;
 		return *this;
@@ -70,7 +70,7 @@ struct xy_t {
 		return xy_t(*this) /= v;
 	}
 	template<typename T>
-	xy_t&operator/=(T&& v) {
+	xy_t& operator/=(T&& v) {
 		x /= v;
 		y /= v;
 		return *this;
@@ -113,13 +113,17 @@ struct rect_t {
 
 template<typename iter_T>
 struct iterators_range {
+private:
 	iter_T begin_it;
 	iter_T end_it;
+public:
 	iterators_range(iter_T begin_it, iter_T end_it) : begin_it(begin_it), end_it(end_it) {}
 
-	typedef iter_T iterator;
-
-	typedef typename iter_T::value_type value_type;
+	using iterator = iter_T;
+	
+	using value_type = typename std::iterator_traits<iterator>::value_type;
+	using pointer = typename std::iterator_traits<iterator>::pointer;
+	using reference = typename std::iterator_traits<iterator>::reference;
 
 	iterator begin() {
 		return begin_it;
@@ -130,6 +134,10 @@ struct iterators_range {
 	
 	bool empty() const {
 		return begin_it == end_it;
+	}
+	
+	reference front() {
+		return *begin_it;
 	}
 
 };
@@ -244,7 +252,7 @@ public:
 	using reference = typename std::iterator_traits<iterator_T>::reference;
 	using value_type = typename std::iterator_traits<iterator_T>::value_type;
 	using difference_type = typename std::iterator_traits<iterator_T>::difference_type;
-	using pointer = reference*;
+	using pointer = value_type*;
 
 	template<typename arg_iterator_T, typename arg_predicate_F>
 	filter_iterator(arg_iterator_T&& ptr, arg_iterator_T&& end_ptr, arg_predicate_F&& f) : ptr(std::forward<arg_iterator_T>(ptr)), end_ptr(std::forward<arg_iterator_T>(end_ptr)), f(std::forward<arg_predicate_F>(f)) {
@@ -358,8 +366,8 @@ using in_place_t = in_place_tag(&)();
 template<typename T>
 struct optional {
 private:
-	bool has_obj = false;
 	typename std::aligned_storage<sizeof(T), alignof(T)>::type buf;
+	bool has_obj = false;
 	T* ptr() {
 		return (T*)&buf;
 	}

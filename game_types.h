@@ -16,6 +16,9 @@ struct unit_id {
 	unit_id() = default;
 	explicit unit_id(uint16_t raw_value) : raw_value(raw_value) {}
 	explicit unit_id(size_t index, int generation) : raw_value((uint16_t)(index | generation << 11)) {}
+	bool operator==(const unit_id& n) const {
+		return raw_value == n.raw_value;
+	}
 	size_t index() const {
 		return raw_value & 0x7ff;
 	}
@@ -137,7 +140,6 @@ struct regions_t {
 		size_t group_index = 0;
 		a_vector<region*> walkable_neighbors;
 		a_vector<region*> non_walkable_neighbors;
-		int priority = 0;
 
 		mutable int pathfinder_flag = 0; // fixme: remove
 		mutable void* pathfinder_node = nullptr; // fixme: remove
@@ -298,7 +300,7 @@ struct bullet_t: flingy_t {
 		state_hit_near_target
 	};
 	int bullet_state;
-	target_t bullet_target;
+	unit_t* bullet_target;
 	const weapon_type_t* weapon_type;
 	int remaining_time;
 	int hit_flags;
@@ -348,7 +350,7 @@ struct path_t: link_base {
 };
 
 struct unit_t: flingy_t {
-
+	
 	unit_t() {}
 
 	enum status_flags_t : uint_fast32_t {
@@ -357,8 +359,8 @@ struct unit_t: flingy_t {
 		status_flag_flying = 4,
 		status_flag_8 = 8,
 		status_flag_burrowed = 0x10,
-		status_flag_in_unit = 0x20,
-		status_flag_40 = 0x40,
+		status_flag_in_bunker = 0x20,
+		status_flag_loaded = 0x40,
 		status_flag_requires_detector = 0x100,
 		status_flag_cloaked = 0x200,
 		status_flag_disabled = 0x400,
@@ -375,9 +377,10 @@ struct unit_t: flingy_t {
 		status_flag_no_collide = 0x200000,
 		status_flag_400000 = 0x400000,
 		status_flag_gathering = 0x800000,
-
+		status_flag_turret_walking = 0x1000000,
+		
 		status_flag_invincible = 0x4000000,
-		status_flag_holding_position = 0x8000000,
+		status_flag_ready_to_attack = 0x8000000,
 
 		status_flag_speed_upgrade = 0x10000000,
 		status_flag_cooldown_upgrade = 0x20000000,
@@ -477,15 +480,16 @@ struct unit_t: flingy_t {
 
 	struct building_t {
 		building_t() {}
+		
 		unit_t* addon;
-		unit_type_t* addon_build_type;
+		const unit_type_t* addon_build_type;
 		int upgrade_research_time;
-		tech_type_t* tech_type;
-		upgrade_type_t* upgrade_type;
+		const tech_type_t* researching_type;
+		const upgrade_type_t* upgrading_type;
 		int larva_timer;
-		int landing_timer;
+		bool is_landing;
 		int creep_timer;
-		int upgrade_level;
+		int upgrading_level;
 		target_t rally;
 		union {
 			struct {

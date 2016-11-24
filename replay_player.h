@@ -12,7 +12,7 @@ namespace data_loading {
 struct crc32 {
 	std::array<uint32_t, 256> table;
 	crc32() {
-		for (size_t i = 0; i != 256; ++i) {
+		for (uint32_t i = 0; i != 256; ++i) {
 			uint32_t v = i;
 			for (size_t b = 0; b != 8; ++b) {
 				v = (v >> 1) ^ (v & 1 ? 0xedb88320 : 0);
@@ -134,7 +134,7 @@ struct replay_player: actions_player {
 		gir.get<uint8_t>(); // resource type
 		gir.get<uint8_t>(); // use standard unit stats
 		gir.get<uint8_t>(); // fog of war enabled
-		gir.get<uint8_t>(); // ums units enabled
+		auto create_initial_units = gir.get<uint8_t>();
 		gir.get<uint8_t>(); // use fixed positions ?
 		gir.get<uint8_t>(); // restriction flags ?
 		gir.get<uint8_t>(); // allies enabled
@@ -173,7 +173,6 @@ struct replay_player: actions_player {
 		
 		actions_data_buffer.resize(r.template get<uint32_t>());
 		r.get_bytes(actions_data_buffer.data(), actions_data_buffer.size());
-		set_actions_data_buffer();
 		
 		a_vector<uint8_t> map_buffer;
 		map_buffer.resize(r.template get<uint32_t>());
@@ -181,6 +180,7 @@ struct replay_player: actions_player {
 		
 		game_load_functions game_load_funcs(st());
 		game_load_funcs.load_map_data(map_buffer.data(), map_buffer.size(), [&]() {
+			game_load_funcs.setup_info.use_map_settings = create_initial_units == 0;
 			for (size_t i = 0; i != 12; ++i) {
 				st().players[i].controller = slot_controller[i];
 				st().players[i].race = (race)slot_race[i];
