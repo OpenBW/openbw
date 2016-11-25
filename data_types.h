@@ -92,9 +92,9 @@ struct unit_type_t {
 		flag_powerup = 0x800,
 		flag_resource_depot = 0x1000,
 		flag_resource = 0x2000,
-		
+		flag_robotic = 0x4000,
 		flag_detector = 0x8000,
-		
+		flag_organic = 0x10000,
 		flag_requires_creep = 0x20000,
 
 		flag_requires_psionic_matrix = 0x80000,

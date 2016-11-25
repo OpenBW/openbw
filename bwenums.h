@@ -386,7 +386,7 @@ enum struct Orders : int {
 	StayInRange,
 	TurretAttack,
 	Nothing,
-	Unused_24,
+	NothingWait,
 	DroneStartBuild,
 	DroneBuild,
 	CastInfestation,

@@ -7,10 +7,10 @@ namespace bwgame {
 
 struct action_state {
 	std::array<int, 12> player_id{};
-	
+
 	size_t actions_data_position = 0;
 	int next_action_frame = 0;
-	
+
 	std::array<static_vector<unit_t*, 12>, 8> selection{};
 	std::array<std::array<static_vector<unit_id, 12>, 10>, 8> control_groups{};
 };
@@ -18,7 +18,7 @@ struct action_state {
 struct action_functions: state_functions {
 	action_state& action_st;
 	explicit action_functions(state& st, action_state& action_st) : state_functions(st), action_st(action_st) {}
-	
+
 	bool unit_can_be_multi_selected(const unit_t* u) const {
 		if (ut_building(u)) return false;
 		if (ut_flag(u, (unit_type_t::flags_t)0x800)) return false;
@@ -37,13 +37,13 @@ struct action_functions: state_functions {
 		if (tid == UnitTypes::Spell_Disruption_Web) return false;
 		return true;
 	}
-	
+
 	auto selected_units(int owner) const {
 		return make_filter_range(action_st.selection.at(owner), [this](unit_t* u) {
 			return u && !unit_dead(u);
 		});
 	}
-	
+
 	auto control_group(int owner, size_t group_n) const {
 		return make_filter_range(make_transform_range(action_st.control_groups.at(owner).at(group_n), [this](unit_id u) {
 			return get_unit(u);
@@ -51,14 +51,14 @@ struct action_functions: state_functions {
 			return u != nullptr;
 		});
 	}
-	
+
 	unit_t* get_first_selected_unit(int owner) const {
 		for (unit_t* u : selected_units(owner)) {
 			return u;
 		}
 		return nullptr;
 	}
-	
+
 	unit_t* get_single_selected_unit(int owner) const {
 		auto sel = selected_units(owner);
 		if (sel.empty()) return nullptr;
@@ -66,7 +66,7 @@ struct action_functions: state_functions {
 		if (std::next(i) != sel.end()) return nullptr;
 		return *i;
 	}
-	
+
 	virtual void on_unit_deselect(unit_t* u) override final {
 		for (size_t i = 0; i != 8; ++i) {
 			auto& selection = action_st.selection.at(i);
@@ -74,7 +74,7 @@ struct action_functions: state_functions {
 			if (it != selection.end()) selection.erase(it);
 		}
 	}
-	
+
 	const order_type_t* get_default_gather_order(const unit_t* u, const unit_t* target) const {
 		if (ut_flag(target, (unit_type_t::flags_t)0x800)) return get_order_type(Orders::Move);
 		if (unit_is_mineral_field(target)) {
@@ -89,7 +89,7 @@ struct action_functions: state_functions {
 			else return nullptr;
 		} else return nullptr;
 	}
-	
+
 	const order_type_t* get_default_order(size_t action, const unit_t* u, xy pos, const unit_t* target, const unit_type_t* target_unit_type) const {
 		const order_type_t* order;
 		switch (action) {
@@ -152,7 +152,7 @@ struct action_functions: state_functions {
 		}
 		return nullptr;
 	}
-	
+
 	struct group_move_t {
 		xy original_target_pos;
 		xy target_pos;
@@ -160,12 +160,12 @@ struct action_functions: state_functions {
 		bool has_move_offset;
 		bool target_is_in_unit_bounds;
 	};
-	
+
 	void calc_group_move(group_move_t& g, int owner, xy target_pos, bool can_be_obstructed) {
 		g.original_target_pos = target_pos;
 		g.has_move_offset = false;
 		g.target_is_in_unit_bounds = false;
-		
+
 		rect area{{std::numeric_limits<int>::max(), std::numeric_limits<int>::max()}, {0, 0}};
 		bool any_collision_enabled_units = false;
 		size_t n_units = 0;
@@ -185,7 +185,7 @@ struct action_functions: state_functions {
 			units_area += w * h;
 		}
 		if (n_units == 0) return;
-		
+
 		if (any_collision_enabled_units && can_be_obstructed) {
 			auto find_target = [&](rect bb, xy source_pos) {
 				auto* source_region = get_region_at(source_pos);
@@ -233,10 +233,10 @@ struct action_functions: state_functions {
 				}
 			}
 		}
-		
+
 		g.target_pos = target_pos;
 	}
-	
+
 	xy get_group_move_pos(const unit_t* u, xy pos, const group_move_t& g) const {
 		xy target_pos = u->pathing_flags & 1 ? g.target_pos : g.original_target_pos;
 		if (g.target_is_in_unit_bounds) {
@@ -257,7 +257,7 @@ struct action_functions: state_functions {
 				pos.y = u->sprite->position.y + g.move_offset.y;
 			}
 		}
-		
+
 		pos = restrict_move_target_to_valid_bounds(u, pos);
 		if (~u->pathing_flags & 1) return pos;
 		auto* source_region = get_region_at(target_pos);
@@ -284,7 +284,7 @@ struct action_functions: state_functions {
 		}
 		return target_pos;
 	}
-	
+
 	template<typename units_T>
 	bool action_select(int owner, units_T&& units) {
 		auto& selection = action_st.selection.at(owner);
@@ -303,11 +303,11 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
-	
+
 	bool action_select(int owner, unit_t* u) {
 		return action_select(owner, std::array<unit_t*, 1>{u});
 	}
-	
+
 	template<typename units_T>
 	bool action_shift_select(int owner, units_T&& units) {
 		auto& selection = action_st.selection.at(owner);
@@ -325,11 +325,11 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
-	
+
 	bool action_shift_select(int owner, unit_t* u) {
 		return action_shift_select(owner, std::array<unit_t*, 1>{u});
 	}
-	
+
 	template<typename units_T>
 	bool action_deselect(int owner, units_T&& units) {
 		auto& selection = action_st.selection.at(owner);
@@ -345,11 +345,11 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
-	
+
 	bool action_deselect(int owner, unit_t* u) {
 		return action_deselect(owner, std::array<unit_t*, 1>{u});
 	}
-	
+
 	bool action_train(int owner, const unit_type_t* unit_type) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
@@ -361,7 +361,7 @@ struct action_functions: state_functions {
 		}
 		return true;
 	}
-	
+
 	bool action_build(int owner, const order_type_t* order_type, const unit_type_t* unit_type, xy_t<size_t> tile_pos) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
@@ -385,7 +385,7 @@ struct action_functions: state_functions {
 		}
 		return true;
 	}
-	
+
 	bool action_default_order(int owner, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
 		if (!is_in_map_bounds(pos)) return false;
 		if (target) target_unit_type = nullptr;
@@ -464,12 +464,12 @@ struct action_functions: state_functions {
 						}
 					}
 				}
-				
+
 			}
 		}
 		return retval;
 	}
-	
+
 	bool action_order(int owner, const order_type_t* order, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
 		if (!is_in_map_bounds(pos)) return false;
 		switch (order->id) {
@@ -577,7 +577,7 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
-	
+
 	bool action_stop(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
@@ -588,14 +588,14 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
-	
+
 	bool action_cancel_building_unit(int owner) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u || u->owner != owner) return false;
 		cancel_building_unit(u);
 		return true;
 	}
-	
+
 	bool action_cancel_build_queue(int owner, size_t slot) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u || u->owner != owner) return false;
@@ -613,7 +613,7 @@ struct action_functions: state_functions {
 		cancel_build_queue(u, slot);
 		return true;
 	}
-	
+
 	bool action_control_group(int owner, size_t group_n, int subaction) {
 		bool retval = false;
 		if (subaction == 1) {
@@ -658,7 +658,7 @@ struct action_functions: state_functions {
 		} else xcept("action_control_group: unknown subaction %d", subaction);
 		return retval;
 	}
-	
+
 	bool action_unload_all(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
@@ -668,7 +668,13 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
-	
+
+	bool action_unload(int owner, unit_t* target) {
+		if (target->owner != owner) return false;
+		if (!target->connected_unit || !u_loaded(target)) return false;
+		return unit_unload(target);
+	}
+
 	bool action_liftoff(int owner, xy pos) {
 		if (!is_in_map_bounds(pos)) return false;
 		unit_t* u = get_single_selected_unit(owner);
@@ -679,7 +685,7 @@ struct action_functions: state_functions {
 		set_queued_order(u, false, u->unit_type->return_to_idle, pos - xy(0, 42));
 		return true;
 	}
-	
+
 	bool action_research(int owner, const tech_type_t* tech) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
@@ -694,7 +700,7 @@ struct action_functions: state_functions {
 		set_unit_order(u, get_order_type(Orders::ResearchTech));
 		return true;
 	}
-	
+
 	bool action_cancel_research(int owner) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u || u->owner != owner) return false;
@@ -704,7 +710,7 @@ struct action_functions: state_functions {
 		cancel_research(u);
 		return true;
 	}
-	
+
 	bool action_upgrade(int owner, const upgrade_type_t* upgrade) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
@@ -720,7 +726,7 @@ struct action_functions: state_functions {
 		set_unit_order(u, get_order_type(Orders::Upgrade));
 		return true;
 	}
-	
+
 	bool action_cancel_upgrade(int owner) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u || u->owner != owner) return false;
@@ -730,7 +736,31 @@ struct action_functions: state_functions {
 		cancel_upgrade(u);
 		return true;
 	}
-	
+
+	bool action_unsiege(int owner, bool queue) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (!unit_is_sieged_tank(u)) continue;
+			if (u->order_type->id == Orders::Unsieging) continue;
+			if (!unit_can_use_tech(u, get_tech_type(TechTypes::Tank_Siege_Mode))) continue;
+			issue_order(u, queue, get_order_type(Orders::Unsieging), {});
+			retval = true;
+		}
+		return retval;
+	}
+
+	bool action_siege(int owner, bool queue) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (!unit_is_unsieged_tank(u)) continue;
+			if (u->order_type->id == Orders::Sieging) continue;
+			if (!unit_can_use_tech(u, get_tech_type(TechTypes::Tank_Siege_Mode))) continue;
+			issue_order(u, queue, get_order_type(Orders::Sieging), {});
+			retval = true;
+		}
+		return retval;
+	}
+
 	template<typename reader_T>
 	bool read_action_select(int owner, reader_T&& r) {
 		size_t n = r.template get<uint8_t>();
@@ -742,7 +772,7 @@ struct action_functions: state_functions {
 		}
 		return action_select(owner, units);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_shift_select(int owner, reader_T&& r) {
 		size_t n = r.template get<uint8_t>();
@@ -754,7 +784,7 @@ struct action_functions: state_functions {
 		}
 		return action_shift_select(owner, units);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_deselect(int owner, reader_T&& r) {
 		size_t n = r.template get<uint8_t>();
@@ -766,13 +796,13 @@ struct action_functions: state_functions {
 		}
 		return action_deselect(owner, units);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_train(int owner, reader_T&& r) {
 		auto* unit_type = get_unit_type((UnitTypes)r.template get<uint16_t>());
 		return action_train(owner, unit_type);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_default_order(int owner, reader_T&& r) {
 		int x = r.template get<int16_t>();
@@ -783,7 +813,7 @@ struct action_functions: state_functions {
 		bool queue = r.template get<uint8_t>() != 0;
 		return action_default_order(owner, {x, y}, target, target_unit_type, queue);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_player_leave(int owner, reader_T&& r) {
 		(void)owner;
@@ -791,7 +821,7 @@ struct action_functions: state_functions {
 		(void)v;
 		return true;
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_build(int owner, reader_T&& r) {
 		auto* order_type = get_order_type((Orders)r.template get<uint8_t>());
@@ -800,13 +830,13 @@ struct action_functions: state_functions {
 		auto* unit_type = get_unit_type((UnitTypes)r.template get<uint16_t>());
 		return action_build(owner, order_type, unit_type, {tile_x, tile_y});
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_stop(int owner, reader_T&& r) {
 		bool queue = r.template get<uint8_t>() != 0;
 		return action_stop(owner, queue);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_order(int owner, reader_T&& r) {
 		int x = r.template get<int16_t>();
@@ -819,18 +849,18 @@ struct action_functions: state_functions {
 		bool queue = r.template get<uint8_t>() != 0;
 		return action_order(owner, order_type, {x, y}, target, target_unit_type, queue);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_cancel_building_unit(int owner, reader_T&& r) {
 		return action_cancel_building_unit(owner);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_cancel_build_queue(int owner, reader_T&& r) {
 		size_t slot = r.template get<uint16_t>();
 		return action_cancel_build_queue(owner, slot);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_control_group(int owner, reader_T&& r) {
 		int subaction = r.template get<uint8_t>();
@@ -838,42 +868,60 @@ struct action_functions: state_functions {
 		if (group_n > 10) return false;
 		return action_control_group(owner, group_n, subaction);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_unload_all(int owner, reader_T&& r) {
 		bool queue = r.template get<uint8_t>() != 0;
 		return action_unload_all(owner, queue);
 	}
-	
+
+	template<typename reader_T>
+	bool read_action_unload(int owner, reader_T&& r) {
+		unit_t* target = get_unit(unit_id(r.template get<uint16_t>()));
+		return action_unload(owner, target);
+	}
+
 	template<typename reader_T>
 	bool read_action_liftoff(int owner, reader_T&& r) {
 		int x = r.template get<int16_t>();
 		int y = r.template get<int16_t>();
 		return action_liftoff(owner, xy(x, y));
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_research(int owner, reader_T&& r) {
 		const tech_type_t* tech = get_tech_type((TechTypes)r.template get<uint8_t>());
 		return action_research(owner, tech);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_cancel_research(int owner, reader_T&& r) {
 		return action_cancel_research(owner);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_upgrade(int owner, reader_T&& r) {
 		const upgrade_type_t* upgrade = get_upgrade_type((UpgradeTypes)r.template get<uint8_t>());
 		return action_upgrade(owner, upgrade);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_cancel_upgrade(int owner, reader_T&& r) {
 		return action_cancel_upgrade(owner);
 	}
-	
+
+	template<typename reader_T>
+	bool read_action_unsiege(int owner, reader_T&& r) {
+		bool queue = r.template get<uint8_t>() != 0;
+		return action_unsiege(owner, queue);
+	}
+
+	template<typename reader_T>
+	bool read_action_siege(int owner, reader_T&& r) {
+		bool queue = r.template get<uint8_t>() != 0;
+		return action_siege(owner, queue);
+	}
+
 	template<typename reader_T>
 	bool read_action(reader_T&& r) {
 		int player_id = r.template get<uint8_t>();
@@ -904,8 +952,14 @@ struct action_functions: state_functions {
 			return read_action_train(owner, r);
 		case 32:
 			return read_action_cancel_build_queue(owner, r);
+		case 37:
+			return read_action_unsiege(owner, r);
+		case 38:
+			return read_action_siege(owner, r);
 		case 40:
 			return read_action_unload_all(owner, r);
+		case 41:
+			return read_action_unload(owner, r);
 		case 47:
 			return read_action_liftoff(owner, r);
 		case 48:
@@ -923,12 +977,12 @@ struct action_functions: state_functions {
 		}
 		return false;
 	}
-	
+
 	bool read_action(uint8_t* data, size_t data_size) {
 		data_loading::data_reader_le r(data, data + data_size);
 		return read_action(r);
 	}
-	
+
 	void execute_actions(uint8_t* actions_data_begin, uint8_t* actions_data_end) {
 		if (st.current_frame != action_st.next_action_frame) return;
 		while (action_st.actions_data_position != size_t(actions_data_end - actions_data_begin)) {
@@ -948,7 +1002,7 @@ struct action_functions: state_functions {
 			action_st.actions_data_position = end - actions_data_begin;
 		}
 	}
-	
+
 };
 
 struct actions_player {
@@ -959,28 +1013,28 @@ public:
 	a_vector<uint8_t> actions_data_buffer;
 	actions_player() = default;
 	explicit actions_player(state& st) : opt_funcs(in_place, st, action_st) {}
-	
+
 	void set_st(state& st) {
 		opt_funcs.emplace(st, action_st);
 	}
-	
+
 	void next_frame() {
 		if (!opt_funcs) xcept("actions_player: not initialized");
 		execute_actions();
 		funcs().next_frame();
 	}
-	
+
 	void execute_actions() {
 		funcs().execute_actions(actions_data_buffer.data(), actions_data_buffer.data() + actions_data_buffer.size());
 	}
-	
+
 	action_functions& funcs() {
 		return *opt_funcs;
 	}
 	state& st() {
 		return funcs().st;
 	}
-	
+
 };
 
 }
