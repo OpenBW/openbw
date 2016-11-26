@@ -124,6 +124,10 @@ struct action_functions: state_functions {
 				if (unit_is_queen(u) && target_unit_type) return get_order_type(Orders::RightClickAction);
 				else return get_order_type(Orders::Move);
 			}
+		case 3:
+			if (!target || unit_is_special_beacon(target) || ut_powerup(target)) return u->unit_type->return_to_idle;
+			else if (unit_target_is_enemy(u, target)) return get_order_type(Orders::Attack1);
+			else return u->unit_type->return_to_idle;
 		case 5:
 			if (!target) return get_default_order(1, u, pos, target, target_unit_type);
 			order = get_default_gather_order(u, target);
@@ -475,7 +479,7 @@ struct action_functions: state_functions {
 		switch (order->id) {
 		case Orders::Die:
 		case Orders::InfestedCommandCenter:
-		case Orders::VultureMine:
+		case Orders::SpiderMine:
 		case Orders::DroneStartBuild:
 		case Orders::InfestingCommandCenter:
 		case Orders::PlaceBuilding:
@@ -509,7 +513,7 @@ struct action_functions: state_functions {
 			if (order->tech_type == TechTypes::None) {
 				if (!unit_can_receive_order(u, order, owner)) continue;
 			} else {
-				xcept("action_order: fixme tech type");
+				if (!unit_can_use_tech(u, get_tech_type(order->tech_type), owner)) continue;
 			}
 			if (u == target) {
 				if (!unit_order_can_target_self(u, order)) continue;
@@ -921,6 +925,17 @@ struct action_functions: state_functions {
 		bool queue = r.template get<uint8_t>() != 0;
 		return action_siege(owner, queue);
 	}
+	
+	template<typename reader_T>
+	bool read_action_chat(int owner, reader_T&& r) {
+		auto buf = r.template get<std::array<uint8_t, 81>>();
+		a_string str;
+		for (auto& v : buf) {
+			if (v == 0) break;
+			if (v >= 32) str += (char)v;
+		}
+		return true;
+	}
 
 	template<typename reader_T>
 	bool read_action(reader_T&& r) {
@@ -972,6 +987,8 @@ struct action_functions: state_functions {
 			return read_action_cancel_upgrade(owner, r);
 		case 87:
 			return read_action_player_leave(owner, r);
+		case 92:
+			return read_action_chat(owner, r);
 		default:
 			xcept("execute_action: unknown action %d", action_id);
 		}

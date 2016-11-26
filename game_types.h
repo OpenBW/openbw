@@ -361,10 +361,11 @@ struct unit_t: flingy_t {
 		status_flag_burrowed = 0x10,
 		status_flag_in_bunker = 0x20,
 		status_flag_loaded = 0x40,
+		
 		status_flag_requires_detector = 0x100,
 		status_flag_cloaked = 0x200,
 		status_flag_disabled = 0x400,
-
+		status_flag_800 = 0x800,
 		status_flag_order_not_interruptible = 0x1000,
 		status_flag_iscript_nobrk = 0x2000,
 
@@ -419,7 +420,7 @@ struct unit_t: flingy_t {
 	int last_attacking_player;
 	int secondary_order_timer;
 	int user_action_flags;
-	bool is_cloaked;
+	int cloak_counter;
 	int movement_state;
 	static_vector<const unit_type_t*, 5> build_queue;
 	fp8 energy;
@@ -526,7 +527,7 @@ struct unit_t: flingy_t {
 	int secondary_order_unk_a;
 	int secondary_order_unk_b;
 	unit_t* current_build_unit;
-	std::pair<unit_t*, unit_t*> burrowed_unit_link;
+	std::pair<unit_t*, unit_t*> cloaked_unit_link;
 
 	path_t* path;
 	int pathing_collision_counter;
@@ -563,7 +564,7 @@ struct unit_t: flingy_t {
 	size_t repulse_index;
 
 	rect unit_finder_bounding_box;
-	bool unit_finder_visited;
+	std::array<bool, 4> unit_finder_visited;
 	size_t unit_finder_index_from;
 	size_t unit_finder_index_to;
 };

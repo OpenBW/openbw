@@ -382,7 +382,7 @@ enum struct Orders : int {
 	UnusedPowerup,
 	TowerGuard,
 	TowerAttack,
-	VultureMine,
+	SpiderMine,
 	StayInRange,
 	TurretAttack,
 	Nothing,
