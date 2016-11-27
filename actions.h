@@ -75,88 +75,6 @@ struct action_functions: state_functions {
 		}
 	}
 
-	const order_type_t* get_default_gather_order(const unit_t* u, const unit_t* target) const {
-		if (ut_flag(target, (unit_type_t::flags_t)0x800)) return get_order_type(Orders::Move);
-		if (unit_is_mineral_field(target)) {
-			if ((u->carrying_flags & ~3) == 0) return get_order_type(Orders::MoveToMinerals);
-			else return get_order_type(Orders::Move);
-		} else if (unit_can_gather_gas(u, target) || unit_is(target, UnitTypes::Resource_Vespene_Geyser)) {
-			if ((u->carrying_flags & ~3) == 0) return get_order_type(Orders::MoveToGas);
-			else return get_order_type(Orders::Move);
-		} else if (unit_is_active_resource_depot(target) && target->owner == u->owner) {
-			if (u->carrying_flags & 2) return get_order_type(Orders::ReturnMinerals);
-			else if (u->carrying_flags & 1) return get_order_type(Orders::ReturnGas);
-			else return nullptr;
-		} else return nullptr;
-	}
-
-	const order_type_t* get_default_order(size_t action, const unit_t* u, xy pos, const unit_t* target, const unit_type_t* target_unit_type) const {
-		const order_type_t* order;
-		switch (action) {
-		case 0:
-			return nullptr;
-		case 1:
-			if (u_grounded_building(u)) return nullptr;
-			else if (target) {
-				if (unit_is_special_beacon(target) || ut_powerup(target)) return get_order_type(Orders::Move);
-				else if (unit_target_is_enemy(u, target)) return get_order_type(Orders::Attack1);
-				else if (unit_provides_space(target) && unit_can_load_target(target, u)) return get_order_type(Orders::EnterTransport);
-				else if (u_burrowed(u)) return get_order_type(Orders::Move);
-				else return get_order_type(Orders::Follow);
-			} else {
-				if (target_unit_type) return get_order_type(Orders::RightClickAction);
-				else return get_order_type(Orders::Move);
-			}
-		case 2:
-			if (u_grounded_building(u)) {
-				if (unit_is_factory(u)) {
-					if (target) return get_order_type(Orders::RallyPointUnit);
-					else return get_order_type(Orders::RallyPointTile);
-				} else return nullptr;
-			} else if (target) {
-				if (unit_provides_space(u) && unit_can_load_target(u, target)) return get_order_type(Orders::PickupTransport);
-				else if (unit_provides_space(target) && unit_can_load_target(target, u)) return get_order_type(Orders::EnterTransport);
-				else if (u_burrowed(target)) return get_order_type(Orders::Move);
-				else if (unit_is_queen(u) && !u_invincible(target) && unit_can_be_infested(target)) return get_order_type(Orders::CastInfestation);
-				else if (unit_is(u, UnitTypes::Terran_Medic)) return get_order_type(Orders::HealMove);
-				else return get_order_type(Orders::Follow);
-			} else {
-				if (unit_is_queen(u) && target_unit_type) return get_order_type(Orders::RightClickAction);
-				else return get_order_type(Orders::Move);
-			}
-		case 3:
-			if (!target || unit_is_special_beacon(target) || ut_powerup(target)) return u->unit_type->return_to_idle;
-			else if (unit_target_is_enemy(u, target)) return get_order_type(Orders::Attack1);
-			else return u->unit_type->return_to_idle;
-		case 5:
-			if (!target) return get_default_order(1, u, pos, target, target_unit_type);
-			order = get_default_gather_order(u, target);
-			if (order) return order;
-			if (u_grounded_building(target) && !u_completed(target)) {
-				if (target->owner == u->owner && unit_race(target) == race::terran) {
-					if (!ut_addon(target)) {
-						if (!target->connected_unit || target->connected_unit->order_target.unit != target) {
-							return get_order_type(Orders::ConstructingBuilding);
-						}
-					}
-				}
-			} else if (!unit_target_is_enemy(u, target)) {
-				bool can_enter = unit_provides_space(target) && unit_can_load_target(target, u);
-				if ((ut_building(target) || !can_enter) && unit_race(target) == race::terran && ut_mechanical(target) && u_completed(target) && target->hp < target->unit_type->hitpoints) {
-					return get_order_type(Orders::Repair);
-				} else if (can_enter) {
-					return get_order_type(Orders::EnterTransport);
-				}
-			}
-			return get_default_order(1, u, pos, target, target_unit_type);
-		case 6:
-			return nullptr;
-		default:
-			xcept("get_default_order: unknown action %u", action);
-		}
-		return nullptr;
-	}
-
 	struct group_move_t {
 		xy original_target_pos;
 		xy target_pos;
@@ -408,21 +326,7 @@ struct action_functions: state_functions {
 		bool has_calculated_group_move = false;
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
-			size_t action = 0;
-			if (u->unit_type->id == UnitTypes::Zerg_Lurker && u_burrowed(u)) {
-				action = 3;
-			} else {
-				action = u->unit_type->right_click_action;
-				if (action == 0 && u_grounded_building(u) && unit_is_factory(u)) {
-					action = 2;
-				}
-			}
-			if (u_hallucination(u)) {
-				if (action == 4 || action == 5) {
-					action = 1;
-				}
-			}
-			const order_type_t* order = get_default_order(action, u, pos, target, target_unit_type);
+			const order_type_t* order = get_default_order(default_action(u), u, pos, target, target_unit_type);
 			if (order) {
 				if (order->id == Orders::RallyPointUnit) {
 					if (unit_is_factory(u)) {
@@ -474,9 +378,9 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_order(int owner, const order_type_t* order, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
+	bool action_order(int owner, const order_type_t* input_order, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
 		if (!is_in_map_bounds(pos)) return false;
-		switch (order->id) {
+		switch (input_order->id) {
 		case Orders::Die:
 		case Orders::InfestedCommandCenter:
 		case Orders::SpiderMine:
@@ -505,11 +409,12 @@ struct action_functions: state_functions {
 		default:
 			break;
 		}
-		bool can_be_obstructed = order->can_be_obstructed;
+		bool can_be_obstructed = input_order->can_be_obstructed;
 		group_move_t g;
 		bool has_calculated_group_move = false;
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
+			const order_type_t* order = input_order;
 			if (order->tech_type == TechTypes::None) {
 				if (!unit_can_receive_order(u, order, owner)) continue;
 			} else {
@@ -674,6 +579,7 @@ struct action_functions: state_functions {
 	}
 
 	bool action_unload(int owner, unit_t* target) {
+		if (!target) return false;
 		if (target->owner != owner) return false;
 		if (!target->connected_unit || !u_loaded(target)) return false;
 		return unit_unload(target);
@@ -760,6 +666,36 @@ struct action_functions: state_functions {
 			if (u->order_type->id == Orders::Sieging) continue;
 			if (!unit_can_use_tech(u, get_tech_type(TechTypes::Tank_Siege_Mode))) continue;
 			issue_order(u, queue, get_order_type(Orders::Sieging), {});
+			retval = true;
+		}
+		return retval;
+	}
+	
+	bool action_return_cargo(int owner, bool queue) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			const order_type_t* order = nullptr;
+			if (u->carrying_flags & 2) order = get_order_type(Orders::ReturnMinerals);
+			else if (u->carrying_flags & 1) order = get_order_type(Orders::ReturnGas);
+			if (!order) continue;
+			if (!unit_can_receive_order(u, order, owner)) continue;
+			issue_order(u, queue, order, {});
+			retval = true;
+		}
+		return retval;
+	}
+	
+	bool action_hold_position(int owner, bool queue) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			const order_type_t* order = get_order_type(Orders::HoldPosition);
+			if (unit_is_carrier(u)) order = get_order_type(Orders::CarrierHoldPosition);
+			else if (unit_is_reaver(u)) order = get_order_type(Orders::ReaverHoldPosition);
+			else if (unit_is_queen(u)) order = get_order_type(Orders::QueenHoldPosition);
+			else if (unit_is(u, UnitTypes::Zerg_Scourge) || unit_is(u, UnitTypes::Zerg_Infested_Terran)) order = get_order_type(Orders::SuicideHoldPosition);
+			else if (unit_is(u, UnitTypes::Terran_Medic)) order = get_order_type(Orders::MedicHoldPosition);
+			if (!unit_can_receive_order(u, order, owner)) continue;
+			issue_order(u, queue, order, {});
 			retval = true;
 		}
 		return retval;
@@ -936,9 +872,23 @@ struct action_functions: state_functions {
 		}
 		return true;
 	}
+	
+	template<typename reader_T>
+	bool read_action_return_cargo(int owner, reader_T&& r) {
+		bool queue = r.template get<uint8_t>() != 0;
+		return action_return_cargo(owner, queue);
+	}
+	
+	template<typename reader_T>
+	bool read_action_hold_position(int owner, reader_T&& r) {
+		bool queue = r.template get<uint8_t>() != 0;
+		return action_hold_position(owner, queue);
+	}
+	
 
 	template<typename reader_T>
 	bool read_action(reader_T&& r) {
+		auto rs = make_thingy_setter(allow_random, true);
 		int player_id = r.template get<uint8_t>();
 		int action_id = r.template get<uint8_t>();
 		auto i = std::find(action_st.player_id.begin(), action_st.player_id.end(), player_id);
@@ -963,6 +913,8 @@ struct action_functions: state_functions {
 			return read_action_cancel_building_unit(owner, r);
 		case 26:
 			return read_action_stop(owner, r);
+		case 30:
+			return read_action_return_cargo(owner, r);
 		case 31:
 			return read_action_train(owner, r);
 		case 32:
@@ -975,6 +927,8 @@ struct action_functions: state_functions {
 			return read_action_unload_all(owner, r);
 		case 41:
 			return read_action_unload(owner, r);
+		case 43:
+			return read_action_hold_position(owner, r);
 		case 47:
 			return read_action_liftoff(owner, r);
 		case 48:
