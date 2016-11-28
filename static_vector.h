@@ -266,10 +266,10 @@ public:
 	explicit static_vector(size_type count, const value_type& value) {
 		resize(count, value);
 	}
-	static_vector(const static_vector&other) {
+	static_vector(const static_vector& other) {
 		m_assign(other);
 	}
-	static_vector(static_vector&&other) {
+	static_vector(static_vector&& other) {
 		m_assign(std::move(other));
 	}
 	~static_vector() {
@@ -292,14 +292,12 @@ public:
 		return *this;
 	}
 	reference at(size_type pos) {
-		pointer r = ptr_begin() + pos;
-		if (r >= ptr_end()) throw std::out_of_range("static_vector subscript out of range");
-		return *r;
+		if (pos >= size()) throw std::out_of_range("static_vector subscript out of range");
+		return *(ptr_begin() + pos);
 	}
 	const_reference at(size_type pos) const {
-		pointer r = ptr_begin() + pos;
-		if (r >= ptr_end()) throw std::out_of_range("static_vector subscript out of range");
-		return *r;
+		if (pos >= size()) throw std::out_of_range("static_vector subscript out of range");
+		return *(ptr_begin() + pos);
 	}
 	reference operator[](size_type pos) {
 		return *(ptr_begin() + pos);
@@ -377,23 +375,20 @@ public:
 		m_resize(0);
 	}
 	void push_back(const T& value) {
-		pointer new_end = ptr_end() + 1;
-		if (new_end > ptr_cap_end()) throw std::length_error("static_vector resized beyond capacity");
-		new (new_end - 1) value_type(value);
-		m_end = new_end;
+		if (size() == capacity()) throw std::length_error("static_vector resized beyond capacity");
+		new (ptr_end()) value_type(value);
+		m_end = ptr_end() + 1;
 	}
 	void push_back(T&& value) {
-		pointer new_end = ptr_end() + 1;
-		if (new_end > ptr_cap_end()) throw std::length_error("static_vector resized beyond capacity");
-		new (new_end - 1) value_type(std::move(value));
-		m_end = new_end;
+		if (size() == capacity()) throw std::length_error("static_vector resized beyond capacity");
+		new (ptr_end()) value_type(std::move(value));
+		m_end = ptr_end() + 1;
 	}
 	template<typename... args_T>
 	void emplace_back(args_T&&... args) {
-		pointer new_end = ptr_end() + 1;
-		if (new_end > ptr_cap_end()) throw std::length_error("static_vector resized beyond capacity");
-		new (new_end - 1) value_type(std::forward<args_T>(args)...);
-		m_end = new_end;
+		if (size() == capacity()) throw std::length_error("static_vector resized beyond capacity");
+		new (ptr_end()) value_type(std::forward<args_T>(args)...);
+		m_end = ptr_end() + 1;
 	}
 	void pop_back() {
 		m_destroy(ptr_end() - 1);
