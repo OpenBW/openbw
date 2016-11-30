@@ -6,6 +6,12 @@
 namespace bwgame {
 
 struct action_state {
+	action_state() = default;
+	action_state(action_state&&) = default;
+	action_state(const action_state&) = delete;
+	action_state& operator=(action_state&) = delete;
+	action_state& operator=(action_state&&) = default;
+	
 	std::array<int, 12> player_id{};
 
 	size_t actions_data_position = 0;
@@ -14,6 +20,22 @@ struct action_state {
 	std::array<static_vector<unit_t*, 12>, 8> selection{};
 	std::array<std::array<static_vector<unit_id, 12>, 10>, 8> control_groups{};
 };
+
+action_state copy_state(const action_state& action_st, const state& source_st, const state& dest_st) {
+	action_state r;
+	r.player_id = action_st.player_id;
+	r.actions_data_position = action_st.actions_data_position;
+	r.next_action_frame = action_st.next_action_frame;
+	r.selection = action_st.selection;
+	for (auto& v : r.selection) {
+		for (auto& v2 : v) {
+			size_t index = v2 - source_st.units.data();
+			v2 = const_cast<unit_t*>(dest_st.units.data() + index);
+		}
+	}
+	r.control_groups = action_st.control_groups;
+	return r;
+}
 
 struct action_functions: state_functions {
 	action_state& action_st;
@@ -972,38 +994,6 @@ struct action_functions: state_functions {
 			}
 			action_st.actions_data_position = end - actions_data_begin;
 		}
-	}
-
-};
-
-struct actions_player {
-private:
-	action_state action_st;
-	optional<action_functions> opt_funcs;
-public:
-	a_vector<uint8_t> actions_data_buffer;
-	actions_player() = default;
-	explicit actions_player(state& st) : opt_funcs(in_place, st, action_st) {}
-
-	void set_st(state& st) {
-		opt_funcs.emplace(st, action_st);
-	}
-
-	void next_frame() {
-		if (!opt_funcs) xcept("actions_player: not initialized");
-		execute_actions();
-		funcs().next_frame();
-	}
-
-	void execute_actions() {
-		funcs().execute_actions(actions_data_buffer.data(), actions_data_buffer.data() + actions_data_buffer.size());
-	}
-
-	action_functions& funcs() {
-		return *opt_funcs;
-	}
-	state& st() {
-		return funcs().st;
 	}
 
 };

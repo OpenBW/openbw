@@ -1,5 +1,5 @@
-#ifndef BWGAME_REPLAY_PLAYER_H
-#define BWGAME_REPLAY_PLAYER_H
+#ifndef BWGAME_REPLAY_H
+#define BWGAME_REPLAY_H
 
 #include "actions.h"
 #include "data_loading.h"
@@ -38,14 +38,14 @@ struct replay_file_reader {
 	}
 
 	void get_bytes(uint8_t* output, size_t output_size) {
-		uint32_t crc32_sum = r.get<uint32_t>();
-		size_t segments = r.get<uint32_t>();
+		uint32_t crc32_sum = r.template get<uint32_t>();
+		size_t segments = r.template get<uint32_t>();
 		
 		a_vector<uint8_t> compressed_data;
 		
 		size_t output_pos = 0;
 		for (size_t i = 0; i != segments; ++i) {
-			size_t segment_input_size = r.get<uint32_t>();
+			size_t segment_input_size = r.template get<uint32_t>();
 			
 			size_t segment_output_size = output_size - output_pos;
 			if (segment_output_size > 8192) segment_output_size = 8192;
@@ -80,11 +80,15 @@ auto make_replay_file_reader(base_reader_T& reader) {
 
 }
 
-struct replay_player: actions_player {
+struct replay_state {
+	a_vector<uint8_t> actions_data_buffer;
 	int end_frame = 0;
-	replay_player() = default;
-	explicit replay_player(state& st) : actions_player(st) {}
-	explicit replay_player(game_player& player) : actions_player(player.st()) {}
+};
+
+struct replay_functions: action_functions {
+	replay_state& replay_st;
+	explicit replay_functions(state& st, action_state& action_st, replay_state& replay_st) : action_functions(st, action_st), replay_st(replay_st) {}
+	
 	void load_replay_file(a_string filename, bool initial_processing = true) {
 		auto file_r = data_loading::file_reader<>(std::move(filename));
 		load_replay(data_loading::make_replay_file_reader(file_r), initial_processing);
@@ -163,45 +167,84 @@ struct replay_player: actions_player {
 			slot_force[i] = gir.get<uint8_t>(); // force
 			gir.get<std::array<char, 25>>(); // player name
 			
-			funcs().action_st.player_id[i] = slot_player_id[i];
+			action_st.player_id[i] = slot_player_id[i];
 		}
 		
 		gir.get<std::array<uint32_t, 8>>(); // player colors
 		gir.get<std::array<uint8_t, 8>>(); // player force ?
 		
-		end_frame = frame_count;
+		replay_st.end_frame = frame_count;
 		
-		actions_data_buffer.resize(r.template get<uint32_t>());
-		r.get_bytes(actions_data_buffer.data(), actions_data_buffer.size());
+		replay_st.actions_data_buffer.resize(r.template get<uint32_t>());
+		r.get_bytes(replay_st.actions_data_buffer.data(), replay_st.actions_data_buffer.size());
 		
 		a_vector<uint8_t> map_buffer;
 		map_buffer.resize(r.template get<uint32_t>());
 		r.get_bytes(map_buffer.data(), map_buffer.size());
 		
-		game_load_functions game_load_funcs(st());
+		game_load_functions game_load_funcs(st);
 		game_load_funcs.load_map_data(map_buffer.data(), map_buffer.size(), [&]() {
 			game_load_funcs.setup_info.use_map_settings = create_initial_units == 0;
 			for (size_t i = 0; i != 12; ++i) {
-				st().players[i].controller = slot_controller[i];
-				st().players[i].race = (race)slot_race[i];
-				st().players[i].force = slot_force[i];
+				st.players[i].controller = slot_controller[i];
+				st.players[i].race = (race)slot_race[i];
+				st.players[i].force = slot_force[i];
 			}
-			st().lcg_rand_state = random_seed;
+			st.lcg_rand_state = random_seed;
 		});
 		
 		if (initial_processing) {
-			funcs().process_frame();
-			funcs().process_frame();
+			process_frame();
+			process_frame();
 		}
 	}
 	
 	void next_frame() {
-		if (st().current_frame == end_frame) xcept("replay_player: attempt to play past end");
-		actions_player::next_frame();
+		if (st.current_frame == replay_st.end_frame) xcept("replay: attempt to play past end");
+		execute_actions(replay_st.actions_data_buffer.data(), replay_st.actions_data_buffer.data() + replay_st.actions_data_buffer.size());
+		state_functions::next_frame();
 	}
 	
 	bool is_done() {
-		return st().current_frame == end_frame;
+		return st.current_frame == replay_st.end_frame;
+	}
+	
+};
+
+struct replay_player: game_player {
+	action_state action_st;
+	replay_state replay_st;
+	optional<replay_functions> opt_funcs;
+	replay_player() = default;
+	replay_player(const game_player& n) {
+		set_st(n.st());
+	}
+	
+	void load_replay_file(a_string filename, bool initial_processing = true) {
+		auto file_r = data_loading::file_reader<>(std::move(filename));
+		load_replay(data_loading::make_replay_file_reader(file_r), initial_processing);
+	}
+	void load_replay_data(uint8_t* data, size_t data_size, bool initial_processing = true) {
+		load_replay(data_loading::data_reader_le(data, data + data_size), initial_processing);
+	}
+	void lazy_init() {
+		if (!opt_funcs) opt_funcs.emplace(st(), action_st, replay_st);
+	}
+
+	template<typename reader_T>
+	void load_replay(reader_T&& r, bool initial_processing = true) {
+		lazy_init();
+		opt_funcs->load_replay(r, initial_processing);
+	}
+	
+	void next_frame() {
+		lazy_init();
+		opt_funcs->next_frame();
+	}
+	
+	bool is_done() {
+		lazy_init();
+		return opt_funcs->is_done();
 	}
 	
 };
