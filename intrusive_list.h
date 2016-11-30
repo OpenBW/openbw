@@ -9,7 +9,10 @@ namespace bwgame {
 
 template<typename T, std::pair<T*, T*> T::* link_ptr>
 struct intrusive_list_member_link {
-	std::pair<T*, T*>* operator()(T* ptr) {
+	std::pair<T*, T*>* operator()(T* ptr) const {
+		return &(ptr->*link_ptr);
+	}
+	const std::pair<T*, T*>* operator()(const T* ptr) const {
 		return &(ptr->*link_ptr);
 	}
 };

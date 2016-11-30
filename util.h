@@ -443,7 +443,7 @@ public:
 		return ptr();
 	}
 	value_type* operator->() {
-		return ptr;
+		return ptr();
 	}
 	const value_type& operator*() const& {
 		return obj();

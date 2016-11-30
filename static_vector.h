@@ -203,12 +203,12 @@ private:
 		m_end = e;
 	}
 	void m_assign(const static_vector& other) {
-		pointer src_i = other.ptr_begin();
+		auto src_i = other.ptr_begin();
 		pointer dst_i = ptr_begin();
 		for (; dst_i != ptr_end() && src_i != other.ptr_end(); ++src_i, ++dst_i) {
 			*dst_i = *src_i;
 		}
-		pointer e = ptr_begin() + other.size();
+		auto e = ptr_begin() + other.size();
 		for (; src_i != other.ptr_end(); ++src_i, ++dst_i) {
 			try {
 				new (dst_i) value_type(*src_i);
@@ -223,12 +223,12 @@ private:
 	}
 	template<typename VT = value_type, typename std::enable_if<std::is_nothrow_move_constructible<VT>::value &&std::is_nothrow_move_assignable<VT>::value, int>::type = 0>
 	void m_assign(static_vector&& other) {
-		pointer src_i = other.ptr_begin();
+		auto src_i = other.ptr_begin();
 		pointer dst_i = ptr_begin();
 		for (; dst_i != ptr_end() && src_i != other.ptr_end(); ++src_i, ++dst_i) {
 			*dst_i = std::move(*src_i);
 		}
-		pointer e = ptr_begin() + other.size();
+		auto e = ptr_begin() + other.size();
 		for (; src_i != other.ptr_end(); ++src_i, ++dst_i) {
 			new (dst_i) value_type(std::move(*src_i));
 		}
