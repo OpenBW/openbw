@@ -252,10 +252,7 @@ struct file_reader {
 	template<typename T, bool little_endian = default_little_endian, typename std::enable_if<sizeof(T) == 1>::type* = nullptr>
 	a_vector<T> get_vec(size_t n) {
 		a_vector<T> r(n);
-		if (!fread(r.data(), n, 1, f)) {
-			if (feof(f)) xcept("file_reader: %s: attempt to read past end", filename);
-			xcept("file_reader: %s: read error", filename);
-		}
+		get_bytes((uint8_t*)(void*)r.data(), n * sizeof(T));
 		return r;
 	}
 
@@ -898,10 +895,11 @@ struct mpq_data {
 	}
 };
 
+template<typename file_reader_T = file_reader<>>
 struct mpq_file {
-	file_reader<> file;
-	paged_reader<file_reader<>> paged;
-	mpq_archive_reader<paged_reader<file_reader<>>> mpq;
+	file_reader_T file;
+	paged_reader<file_reader_T> paged;
+	mpq_archive_reader<paged_reader<file_reader_T>> mpq;
 	explicit mpq_file(a_string filename) : file(std::move(filename)), paged(file), mpq(paged) {}
 	void operator()(a_vector<uint8_t>& dst, a_string filename) {
 		auto file_r = mpq.open(std::move(filename));
@@ -912,8 +910,9 @@ struct mpq_file {
 	}
 };
 
+template<typename mpq_file_T = mpq_file<>>
 struct data_files_loader {
-	a_list<mpq_file> mpqs;
+	a_list<mpq_file_T> mpqs;
 
 	void add_mpq_file(a_string filename) {
 		mpqs.emplace_back(std::move(filename));
@@ -930,9 +929,10 @@ struct data_files_loader {
 	}
 };
 
-static inline data_files_loader data_files_directory(a_string path) {
+template<typename data_files_loader_T = data_files_loader<>>
+data_files_loader_T data_files_directory(a_string path) {
 	if (!path.empty() && path[path.size() - 1] != '/' && path[path.size() - 1] != '\\') path += '/';
-	data_files_loader r;
+	data_files_loader_T r;
 	r.add_mpq_file(path + "Patch_rt.mpq");
 	r.add_mpq_file(path + "BrooDat.mpq");
 	r.add_mpq_file(path + "StarDat.mpq");
@@ -999,7 +999,7 @@ struct data_type_cast_helper<fp1, uint8_t> {
 template<typename T, typename from_T>
 struct data_type_cast_helper<type_id<T>, from_T> {
 	type_id<T> operator()(from_T v) {
-		return type_id<T>(data_type_cast<decltype(T::id), from_T>(v));
+		return type_id<T>(data_type_cast<decltype(std::declval<T>().id), from_T>(v));
 	}
 };
 

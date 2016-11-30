@@ -220,6 +220,7 @@ struct state_base_copyable {
 		int controller = controller_inactive;
 		race race = race::zerg;
 		int force = 0;
+		int color = 0;
 	};
 	std::array<player_t, 12> players;
 
@@ -573,6 +574,9 @@ struct state_functions {
 
 	bool us_hidden(const thingy_t* u) const {
 		return us_flag(u, sprite_t::flag_hidden);
+	}
+	bool s_hidden(const sprite_t* u) const {
+		return s_flag(u, sprite_t::flag_hidden);
 	}
 
 	const unit_type_t* get_unit_type(UnitTypes id) const {
@@ -1317,6 +1321,10 @@ struct state_functions {
 
 	bool unit_is_tank(unit_type_autocast ut) const {
 		return unit_is_sieged_tank(ut) || unit_is_unsieged_tank(ut);
+	}
+	
+	bool unit_is_trap(unit_type_autocast ut) const {
+		return ut->id >= UnitTypes::Special_Floor_Missile_Trap && ut->id <= UnitTypes::Special_Right_Wall_Flame_Trap;
 	}
 
 	bool unit_target_is_undetected(const unit_t* u, const unit_t* target) const {
@@ -2775,6 +2783,7 @@ struct state_functions {
 			auto ius = make_thingy_setter(iscript_unit, u->subunit);
 			if (!unit_type->turret_unit_type) xcept("unit_type->turret_unit_type is null");
 			reinitialize_unit_type(u->subunit, unit_type->turret_unit_type);
+			u->subunit->sprite->flags |= sprite_t::flag_turret;
 			if (requires_detector || cloaked) {
 				set_sprite_cloak_modifier(u->subunit->sprite, requires_detector, cloaked, data1, data2);
 			}
@@ -3144,7 +3153,7 @@ struct state_functions {
 					t->sprite->elevation_level = sprite->elevation_level + 1;
 					if (!us_hidden(t)) set_sprite_visibility(t->sprite, tile_visibility(t->sprite->position));
 					if (flipped) {
-						for (auto* image : ptr(sprite->images)) {
+						for (auto* image : ptr(t->sprite->images)) {
 							set_image_frame_index_offset(image, image->frame_index_offset, true);
 						}
 					}
@@ -12497,7 +12506,7 @@ struct state_functions {
 		}
 		u->detected_flags = 0xffffffff;
 		if (ut_turret(u)) {
-			u->sprite->flags |= 0x10;
+			u->sprite->flags |= sprite_t::flag_turret;
 		} else {
 			if (!us_hidden(u)) {
 				refresh_unit_vision(u);
@@ -12653,7 +12662,7 @@ struct state_functions {
 				if (dir == 32) dir = lcg_rand(36) % 32;
 				set_unit_heading(u, 8_dir * dir);
 			}
-			if (u->unit_type->id >= UnitTypes::Special_Floor_Missile_Trap && u->unit_type->id <= UnitTypes::Special_Right_Wall_Flame_Trap) {
+			if (unit_is_trap(u)) {
 				show_unit(u);
 			}
 		}
@@ -13343,14 +13352,7 @@ struct state_functions {
 				}
 			}
 		}
-		bool is_trap = false;
-		if (unit_is(u, UnitTypes::Special_Floor_Missile_Trap)) is_trap = true;
-		if (unit_is(u, UnitTypes::Special_Floor_Gun_Trap)) is_trap = true;
-		if (unit_is(u, UnitTypes::Special_Wall_Missile_Trap)) is_trap = true;
-		if (unit_is(u, UnitTypes::Special_Wall_Flame_Trap)) is_trap = true;
-		if (unit_is(u, UnitTypes::Special_Right_Wall_Missile_Trap)) is_trap = true;
-		if (unit_is(u, UnitTypes::Special_Right_Wall_Flame_Trap)) is_trap = true;
-		if (is_trap) {
+		if (unit_is_trap(u)) {
 			u->status_flags |= unit_t::status_flag_cloaked | unit_t::status_flag_requires_detector;
 			u->detected_flags = 0x80000000;
 			u->secondary_order_timer = 0;
@@ -14027,7 +14029,7 @@ struct state_functions {
 			if (u_hallucination(u)) return false;
 			return true;
 		case Orders::TowerAttack:
-			if (!unit_is(u, UnitTypes::Terran_Missile_Turret) && !unit_is(u, UnitTypes::Zerg_Spore_Colony) && !unit_is(u, UnitTypes::Zerg_Sunken_Colony) && !unit_is(u, UnitTypes::Protoss_Photon_Cannon) && !unit_is(u, UnitTypes::Special_Floor_Gun_Trap) && !unit_is(u, UnitTypes::Special_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Wall_Flame_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Flame_Trap)) return false;
+			if (!unit_is(u, UnitTypes::Terran_Missile_Turret) && !unit_is(u, UnitTypes::Zerg_Spore_Colony) && !unit_is(u, UnitTypes::Zerg_Sunken_Colony) && !unit_is(u, UnitTypes::Protoss_Photon_Cannon) && !unit_is_trap(u)) return false;
 			if (u_hallucination(u)) return false;
 			return true;
 		case Orders::TurretAttack:
@@ -14282,7 +14284,7 @@ struct state_functions {
 			if (!unit_is_critter(u)) return false;
 			return true;
 		case Orders::HiddenGun:
-			if (!unit_is(u, UnitTypes::Special_Floor_Gun_Trap) && !unit_is(u, UnitTypes::Special_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Wall_Flame_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Flame_Trap)) return false;
+			if (!unit_is_trap(u)) return false;
 			if (u_hallucination(u)) return false;
 			return true;
 		case Orders::OpenDoor:
@@ -14294,11 +14296,11 @@ struct state_functions {
 			if (u_hallucination(u)) return false;
 			return true;
 		case Orders::HideTrap:
-			if (!unit_is(u, UnitTypes::Special_Floor_Missile_Trap) && !unit_is(u, UnitTypes::Special_Floor_Gun_Trap) && !unit_is(u, UnitTypes::Special_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Wall_Flame_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Flame_Trap)) return false;
+			if (!unit_is_trap(u)) return false;
 			if (u_hallucination(u)) return false;
 			return true;
 		case Orders::RevealTrap:
-			if (!unit_is(u, UnitTypes::Special_Floor_Missile_Trap) && !unit_is(u, UnitTypes::Special_Floor_Gun_Trap) && !unit_is(u, UnitTypes::Special_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Wall_Flame_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Missile_Trap) && !unit_is(u, UnitTypes::Special_Right_Wall_Flame_Trap)) return false;
+			if (!unit_is_trap(u)) return false;
 			if (u_hallucination(u)) return false;
 			return true;
 		case Orders::Medic:
@@ -14940,6 +14942,204 @@ struct state_functions {
 	}
 
 };
+
+struct state_copier {
+	const state& st;
+	state& r;
+	state_functions funcs;
+	state_copier(const state&st, state& r) : st(st), r(r), funcs(r) {}
+	
+	std::array<bool, 1700> unit_copied{};
+	std::array<bool, 100> bullet_copied{};
+	std::array<bool, 2500> sprite_copied{};
+	std::array<bool, 5000> image_copied{};
+	std::array<bool, 2000> order_copied{};
+	unit_t* unit(const unit_t* v) {
+		size_t index = v - st.units.data();
+		auto* u = &r.units[index];
+		if (!unit_copied[index]) {
+			unit_copied[index] = true;
+			memcpy(u, v, sizeof(*v));
+			remap_sprite(u->sprite);
+			remap_unit(u->move_target.unit);
+			remap_unit(u->order_target.unit);
+			remap_unit(u->subunit);
+			assemble(u->order_queue, v->order_queue, &state_copier::order);
+			remap_unit(u->auto_target_unit);
+			remap_unit(u->connected_unit);
+			new (&u->build_queue) static_vector<const unit_type_t*, 5>(v->build_queue);
+			if (u->unit_type) {
+				if (funcs.unit_is(u, UnitTypes::Protoss_Interceptor) || funcs.unit_is(u, UnitTypes::Protoss_Scarab)) {
+					remap_unit(u->fighter.parent);
+				} else if (funcs.unit_is_carrier(u)) {
+					assemble(u->carrier.inside_units, v->carrier.inside_units, &state_copier::unit);
+					assemble(u->carrier.outside_units, v->carrier.outside_units, &state_copier::unit);
+				} else if (funcs.unit_is_reaver(u)) {
+					assemble(u->reaver.inside_units, v->reaver.inside_units, &state_copier::unit);
+					assemble(u->reaver.outside_units, v->reaver.outside_units, &state_copier::unit);
+				} else if (funcs.unit_is_ghost(u)) {
+					remap_sprite(u->ghost.nuke_dot);
+				}
+			}
+			remap_unit(u->worker.powerup);
+			remap_unit(u->worker.target_resource_unit);
+			remap_unit(u->worker.gather_target);
+			remap_unit(u->building.addon);
+			remap_unit(u->building.rally.unit);
+			if (u->unit_type) {
+				if (funcs.ut_resource(u)) {
+					assemble(u->building.resource.gather_queue, v->building.resource.gather_queue, &state_copier::unit);
+				} else if (funcs.unit_is_nydus(u)) {
+					remap_unit(u->building.nydus.exit);
+				} else if (funcs.unit_is(u, UnitTypes::Terran_Nuclear_Silo)) {
+					remap_unit(u->building.silo.nuke);
+				}
+			}
+			remap_unit(u->current_build_unit);
+			u->path = path(u->path);
+			remap_unit(u->irradiated_by);
+			
+		}
+		return u;
+	}
+	template<typename T>
+	void remap_unit(T& v) {
+		if (v) v = unit(v);
+	}
+	bullet_t* bullet(const bullet_t* v) {
+		if (!v) return nullptr;
+		size_t index = v - st.bullets.data();
+		auto* rv = &r.bullets[index];
+		if (!bullet_copied[index]) {
+			bullet_copied[index] = true;
+			memcpy(rv, v, sizeof(*v));
+			remap_sprite(rv->sprite);
+			remap_unit(rv->move_target.unit);
+			remap_unit(rv->bullet_target);
+			remap_unit(rv->bullet_owner_unit);
+			remap_unit(rv->prev_bounce_unit);
+		}
+		return rv;
+	}
+	sprite_t* sprite(const sprite_t* v) {
+		if (!v) return nullptr;
+		size_t index = v - st.sprites.data();
+		auto* rv = &r.sprites[index];
+		if (!sprite_copied[index]) {
+			sprite_copied[index] = true;
+			memcpy(rv, v, sizeof(*v));
+			remap_image(rv->main_image);
+			assemble(rv->images, v->images, &state_copier::image);
+		}
+		return rv;
+	}
+	template<typename T>
+	void remap_sprite(T& v) {
+		if (v) v = sprite(v);
+	}
+	image_t* image(const image_t* v) {
+		if (!v) return nullptr;
+		size_t index = v - st.images.data();
+		auto* rv = &r.images[index];
+		if (!image_copied[index]) {
+			image_copied[index] = true;
+			*rv = *v;
+			remap_sprite(rv->sprite);
+		}
+		return rv;
+	}
+	template<typename T>
+	void remap_image(T& v) {
+		if (v) v = image(v);
+	}
+	order_t* order(const order_t* v) {
+		if (!v) return nullptr;
+		size_t index = v - st.orders.data();
+		auto* rv = &r.orders[index];
+		if (!order_copied[index]) {
+			order_copied[index] = true;
+			*rv = *v;
+			remap_unit(rv->target.unit);
+		}
+		return rv;
+	}
+	template<typename T>
+	void remap_order(T& v) {
+		if (v) v = order(v);
+	}
+	a_unordered_map<const path_t*, path_t*> path_remap;
+	path_t* path(const path_t* v) {
+		if (!v) return nullptr;
+		auto*& rv = path_remap[v];
+		if (!rv) {
+			r.paths.emplace_back(*v);
+			rv = &r.paths.back();
+		}
+		return rv;
+	}
+	a_unordered_map<const thingy_t*, thingy_t*> thingy_remap;
+	thingy_t* thingy(const thingy_t* v) {
+		if (!v) return nullptr;
+		auto*& rv = thingy_remap[v];
+		if (!rv) {
+			r.thingies.emplace_back(*v);
+			rv = &r.thingies.back();
+			remap_sprite(rv->sprite);
+		}
+		return rv;
+	}
+	template<typename list_T, typename F>
+	void assemble(list_T& dst_list, const list_T& src_list, F&& func) {
+		dst_list.clear();
+		for (auto* v : ptr(src_list)) {
+			dst_list.push_back(*(this->*func)(v));
+		}
+	}
+	
+	void operator()() {
+		(state_base_copyable&)r = (state_base_copyable&)st;
+		
+		assemble(r.free_thingies, st.free_thingies, &state_copier::thingy);
+		assemble(r.active_thingies, st.active_thingies, &state_copier::thingy);
+		
+		assemble(r.free_paths, st.free_paths, &state_copier::path);
+		
+		assemble(r.free_orders, st.free_orders, &state_copier::order);
+		
+		assemble(r.free_images, st.free_images, &state_copier::image);
+		
+		assemble(r.free_sprites, st.free_sprites, &state_copier::sprite);
+		r.sprites_on_tile_line.resize(st.sprites_on_tile_line.size());
+		for (size_t i = 0; i != r.sprites_on_tile_line.size(); ++i) {
+			assemble(r.sprites_on_tile_line[i], st.sprites_on_tile_line[i], &state_copier::sprite);
+		}
+		
+		assemble(r.free_bullets, st.free_bullets, &state_copier::bullet);
+		assemble(r.active_bullets, st.active_bullets, &state_copier::bullet);
+		
+		assemble(r.cloaked_units, st.cloaked_units, &state_copier::unit);
+		for (size_t i = 0; i != 12; ++i) {
+			assemble(r.player_units[i], st.player_units[i], &state_copier::unit);
+		}
+		assemble(r.free_units, st.free_units, &state_copier::unit);
+		assemble(r.dead_units, st.dead_units, &state_copier::unit);
+		assemble(r.map_revealer_units, st.map_revealer_units, &state_copier::unit);
+		assemble(r.hidden_units, st.hidden_units, &state_copier::unit);
+		assemble(r.visible_units, st.visible_units, &state_copier::unit);
+		
+		r.unit_finder_x = st.unit_finder_x;
+		for (auto& v : r.unit_finder_x) remap_unit(v.u);
+		r.unit_finder_y = st.unit_finder_y;
+		for (auto& v : r.unit_finder_y) remap_unit(v.u);
+	}
+};
+
+state copy_state(const state& st) {
+	state r;
+	state_copier(st, r)();
+	return std::move(r);
+}
+
 
 struct game_load_functions : state_functions {
 
@@ -16339,7 +16539,7 @@ struct game_load_functions : state_functions {
 	};
 
 	void load_map_file(a_string filename, std::function<void()> setup_f = {}) {
-		load_map(data_loading::mpq_file(std::move(filename)));
+		load_map(data_loading::mpq_file<>(std::move(filename)));
 	}
 
 	template<typename load_data_file_F>
@@ -16411,6 +16611,7 @@ struct game_load_functions : state_functions {
 			}
 		};
 		tag_funcs["STR "] = [&](data_reader_le r) {
+			if (r.left() < 2) return;
 			auto start = r;
 			size_t num = r.get<uint16_t>();
 			game_st.map_strings.clear();
@@ -16464,6 +16665,7 @@ struct game_load_functions : state_functions {
 					game_st.gfx_tiles.at(i).raw_value |= r.get<uint8_t>();
 					break;
 				}
+				if (i >= game_st.gfx_tiles.size()) break;
 				game_st.gfx_tiles.at(i) = tile_id(r.get<uint16_t>());
 			}
 			for (size_t i = 0; i != game_st.gfx_tiles.size(); ++i) {
@@ -16502,6 +16704,7 @@ struct game_load_functions : state_functions {
 				r.get<uint8_t>();
 				int flags = r.get<uint8_t>();
 				if (flags & 0x10) {
+					if (id == 0xffff) continue;
 					const sprite_type_t* sprite_type = get_sprite_type((SpriteTypes)id);
 					create_thingy(sprite_type, {x, y}, owner);
 				} else {
@@ -16697,10 +16900,11 @@ struct game_load_functions : state_functions {
 				int flags = r.get<uint16_t>();
 				r.get<uint32_t>();
 				int related_unit_id = r.get<uint32_t>();
+				if ((int)unit_type_id == 0xffff) continue;
 
 				(void)id; (void)link; (void)valid_flags; (void)units_in_hangar; (void)flags; (void)related_unit_id;
 
-				if ((size_t)unit_type_id >= 228) xcept("UNIT: invalid unit type %d", unit_type_id);
+				if ((size_t)unit_type_id >= 228) xcept("UNIT: invalid unit type %d", (int)unit_type_id);
 				if ((size_t)owner >= 12) xcept("UNIT: invalid owner %d", owner);
 
 				const unit_type_t* unit_type = get_unit_type(unit_type_id);
@@ -16812,7 +17016,7 @@ struct game_load_functions : state_functions {
 		tag_funcs["COLR"] = [&](data_reader_le r) {
 			// todo
 			for (size_t i = 0; i != 8; ++i) {
-				r.get<uint8_t>();
+				st.players[i].color = r.get<uint8_t>();
 			}
 		};
 
@@ -16834,6 +17038,7 @@ struct game_load_functions : state_functions {
 
 		for (size_t i = 0; i != 12; ++i) {
 			st.shared_vision[i] = 1 << i;
+			st.players[i].color = (int)i;
 			if (st.players[i].controller == state::player_t::controller_rescue_passive || st.players[i].controller == state::player_t::controller_neutral) {
 				for (int i2 = 0; i2 < 12; ++i2) {
 					st.alliances[i][i2] = 1;
@@ -16932,6 +17137,56 @@ struct game_load_functions : state_functions {
 
 	}
 };
+
+template<typename reader_T>
+grp_t read_grp(reader_T&& r) {
+	auto base_r = r;
+	grp_t grp;
+	size_t frame_count = r.template get<uint16_t>();
+	grp.width = r.template get<uint16_t>();
+	grp.height = r.template get<uint16_t>();
+	grp.frames.resize(frame_count);
+	for (size_t i = 0; i != frame_count; ++i) {
+		auto& f = grp.frames[i];
+		f.offset.x = r.template get<uint8_t>();
+		f.offset.y = r.template get<uint8_t>();
+		f.size.x = r.template get<uint8_t>();
+		f.size.y = r.template get<uint8_t>();
+		size_t file_offset = r.template get<uint32_t>();
+		auto line_offset_r = base_r;
+		line_offset_r.skip(file_offset);
+		f.line_data_offset.reserve(f.size.y);
+		for (size_t y = 0; y != f.size.y; ++y) {
+			auto line_r = base_r;
+			line_r.skip(file_offset + line_offset_r.template get<uint16_t>());
+			f.line_data_offset.push_back(f.data_container.size());
+			for (size_t x = 0; x != f.size.x;) {
+				auto v = line_r.template get<uint8_t>();
+				if (v & 0x80) {
+					v &= 0x7f;
+					if (v > f.size.x - x) v = (uint8_t)(f.size.x - x);
+					f.data_container.push_back(0x80 | v);
+					x += v;
+				} else if (v & 0x40) {
+					v &= 0x3f;
+					if (v > f.size.x - x) v = (uint8_t)(f.size.x - x);
+					f.data_container.push_back(0x40 | v);
+					f.data_container.push_back(line_r.template get<uint8_t>());
+					x += v;
+				} else {
+					if (v > f.size.x - x) v = (uint8_t)(f.size.x - x);
+					f.data_container.push_back(v);
+					for (size_t i = 0; i != v; ++i) {
+						f.data_container.push_back(line_r.template get<uint8_t>());
+					}
+					x += v;
+				}
+			}
+		}
+		f.data_container.shrink_to_fit();
+	}
+	return grp;
+}
 
 template<typename load_data_file_F>
 void global_init(global_state& st, load_data_file_F&& load_data_file) {
@@ -17159,53 +17414,8 @@ void global_init(global_state& st, load_data_file_F&& load_data_file) {
 		a_vector<a_vector<a_vector<xy>>> lo_offsets;
 
 		auto load_grp = [&](data_reader_le r) {
-			auto base_r = r;
-			grp_t grp;
-			size_t frame_count = r.get<uint16_t>();
-			grp.width = r.get<uint16_t>();
-			grp.height = r.get<uint16_t>();
-			grp.frames.resize(frame_count);
-			for (size_t i = 0; i != frame_count; ++i) {
-				auto& f = grp.frames[i];
-				f.offset.x = r.get<uint8_t>();
-				f.offset.y = r.get<uint8_t>();
-				f.size.x = r.get<uint8_t>();
-				f.size.y = r.get<uint8_t>();
-				size_t file_offset = r.get<uint32_t>();
-				auto line_offset_r = base_r;
-				line_offset_r.skip(file_offset);
-				f.line_data_offset.reserve(f.size.y);
-				for (size_t y = 0; y != f.size.y; ++y) {
-					auto line_r = base_r;
-					line_r.skip(file_offset + line_offset_r.get<uint16_t>());
-					f.line_data_offset.push_back(f.data_container.size());
-					for (size_t x = 0; x != f.size.x;) {
-						auto v = line_r.get<uint8_t>();
-						if (v & 0x80) {
-							v &= 0x7f;
-							if (v > f.size.x - x) v = (uint8_t)(f.size.x - x);
-							f.data_container.push_back(0x80 | v);
-							x += v;
-						} else if (v & 0x40) {
-							v &= 0x3f;
-							if (v > f.size.x - x) v = (uint8_t)(f.size.x - x);
-							f.data_container.push_back(0x40 | v);
-							f.data_container.push_back(line_r.get<uint8_t>());
-							x += v;
-						} else {
-							if (v > f.size.x - x) v = (uint8_t)(f.size.x - x);
-							f.data_container.push_back(v);
-							for (size_t i = 0; i != v; ++i) {
-								f.data_container.push_back(line_r.get<uint8_t>());
-							}
-							x += v;
-						}
-					}
-				}
-				f.data_container.shrink_to_fit();
-			}
 			size_t index = grps.size();
-			grps.push_back(std::move(grp));
+			grps.push_back(read_grp(r));
 			return index;
 		};
 		auto load_offsets = [&](data_reader_le r) {
@@ -17381,7 +17591,13 @@ public:
 	state_functions& funcs() {
 		return *opt_funcs;
 	}
+	const state_functions& funcs() const {
+		return *opt_funcs;
+	}
 	state& st() {
+		return funcs().st;
+	}
+	state& st() const {
 		return funcs().st;
 	}
 };

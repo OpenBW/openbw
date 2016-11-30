@@ -239,6 +239,7 @@ struct sprite_t: link_base {
 
 	enum flags_t : uint_fast32_t {
 		flag_selected = 0x8,
+		flag_turret = 0x10,
 		flag_hidden = 0x20,
 		flag_burrowed = 0x40,
 		flag_iscript_nobrk = 0x80,
@@ -437,6 +438,9 @@ struct unit_t: flingy_t {
 		auto* operator()(unit_t* ptr) {
 			return &ptr->fighter.fighter_link;
 		}
+		auto* operator()(const unit_t* ptr) {
+			return &ptr->fighter.fighter_link;
+		}
 	};
 	union {
 		struct {
@@ -475,6 +479,9 @@ struct unit_t: flingy_t {
 	} worker;
 	struct worker_gather_link {
 		auto* operator()(unit_t* ptr) {
+			return &ptr->worker.gather_link;
+		}
+		auto* operator()(const unit_t* ptr) {
 			return &ptr->worker.gather_link;
 		}
 	};
