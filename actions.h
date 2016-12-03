@@ -132,8 +132,9 @@ struct action_functions: state_functions {
 
 		if (any_collision_enabled_units && can_be_obstructed) {
 			auto find_target = [&](rect bb, xy source_pos) {
-				auto* source_region = get_region_at(source_pos);
-				auto* target_region = get_region_at(target_pos);
+				auto* source_region = get_region_at_prefer_walkable(source_pos);
+				auto* target_region = get_region_at_prefer_walkable(target_pos);
+				xy t = nearest_pos_in_rect(target_pos, target_region->area);
 				if (!is_walkable(target_pos) || source_region->group_index != target_region->group_index) {
 					pathfinder pf;
 					if (pathfinder_find_long_path(pf, source_pos, target_pos)) target_region = pf.long_path.back();
@@ -554,7 +555,7 @@ struct action_functions: state_functions {
 				selection.clear();
 				for (size_t i = 0; i != group.size(); ++i) {
 					unit_t* u = get_unit(group[i]);
-					if (u && !us_hidden(u) && (group.size() == 1 || unit_can_be_multi_selected(u))) {
+					if (u && !us_hidden(u) && u->owner == owner && (group.size() == 1 || unit_can_be_multi_selected(u))) {
 						selection.push_back(u);
 						retval = true;
 					} else {
@@ -568,21 +569,37 @@ struct action_functions: state_functions {
 			auto& group = action_st.control_groups.at(owner).at(group_n);
 			if (subaction == 0) {
 				group.clear();
+				for (unit_t* u : selected_units(owner)) {
+					if (u->owner != owner) break;
+					auto uid = get_unit_id(u);
+					if (group.size() == 12) xcept("attempt to control group more than 12 units");
+					group.push_back(uid);
+					retval = true;
+				}
 			} else {
 				if (!group.empty()) {
 					unit_t* u = get_unit(group[0]);
 					if (u && !unit_dead(u) && !unit_can_be_multi_selected(u)) return false;
 				}
-			}
-			for (unit_t* u : selected_units(owner)) {
-				if (u->owner != owner) continue;
-				auto uid = get_unit_id(u);
-				if (group.empty() || unit_can_be_multi_selected(u)) {
-					auto i = std::find(group.begin(), group.end(), uid);
-					if (i == group.end()) {
-						if (group.size() == 12) xcept("attempt to control group more than 12 units");
-						group.push_back(uid);
-						retval = true;
+				for (unit_t* u : selected_units(owner)) {
+					if (u->owner != owner) break;
+					auto uid = get_unit_id(u);
+					if (group.empty() || unit_can_be_multi_selected(u)) {
+						auto i = std::find(group.begin(), group.end(), uid);
+						if (i == group.end()) {
+							if (group.size() == 12) {
+								// original buffer overflow bug
+								if (group_n != 9) {
+									auto& next_group = action_st.control_groups.at(owner).at(group_n + 1);
+									if (next_group.empty()) next_group.push_back(uid);
+									else next_group[0] = uid;
+								}
+								break;
+							}
+							group.push_back(uid);
+							retval = true;
+							if (group.size() == 12) break;
+						}
 					}
 				}
 			}
@@ -721,6 +738,54 @@ struct action_functions: state_functions {
 			retval = true;
 		}
 		return retval;
+	}
+	
+	bool action_cloak(int owner) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			const tech_type_t* tech = nullptr;
+			if (unit_is_ghost(u)) tech = get_tech_type(TechTypes::Personnel_Cloaking);
+			else if (unit_is_wraith(u)) tech = get_tech_type(TechTypes::Cloaking_Field);
+			if (!tech) continue;
+			if (!unit_can_use_tech(u, tech)) continue;
+			if (u_requires_detector(u)) continue;
+			if (u->energy < fp8::integer(tech->energy_cost)) continue;
+			u->energy -= fp8::integer(tech->energy_cost);
+			set_secondary_order(u, get_order_type(Orders::Cloak));
+		}
+		return retval;
+	}
+	
+	bool action_decloak(int owner) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			const tech_type_t* tech = nullptr;
+			if (unit_is_ghost(u)) tech = get_tech_type(TechTypes::Personnel_Cloaking);
+			else if (unit_is_wraith(u)) tech = get_tech_type(TechTypes::Cloaking_Field);
+			if (!tech) continue;
+			if (!unit_can_use_tech(u, tech)) continue;
+			set_secondary_order(u, get_order_type(Orders::Decloak));
+		}
+		return retval;
+	}
+	
+	bool action_set_alliances(int owner, std::array<int, 12> alliances) {
+		st.alliances.at(owner) = alliances;
+		for (unit_t* u : ptr(st.player_units[owner])) {
+			if (u->order_target.unit && u->order_type->targets_enemies) {
+				if (alliances[u->order_target.unit->owner] && !unit_target_is_enemy(u, u->order_target.unit)) {
+					u->order_target.unit = nullptr;
+				}
+			}
+		}
+		return true;
+	}
+	
+	bool action_set_shared_vision(int owner, uint32_t flags) {
+		flags &= 0xff;
+		flags |= st.shared_vision.at(owner) & 0xff00;
+		st.shared_vision.at(owner) = flags;
+		return true;
 	}
 
 	template<typename reader_T>
@@ -907,6 +972,34 @@ struct action_functions: state_functions {
 		return action_hold_position(owner, queue);
 	}
 	
+	template<typename reader_T>
+	bool read_action_cloak(int owner, reader_T&& r) {
+		r.template get<uint8_t>();
+		return action_cloak(owner);
+	}
+	
+	template<typename reader_T>
+	bool read_action_decloak(int owner, reader_T&& r) {
+		r.template get<uint8_t>();
+		return action_decloak(owner);
+	}
+	
+	template<typename reader_T>
+	bool read_action_set_alliances(int owner, reader_T&& r) {
+		std::array<int, 12> arr;
+		uint32_t vals = r.template get<uint32_t>();
+		for (size_t i = 0; i != 12; ++i) {
+			arr[i] = vals & 3;
+			vals >>= 2;
+		}
+		return action_set_alliances(owner, arr);
+	}
+	
+	template<typename reader_T>
+	bool read_action_set_shared_vision(int owner, reader_T&& r) {
+		uint32_t flags = r.template get<uint16_t>();
+		return action_set_shared_vision(owner, flags);
+	}
 
 	template<typename reader_T>
 	bool read_action(reader_T&& r) {
@@ -925,6 +1018,10 @@ struct action_functions: state_functions {
 			return read_action_deselect(owner, r);
 		case 12:
 			return read_action_build(owner, r);
+		case 13:
+			return read_action_set_shared_vision(owner, r);
+		case 14:
+			return read_action_set_alliances(owner, r);
 		case 19:
 			return read_action_control_group(owner, r);
 		case 20:
@@ -941,6 +1038,10 @@ struct action_functions: state_functions {
 			return read_action_train(owner, r);
 		case 32:
 			return read_action_cancel_build_queue(owner, r);
+		case 33:
+			return read_action_cloak(owner, r);
+		case 34:
+			return read_action_decloak(owner, r);
 		case 37:
 			return read_action_unsiege(owner, r);
 		case 38:
