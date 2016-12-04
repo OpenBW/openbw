@@ -1364,10 +1364,10 @@ order_types_t load_orders_dat(const data_T& data) {
 	rawr(uint8_t, unused12, count);
 	rawr(uint8_t, weapon, count);
 	rawr(uint8_t, tech_type, count);
-	rawr(uint8_t, seq, count);
+	rawr(uint8_t, animation, count);
 	rawr(int16_t, highlight, count);
 	rawr(uint16_t, dep_index, count);
-	rawr(uint8_t, obscured, count);
+	rawr(uint8_t, target_order, count);
 
 	if (r.left()) log(" WARNING: %s: %d bytes left\n", "orders.dat", r.left());
 

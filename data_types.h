@@ -346,10 +346,10 @@ struct order_type_t {
 	int unused12;
 	WeaponTypes weapon;    // weapon and tech_type could be pointers, but then order_types would 
 	TechTypes tech_type;   // need to live in game_state
-	int seq;
+	int animation;
 	int highlight;
 	int dep_index;
-	int obscured;
+	Orders target_order;
 };
 
 using order_types_t = type_container<order_type_t>;

@@ -83,6 +83,8 @@ auto make_replay_file_reader(base_reader_T& reader) {
 struct replay_state {
 	a_vector<uint8_t> actions_data_buffer;
 	int end_frame = 0;
+	a_string map_name;
+	std::array<a_string, 12> player_name;
 };
 
 struct replay_functions: action_functions {
@@ -134,8 +136,8 @@ struct replay_functions: action_functions {
 		gir.get<uint16_t>(); // game sub type ?
 		gir.get<uint16_t>(); // sub type display ?
 		gir.get<uint16_t>(); // sub type label ?
-		gir.get<uint8_t>(); // victory condition
-		gir.get<uint8_t>(); // resource type
+		auto victory_condition = gir.get<uint8_t>(); // victory condition
+		int resource_type = gir.get<uint8_t>(); // resource type
 		gir.get<uint8_t>(); // use standard unit stats
 		gir.get<uint8_t>(); // fog of war enabled
 		auto create_initial_units = gir.get<uint8_t>();
@@ -144,15 +146,24 @@ struct replay_functions: action_functions {
 		gir.get<uint8_t>(); // allies enabled
 		gir.get<uint8_t>(); // teams enabled
 		gir.get<uint8_t>(); // cheats enabled
-		gir.get<uint8_t>(); // tournament mode ?
+		auto tournament_mode = gir.get<uint8_t>(); // tournament mode ?
 		gir.get<uint32_t>(); // victory condition value?
-		gir.get<uint32_t>(); // starting minerals
+		auto starting_minerals = gir.get<uint32_t>(); // starting minerals
 		gir.get<uint32_t>(); // starting gas
 		gir.get<uint8_t>(); // ?
 		
 		(void)player_name;
 		(void)game_name;
-		(void)map_name;
+		
+		auto arr_str = [&](auto& str) {
+			a_string r;
+			for (auto& v : str) {
+				if (!v) break;
+				if (v >= 21) r += v;
+			}
+			return r;
+		};
+		replay_st.map_name = arr_str(map_name);
 		
 		std::array<int, 12> slot_player_id;
 		std::array<int, 12> slot_controller;
@@ -165,13 +176,14 @@ struct replay_functions: action_functions {
 			slot_controller[i] = gir.get<uint8_t>(); // controller
 			slot_race[i] = gir.get<uint8_t>(); // race
 			slot_force[i] = gir.get<uint8_t>(); // force
-			gir.get<std::array<char, 25>>(); // player name
+			auto name = gir.get<std::array<char, 25>>(); // player name
+			replay_st.player_name[i] = arr_str(name);
 			
 			action_st.player_id[i] = slot_player_id[i];
 		}
 		
-		gir.get<std::array<uint32_t, 8>>(); // player colors
-		gir.get<std::array<uint8_t, 8>>(); // player force ?
+		auto player_color = gir.get<std::array<uint32_t, 8>>(); // player colors
+		auto player_force = gir.get<std::array<uint8_t, 8>>(); // player force ?
 		
 		replay_st.end_frame = frame_count;
 		
@@ -184,11 +196,20 @@ struct replay_functions: action_functions {
 		
 		game_load_functions game_load_funcs(st);
 		game_load_funcs.load_map_data(map_buffer.data(), map_buffer.size(), [&]() {
-			game_load_funcs.setup_info.use_map_settings = create_initial_units == 0;
+			game_load_funcs.setup_info.victory_condition = victory_condition;
+			game_load_funcs.setup_info.starting_units = create_initial_units;
+			game_load_funcs.setup_info.tournament_mode = tournament_mode;
+			game_load_funcs.setup_info.resource_type = resource_type;
+			game_load_funcs.setup_info.starting_minerals = starting_minerals;
 			for (size_t i = 0; i != 12; ++i) {
 				st.players[i].controller = slot_controller[i];
 				st.players[i].race = (race)slot_race[i];
 				st.players[i].force = slot_force[i];
+				if (i < 8) st.players[i].color = player_color[i];
+				if (victory_condition == 0 && tournament_mode == 0) {
+					if (i >= 8) game_load_funcs.setup_info.create_melee_units_for_player[i] = false;
+					else game_load_funcs.setup_info.create_melee_units_for_player[i] = player_force[i] != 0;
+				}
 			}
 			st.lcg_rand_state = random_seed;
 		});

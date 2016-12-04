@@ -58,6 +58,37 @@ struct sight_values_t {
 
 };
 
+struct trigger {
+	struct condition {
+		int location;
+		int group;
+		int count_n;
+		int unit_id;
+		int num_n;
+		int type;
+		int extra_n;
+		int flags;
+		int unk;
+	};
+	struct action {
+		int location;
+		int string_index;
+		int sound_index;
+		int time_n;
+		int group_n;
+		int group2_n;
+		int extra_n;
+		int type;
+		int num_n;
+		int flags;
+		int unk;
+	};
+	std::array<condition, 16> conditions;
+	std::array<action, 64> actions;
+	int execution_flags;
+	std::array<bool, 28> enabled;
+};
+
 struct cv5_entry {
 	uint16_t flags;
 	std::array<uint16_t, 16> mega_tile_index;
@@ -563,7 +594,7 @@ struct unit_t: flingy_t {
 	int acid_spore_count;
 	std::array<int, 9> acid_spore_time;
 
-	int bullet_behavior_3_by_3_attack_sequence;
+	int next_hit_near_target_position_index;
 	int air_strength;
 	int ground_strength;
 	int repulse_flags;

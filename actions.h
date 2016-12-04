@@ -134,7 +134,6 @@ struct action_functions: state_functions {
 			auto find_target = [&](rect bb, xy source_pos) {
 				auto* source_region = get_region_at_prefer_walkable(source_pos);
 				auto* target_region = get_region_at_prefer_walkable(target_pos);
-				xy t = nearest_pos_in_rect(target_pos, target_region->area);
 				if (!is_walkable(target_pos) || source_region->group_index != target_region->group_index) {
 					pathfinder pf;
 					if (pathfinder_find_long_path(pf, source_pos, target_pos)) target_region = pf.long_path.back();
@@ -366,7 +365,7 @@ struct action_functions: state_functions {
 							u->building.rally.pos = pos;
 						}
 					} else {
-						if (order->id == Orders::Attack1) {
+						if (order->id == Orders::AttackDefault) {
 							if (u->subunit) {
 								issue_order(u->subunit, queue, u->subunit->unit_type->attack_unit, target);
 							}
@@ -454,12 +453,12 @@ struct action_functions: state_functions {
 				}
 			}
 			if (unit_is(u, UnitTypes::Terran_Medic)) {
-				if (order->id == Orders::AttackMove || order->id == Orders::Attack1) {
+				if (order->id == Orders::AttackMove || order->id == Orders::AttackDefault) {
 					order = get_order_type(Orders::HealMove);
 				}
 			}
 			const order_type_t* subunit_order = get_order_type(Orders::Nothing);
-			if (order->id == Orders::Attack1) {
+			if (order->id == Orders::AttackDefault) {
 				if (target) order = u->unit_type->attack_unit;
 				else order = u->unit_type->attack_move;
 				if (order->id == Orders::Nothing) continue;
