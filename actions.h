@@ -446,11 +446,9 @@ struct action_functions: state_functions {
 				if (!unit_order_can_target_self(u, order)) continue;
 			}
 			if (u->order_type->id == Orders::NukeLaunch) continue;
-			if (u->unit_type->right_click_action == 0) {
-				if (u_grounded_building(u) && !unit_is_factory(u)) {
-					auto oid = u->order_type->id;
-					if (oid != Orders::RallyPointUnit && oid != Orders::RallyPointTile && oid != Orders::RechargeShieldsBattery && oid != Orders::PickupBunker) continue;
-				}
+			if (default_action(u) == 0) {
+				auto oid = order->id;
+				if (oid != Orders::RallyPointUnit && oid != Orders::RallyPointTile && oid != Orders::RechargeShieldsBattery && oid != Orders::PickupBunker) continue;
 			}
 			if (unit_is(u, UnitTypes::Terran_Medic)) {
 				if (order->id == Orders::AttackMove || order->id == Orders::AttackDefault) {
@@ -786,6 +784,19 @@ struct action_functions: state_functions {
 		st.shared_vision.at(owner) = flags;
 		return true;
 	}
+	
+	bool action_cancel_addon(int owner) {
+		unit_t* u = get_single_selected_unit(owner);
+		if (!u || u->owner != owner) return false;
+		if (!u_completed(u)) return false;
+		if (!u_grounded_building(u)) return false;
+		if (u->secondary_order_type->id != Orders::BuildAddon) return false;
+		unit_t* addon = u->current_build_unit;
+		if (!addon) return false;
+		if (u_completed(addon)) return false;
+		cancel_building_unit(addon);
+		return true;
+	}
 
 	template<typename reader_T>
 	bool read_action_select(int owner, reader_T&& r) {
@@ -999,6 +1010,11 @@ struct action_functions: state_functions {
 		uint32_t flags = r.template get<uint16_t>();
 		return action_set_shared_vision(owner, flags);
 	}
+	
+	template<typename reader_T>
+	bool read_action_cancel_addon(int owner, reader_T&& r) {
+		return action_cancel_addon(owner);
+	}
 
 	template<typename reader_T>
 	bool read_action(reader_T&& r) {
@@ -1061,6 +1077,8 @@ struct action_functions: state_functions {
 			return read_action_upgrade(owner, r);
 		case 51:
 			return read_action_cancel_upgrade(owner, r);
+		case 52:
+			return read_action_cancel_addon(owner, r);
 		case 87:
 			return read_action_player_leave(owner, r);
 		case 92:

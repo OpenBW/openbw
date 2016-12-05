@@ -4248,7 +4248,7 @@ struct state_functions {
 		auto repair = [&]() {
 			if (u->worker.repair_timer == 0) {
 				calc_repair_costs();
-				if (st.current_minerals[u->owner] >= mineral_cost && st.current_gas[u->owner] >= mineral_cost) {
+				if (st.current_minerals[u->owner] >= mineral_cost && st.current_gas[u->owner] >= gas_cost) {
 					u->worker.repair_timer = time_cost;
 					st.current_minerals[u->owner] -= mineral_cost;
 					st.current_gas[u->owner] -= gas_cost;
@@ -5231,6 +5231,14 @@ struct state_functions {
 			}
 		}
 	}
+	
+	void order_PickupBunker(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		if (target && unit_can_load_target(u, target)) {
+			set_unit_order(target, get_order_type(Orders::EnterTransport), u);
+		}
+		order_done(u);
+	}
 
 	void execute_main_order(unit_t* u) {
 		switch (u->order_type->id) {
@@ -5557,7 +5565,7 @@ struct state_functions {
 			order_PickupTransport(u);
 			break;
 		case Orders::PickupBunker:
-			xcept("PickupBunker");
+			order_PickupBunker(u);
 			break;
 		case Orders::Pickup4:
 			xcept("Pickup4");
@@ -6106,11 +6114,8 @@ struct state_functions {
 		u->next_velocity_direction = velocity_direction;
 		if (!u_movement_flag(u, 2) || u_movement_flag(u, 1)) {
 			fp8 turn = fp8::extend(u->desired_velocity_direction - u->heading);
-			if (u->flingy_turn_rate == 128_fp8) turn = 128_fp8;
-			else {
-				if (turn > u->flingy_turn_rate) turn = u->flingy_turn_rate;
-				else if (turn < -u->flingy_turn_rate) turn = -u->flingy_turn_rate;
-			}
+			if (turn > u->flingy_turn_rate || u->flingy_turn_rate >= 128_fp8) turn = u->flingy_turn_rate;
+			else if (turn < -u->flingy_turn_rate) turn = -u->flingy_turn_rate;
 			u->heading += direction_t::truncate(turn);
 			if (u->flingy_type->id >= (FlingyTypes)0x8d && u->flingy_type->id <= (FlingyTypes)0xab) {
 				u->flingy_turn_rate += 1_fp8;
@@ -8748,9 +8753,9 @@ struct state_functions {
 				auto* r = get_region_at(u->sprite->position);
 				if (r->walkable()) {
 					direction_t dir = xy_direction(to_xy(r->center) - u->sprite->position) + 16_dir * lcg_rand(50, -2, 2);
-					int length = lcg_rand(50, 2, 4) * 8;
-					int center_length = xy_length(to_xy(r->center) - u->sprite->position);
-					if (length > center_length - 1) length = center_length - 1;
+					fp8 length = fp8::integer(lcg_rand(50, 2, 4) * 8);
+					fp8 center_length = fp8::integer(xy_length(to_xy(r->center) - u->sprite->position));
+					if (length > center_length - 1_fp8) length = center_length - 1_fp8;
 					move_to = u->sprite->position + to_xy(direction_xy(dir, length));
 					if (!is_reachable(u->sprite->position, move_to)) move_to = u->sprite->position;
 				} else {
@@ -8771,16 +8776,15 @@ struct state_functions {
 						if (u->sprite->position.x + 32 < best_region->area.from.x) maybe_outside = true;
 						if (u->sprite->position.x - 32 >= best_region->area.to.x) maybe_outside = true;
 						if (u->sprite->position.y + 32 < best_region->area.from.y) maybe_outside = true;
-						if (u->sprite->position.y - 32 < best_region->area.to.y) maybe_outside = true;
+						if (u->sprite->position.y - 32 >= best_region->area.to.y) maybe_outside = true;
 						if (maybe_outside) {
 							// bug? seems like it should be best_region->center, not last_center_pos
 							dir = xy_direction(last_center_pos - u->sprite->position);
+							move_to = u->sprite->position + to_xy(direction_xy(dir, 64));
 						} else {
-							dir = xy_direction(pathfinder_adjust_destination(best_region, u->sprite->position) - u->sprite->position);
+							move_to = pathfinder_adjust_destination(best_region, u->sprite->position);
+							if (move_to == u->sprite->position) move_to = u->sprite->position - xy(0, 64);
 						}
-
-						move_to = u->sprite->position + to_xy(direction_xy(dir, 64));
-
 					} else {
 						if (!r->non_walkable_neighbors.empty()) {
 							size_t random_index = lcg_rand(50, 0, (int)r->non_walkable_neighbors.size() - 1);
@@ -9011,7 +9015,7 @@ struct state_functions {
 	}
 
 	bool movement_UM_Repath(unit_t* u, execute_movement_struct& ems) {
-		const unit_t* collision_unit = nullptr;
+		const unit_t* collision_unit = st.consider_collision_with_unit_bug;
 		if (u->path) {
 			collision_unit = get_unit(u->path->last_collision_unit);
 			free_path(u->path);
@@ -9117,7 +9121,7 @@ struct state_functions {
 	}
 
 	bool movement_UM_TurnAndStart(unit_t* u, execute_movement_struct& ems) {
-		const unit_t* collision_unit = nullptr;
+		const unit_t* collision_unit = st.consider_collision_with_unit_bug;
 		if (u->path) {
 			collision_unit = get_unit(u->path->last_collision_unit);
 			free_path(u->path);
@@ -9178,15 +9182,12 @@ struct state_functions {
 
 	bool movement_UM_ForceMoveFree(unit_t* u, execute_movement_struct& ems) {
 		if (u->pathing_collision_counter < 255) ++u->pathing_collision_counter;
-		if (unit_is_at_move_target(u)) {
+		if (unit_is_at_move_target(u) || u_movement_flag(u, 4)) {
 			u->movement_state = movement_states::UM_AtMoveTarget;
 			return false;
 		}
 		set_next_speed(u, 0_fp8);
-		if (u->path) {
-			free_path(u->path);
-			u->path = nullptr;
-		}
+		free_path(u);
 		u->movement_state = movement_states::UM_TurnAndStart;
 		return true;
 	}
@@ -17659,6 +17660,17 @@ struct game_load_functions : state_functions {
 			for (size_t i = 0; i != 12; ++i) {
 				st.current_minerals[i] = setup_info.starting_minerals;
 				st.total_minerals_gathered[i] = setup_info.starting_minerals;
+			}
+		}
+		for (size_t i = 0; i != 12; ++i) {
+			if (st.players[i].controller != state::player_t::controller_occupied) continue;
+			if (st.players[i].force >= 1 && st.players[i].force <= 4) {
+				if (game_st.forces[st.players[i].force - 1].flags & 8) {
+					for (size_t i2 = 0; i2 != 12; ++i2) {
+						if (st.players[i2].controller != state::player_t::controller_occupied) continue;
+						if (st.players[i2].force == st.players[i].force) st.shared_vision[i] |= 1 << i2;
+					}
+				}
 			}
 		}
 
