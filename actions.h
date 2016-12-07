@@ -625,6 +625,7 @@ struct action_functions: state_functions {
 		if (!is_in_map_bounds(pos)) return false;
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
+		if (unit_is_constructing(u)) return false;
 		if (unit_is_researching(u) || unit_is_upgrading(u)) return false;
 		if (!unit_can_receive_order(u, get_order_type(Orders::BuildingLiftoff), owner)) return false;
 		set_unit_order(u, get_order_type(Orders::BuildingLiftoff), pos);
@@ -1015,6 +1016,9 @@ struct action_functions: state_functions {
 	bool read_action_cancel_addon(int owner, reader_T&& r) {
 		return action_cancel_addon(owner);
 	}
+	
+	virtual void on_action(int owner, int action) {
+	}
 
 	template<typename reader_T>
 	bool read_action(reader_T&& r) {
@@ -1024,6 +1028,7 @@ struct action_functions: state_functions {
 		auto i = std::find(action_st.player_id.begin(), action_st.player_id.end(), player_id);
 		if (i == action_st.player_id.end()) xcept("execute_action: player id %d not found", player_id);
 		int owner = (int)(i - action_st.player_id.begin());
+		on_action(owner, action_id);
 		switch (action_id) {
 		case 9:
 			return read_action_select(owner, r);

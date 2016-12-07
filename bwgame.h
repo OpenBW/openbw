@@ -132,9 +132,9 @@ struct global_state {
 struct game_state {
 
 	game_state() = default;
-	game_state(game_state&) = delete;
+	game_state(const game_state&) = delete;
 	game_state(game_state&&) = default;
-	game_state& operator=(game_state&) = delete;
+	game_state& operator=(const game_state&) = delete;
 	game_state& operator=(game_state&&) = default;
 
 	size_t map_tile_width;
@@ -2075,29 +2075,9 @@ struct state_functions {
 		return false;
 	}
 
-	template<typename F>
-	unit_t* find_nearest_unit(const unit_t* u, rect search_area, F&& predicate) const {
-		if (us_hidden(u)) {
-			return find_nearest_unit(u->sprite->position, search_area, std::forward<F>(predicate));
-		} else {
-			auto cmp_l = [&](auto& a, int b) {
-				return a.value < b;
-			};
-			auto get = [&](auto& vec, int value) {
-				auto i = std::lower_bound(vec.begin(), vec.end(), value, cmp_l);
-				while (i->u != u) ++i;
-				return i;
-			};
-			auto left_i = get(st.unit_finder_x, u->unit_finder_bounding_box.to.x);
-			auto up_i = get(st.unit_finder_y, u->unit_finder_bounding_box.to.y);
-			auto right_i = get(st.unit_finder_x, u->unit_finder_bounding_box.from.x);
-			auto down_i = get(st.unit_finder_y, u->unit_finder_bounding_box.from.y);
-			return find_nearest_unit(u->sprite->position, search_area, left_i, up_i, right_i, down_i, std::forward<F>(predicate));
-		}
-	}
-
 	unit_t* find_nearest_active_resource_depot(const unit_t* u) const {
 		return find_nearest_unit(u, map_bounds(), [&](const unit_t* target) {
+			if (target == u) return false;
 			if (!unit_is_active_resource_depot(target)) return false;
 			if (target->owner != u->owner) return false;
 			if (~u->pathing_flags & 1 || !is_reachable(u->sprite->position, target->sprite->position)) return false;
@@ -3373,6 +3353,9 @@ struct state_functions {
 			if (!target || unit_is_special_beacon(target) || ut_powerup(target)) return u->unit_type->return_to_idle;
 			else if (unit_target_is_enemy(u, target)) return get_order_type(Orders::AttackDefault);
 			else return u->unit_type->return_to_idle;
+		case 4:
+			if (auto* o = target ? get_default_gather_order(u, target) : nullptr) return o;
+			else return get_default_order(1, u, pos, target, target_unit_type);
 		case 5:
 			if (!target) return get_default_order(1, u, pos, target, target_unit_type);
 			order = get_default_gather_order(u, target);
@@ -3385,7 +3368,7 @@ struct state_functions {
 						}
 					}
 				}
-			} else if (!unit_target_is_enemy(u, target)) {
+			} else if (st.alliances[u->owner][target->owner]) {
 				bool can_enter = unit_provides_space(target) && unit_can_load_target(target, u);
 				if ((ut_building(target) || !can_enter) && unit_race(target) == race::terran && ut_mechanical(target) && u_completed(target) && target->hp < target->unit_type->hitpoints) {
 					return get_order_type(Orders::Repair);
@@ -3432,6 +3415,7 @@ struct state_functions {
 			order_done(u);
 			return false;
 		}
+		u->order_target.pos = target->sprite->position;
 		set_next_target_waypoint(u, target->sprite->position);
 		if (unit_can_see_target(u, target)) {
 			if (u_movement_flag(u, 2)) {
@@ -3446,7 +3430,7 @@ struct state_functions {
 				return false;
 			}
 		}
-		if (unit_is_at_move_target(u) && !u_immovable(u)) {
+		if (unit_is_at_move_target(u) && u_immovable(u)) {
 			stop_unit(u);
 			order_done(u);
 			return false;
@@ -4680,10 +4664,10 @@ struct state_functions {
 				auto ius = make_thingy_setter(iscript_unit, turret);
 				sprite_run_anim(turret->sprite, iscript_anims::SpecialState1);
 				u->order_state = 2;
-				for (unit_t* n : find_units_noexpand(unit_sprite_bounding_box(u))) {
+				for (unit_t* n : find_units(unit_sprite_inner_bounding_box(u))) {
 					if (n == u) continue;
 					if (!u_grounded_building(n)) continue;
-					if (!u_no_collide(n)) continue;
+					if (u_no_collide(n)) continue;
 					kill_unit(u);
 					return;
 				}
@@ -4886,6 +4870,7 @@ struct state_functions {
 			if (!u_cannot_attack(u)) {
 				int range = 32 * unit_target_acquisition_range(u);
 				unit_t* target = find_nearest_unit(u, square_at(u->sprite->position, range), [&](unit_t* target) {
+					if (target == u) return false;
 					if (!unit_target_is_enemy(u, target)) return false;
 					if (u_invincible(target)) return false;
 					if (u_grounded_building(target)) return false;
@@ -12520,6 +12505,27 @@ struct state_functions {
 
 		return find_nearest_unit(pos, search_area, x_i, y_i, x_i, y_i, predicate);
 	}
+	
+	template<typename F>
+	unit_t* find_nearest_unit(const unit_t* u, rect search_area, F&& predicate) const {
+		if (us_hidden(u)) {
+			return find_nearest_unit(u->sprite->position, search_area, std::forward<F>(predicate));
+		} else {
+			auto cmp_l = [&](auto& a, int b) {
+				return a.value < b;
+			};
+			auto get = [&](auto& vec, int value) {
+				auto i = std::lower_bound(vec.begin(), vec.end(), value, cmp_l);
+				while (i->u != u) ++i;
+				return i;
+			};
+			auto left_i = get(st.unit_finder_x, u->unit_finder_bounding_box.to.x);
+			auto up_i = get(st.unit_finder_y, u->unit_finder_bounding_box.to.y);
+			auto right_i = std::next(get(st.unit_finder_x, u->unit_finder_bounding_box.from.x));
+			auto down_i = std::next(get(st.unit_finder_y, u->unit_finder_bounding_box.from.y));
+			return find_nearest_unit(u->sprite->position, search_area, left_i, up_i, right_i, down_i, std::forward<F>(predicate));
+		}
+	}
 
 	bool unit_is_factory(const unit_t* u) const {
 		if (unit_is(u, UnitTypes::Terran_Command_Center)) return true;
@@ -12848,6 +12854,8 @@ struct state_functions {
 		u->user_action_flags = 0;
 		u->pathing_flags = 0;
 		u->previous_hp = 1;
+		
+		u->building.rally = {};
 
 		if (!initialize_unit_type(u, unit_type, pos, owner)) return false;
 
@@ -13623,6 +13631,10 @@ struct state_functions {
 	}
 
 	void set_sprite_cloak_modifier(sprite_t* sprite, bool requires_detector, bool cloaked, int data1, int data2) {
+		for (image_t* image : ptr(sprite->images)) {
+			if (image->image_type->always_visible) continue;
+			hide_image(image);
+		}
 		if (requires_detector && !cloaked) {
 			for (image_t* image : ptr(sprite->images)) {
 				if (image->modifier == 0) {
@@ -13821,7 +13833,7 @@ struct state_functions {
 	}
 	bool unit_is_building_protoss_thing(const unit_t* u) const {
 		if (u->secondary_order_type->id == Orders::PlaceProtossBuilding) {
-			if (u_grounded_building(u) && u->current_build_unit && !u_completed(u->current_build_unit)) return true;
+			if (u_grounded_building(u) && u->order_target.unit && !u_completed(u->order_target.unit)) return true;
 		}
 		return false;
 	}
@@ -17586,7 +17598,7 @@ struct game_load_functions : state_functions {
 
 		use_map_settings = setup_info.victory_condition == 0 && setup_info.tournament_mode == 0 && setup_info.starting_units == 0;
 
-		if (version == 59) {
+		if (version == 59 || version == 63) {
 			if (use_map_settings) {
 				read_chunks({
 					{"STR ", true},

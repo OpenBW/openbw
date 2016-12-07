@@ -95,8 +95,9 @@ struct replay_functions: action_functions {
 		auto file_r = data_loading::file_reader<>(std::move(filename));
 		load_replay(data_loading::make_replay_file_reader(file_r), initial_processing);
 	}
-	void load_replay_data(uint8_t* data, size_t data_size, bool initial_processing = true) {
-		load_replay(data_loading::data_reader_le(data, data + data_size), initial_processing);
+	void load_replay_data(const uint8_t* data, size_t data_size, bool initial_processing = true) {
+		auto r = data_loading::data_reader_le(data, data + data_size);
+		load_replay(data_loading::make_replay_file_reader(r), initial_processing);
 	}
 	template<typename reader_T>
 	void load_replay(reader_T&& r, bool initial_processing = true) {
