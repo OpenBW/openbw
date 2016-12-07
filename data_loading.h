@@ -694,7 +694,9 @@ struct mpq_archive_file_reader {
 	size_t file_position = 0;
 	mpq_archive_file_reader(a_string arg_filename, base_reader_T& r, size_t sector_size, block_table_entry be, uint32_t key, const crypt_table_t& crypt_table) : filename(std::move(arg_filename)), r(r), sector_size(sector_size), be(be), key(key), crypt_table(crypt_table) {
 
-		if (~be.flags & 0x200) xcept("mpq: %s: file is not compressed", filename);
+		if (~be.flags & 0x200 && ~be.flags & 0x100) {
+			xcept("mpq: %s: file is not compressed", filename);
+		}
 
 		sector_data.resize(sector_size);
 		r.seek(be.data_offset);
@@ -707,7 +709,6 @@ struct mpq_archive_file_reader {
 				if (compressed_sectors.size() > (be.size + sector_size - 1) / sector_size) xcept("mpq: %s: too many compressed sectors in file", filename);
 			}
 		};
-
 
 		if (be.flags & 0x10000) {
 			read_sectors(make_encrypted_reader(r, 4 * ((be.size + sector_size - 1) / sector_size + 1), key - 1, crypt_table));
@@ -724,10 +725,16 @@ struct mpq_archive_file_reader {
 
 		int compression_method;
 		auto get_data = [&](auto&& sector_data_r) {
-			compression_method = sector_data_r.template get<uint8_t>();
-
-			if (compressed_data.size() < sector_data_size) compressed_data.resize(sector_data_size);
-			sector_data_r.get_bytes(compressed_data.data(), sector_data_size - 1);
+			if (~be.flags & 0x200) {
+				compression_method = 8;
+				if (compressed_data.size() < sector_data_size) compressed_data.resize(sector_data_size);
+				sector_data_r.get_bytes(compressed_data.data(), sector_data_size);
+			} else {
+				compression_method = sector_data_r.template get<uint8_t>();
+	
+				if (compressed_data.size() < sector_data_size) compressed_data.resize(sector_data_size);
+				sector_data_r.get_bytes(compressed_data.data(), sector_data_size - 1);
+			}
 		};
 
 		size_t current_sector_size = sector_data.size();
