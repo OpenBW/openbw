@@ -1,8 +1,12 @@
 #include "common.h"
 #include "bwgame.h"
+#include "replay.h"
 
 #include "native_window.h"
 #include "native_window_drawing.h"
+
+#include <chrono>
+#include <thread>
 
 #ifdef EMSCRIPTEN
 #include <emscripten.h>
@@ -23,268 +27,13 @@ void log_str(a_string str) {
 }
 
 void fatal_error_str(a_string str) {
+#ifdef EMSCRIPTEN
+	const char* p = str.c_str();
+	EM_ASM_({js_fatal_error($0);}, p);
+#endif
 	log("fatal error: %s\n", str);
 	std::terminate();
 }
-
-native_window_drawing::color palette_colors[256] = {
-	{0, 0, 0, 0},
-	{39, 39, 59, 0},
-	{47, 47, 71, 0},
-	{55, 59, 83, 0},
-	{47, 51, 75, 0},
-	{43, 43, 67, 0},
-	{39, 39, 59, 0},
-	{83, 87, 119, 0},
-	{75, 79, 111, 0},
-	{71, 75, 103, 0},
-	{79, 83, 115, 0},
-	{87, 95, 131, 0},
-	{99, 107, 147, 0},
-	{107, 119, 163, 0},
-	{58, 0, 58, 0},
-	{25, 0, 25, 0},
-	{44, 36, 24, 0},
-	{72, 36, 20, 0},
-	{92, 44, 20, 0},
-	{112, 48, 20, 0},
-	{104, 60, 36, 0},
-	{124, 64, 24, 0},
-	{120, 76, 44, 0},
-	{168, 8, 8, 0},
-	{140, 84, 48, 0},
-	{132, 96, 68, 0},
-	{160, 84, 28, 0},
-	{196, 76, 24, 0},
-	{188, 104, 36, 0},
-	{180, 112, 60, 0},
-	{208, 100, 32, 0},
-	{220, 148, 52, 0},
-	{224, 148, 84, 0},
-	{236, 196, 84, 0},
-	{52, 68, 40, 0},
-	{64, 108, 60, 0},
-	{72, 108, 80, 0},
-	{76, 128, 80, 0},
-	{80, 140, 92, 0},
-	{92, 160, 120, 0},
-	{0, 0, 24, 0},
-	{0, 16, 52, 0},
-	{0, 8, 80, 0},
-	{36, 52, 72, 0},
-	{48, 64, 84, 0},
-	{20, 52, 124, 0},
-	{52, 76, 108, 0},
-	{64, 88, 116, 0},
-	{72, 104, 140, 0},
-	{0, 112, 156, 0},
-	{88, 128, 164, 0},
-	{64, 104, 212, 0},
-	{24, 172, 184, 0},
-	{36, 36, 252, 0},
-	{100, 148, 188, 0},
-	{112, 168, 204, 0},
-	{140, 192, 216, 0},
-	{148, 220, 244, 0},
-	{172, 220, 232, 0},
-	{172, 252, 252, 0},
-	{204, 248, 248, 0},
-	{252, 252, 0, 0},
-	{244, 228, 144, 0},
-	{252, 252, 192, 0},
-	{12, 12, 12, 0},
-	{24, 20, 16, 0},
-	{28, 28, 32, 0},
-	{40, 40, 48, 0},
-	{56, 48, 36, 0},
-	{56, 60, 68, 0},
-	{76, 64, 48, 0},
-	{76, 76, 76, 0},
-	{92, 80, 64, 0},
-	{88, 88, 88, 0},
-	{104, 104, 104, 0},
-	{120, 132, 108, 0},
-	{104, 148, 108, 0},
-	{116, 164, 124, 0},
-	{152, 148, 140, 0},
-	{144, 184, 148, 0},
-	{152, 196, 168, 0},
-	{176, 176, 176, 0},
-	{172, 204, 176, 0},
-	{196, 192, 188, 0},
-	{204, 224, 208, 0},
-	{240, 240, 240, 0},
-	{28, 16, 8, 0},
-	{40, 24, 12, 0},
-	{52, 16, 8, 0},
-	{52, 32, 12, 0},
-	{56, 16, 32, 0},
-	{52, 40, 32, 0},
-	{68, 52, 8, 0},
-	{72, 48, 24, 0},
-	{96, 0, 0, 0},
-	{84, 40, 32, 0},
-	{80, 64, 20, 0},
-	{92, 84, 20, 0},
-	{132, 4, 4, 0},
-	{104, 76, 52, 0},
-	{124, 56, 48, 0},
-	{112, 100, 32, 0},
-	{124, 80, 80, 0},
-	{164, 52, 28, 0},
-	{148, 108, 0, 0},
-	{152, 92, 64, 0},
-	{140, 128, 52, 0},
-	{152, 116, 84, 0},
-	{184, 84, 68, 0},
-	{176, 144, 24, 0},
-	{176, 116, 92, 0},
-	{244, 4, 4, 0},
-	{200, 120, 84, 0},
-	{252, 104, 84, 0},
-	{224, 164, 132, 0},
-	{252, 148, 104, 0},
-	{252, 204, 44, 0},
-	{16, 252, 24, 0},
-	{12, 0, 32, 0},
-	{28, 28, 44, 0},
-	{36, 36, 76, 0},
-	{40, 44, 104, 0},
-	{44, 48, 132, 0},
-	{32, 24, 184, 0},
-	{52, 60, 172, 0},
-	{104, 104, 148, 0},
-	{100, 144, 252, 0},
-	{124, 172, 252, 0},
-	{0, 228, 252, 0},
-	{156, 144, 64, 0},
-	{168, 148, 84, 0},
-	{188, 164, 92, 0},
-	{204, 184, 96, 0},
-	{232, 216, 128, 0},
-	{236, 196, 176, 0},
-	{252, 252, 56, 0},
-	{252, 252, 124, 0},
-	{252, 252, 164, 0},
-	{8, 8, 8, 0},
-	{16, 16, 16, 0},
-	{24, 24, 24, 0},
-	{40, 40, 40, 0},
-	{52, 52, 52, 0},
-	{76, 60, 56, 0},
-	{68, 68, 68, 0},
-	{72, 72, 88, 0},
-	{88, 88, 104, 0},
-	{116, 104, 56, 0},
-	{120, 100, 92, 0},
-	{96, 96, 124, 0},
-	{132, 116, 116, 0},
-	{132, 132, 156, 0},
-	{172, 140, 124, 0},
-	{172, 152, 148, 0},
-	{144, 144, 184, 0},
-	{184, 184, 232, 0},
-	{248, 140, 20, 0},
-	{16, 84, 60, 0},
-	{32, 144, 112, 0},
-	{44, 180, 148, 0},
-	{4, 32, 100, 0},
-	{72, 28, 80, 0},
-	{8, 52, 152, 0},
-	{104, 48, 120, 0},
-	{136, 64, 156, 0},
-	{12, 72, 204, 0},
-	{188, 184, 52, 0},
-	{220, 220, 60, 0},
-	{16, 0, 0, 0},
-	{36, 0, 0, 0},
-	{52, 0, 0, 0},
-	{72, 0, 0, 0},
-	{96, 24, 4, 0},
-	{140, 40, 8, 0},
-	{200, 24, 24, 0},
-	{224, 44, 44, 0},
-	{232, 32, 32, 0},
-	{232, 80, 20, 0},
-	{252, 32, 32, 0},
-	{232, 120, 36, 0},
-	{248, 172, 60, 0},
-	{0, 20, 0, 0},
-	{0, 40, 0, 0},
-	{0, 68, 0, 0},
-	{0, 100, 0, 0},
-	{8, 128, 8, 0},
-	{36, 152, 36, 0},
-	{60, 156, 60, 0},
-	{88, 176, 88, 0},
-	{104, 184, 104, 0},
-	{128, 196, 128, 0},
-	{148, 212, 148, 0},
-	{12, 20, 36, 0},
-	{36, 60, 100, 0},
-	{48, 80, 132, 0},
-	{56, 92, 148, 0},
-	{72, 116, 180, 0},
-	{84, 132, 196, 0},
-	{96, 148, 212, 0},
-	{120, 180, 236, 0},
-	{20, 16, 8, 0},
-	{24, 20, 12, 0},
-	{40, 48, 12, 0},
-	{16, 16, 24, 0},
-	{20, 20, 32, 0},
-	{44, 44, 64, 0},
-	{68, 76, 104, 0},
-	{4, 4, 4, 0},
-	{28, 24, 16, 0},
-	{32, 28, 20, 0},
-	{36, 32, 28, 0},
-	{48, 40, 28, 0},
-	{64, 56, 44, 0},
-	{84, 72, 52, 0},
-	{104, 92, 76, 0},
-	{144, 124, 100, 0},
-	{40, 32, 16, 0},
-	{44, 36, 20, 0},
-	{52, 44, 24, 0},
-	{56, 44, 28, 0},
-	{60, 48, 28, 0},
-	{64, 52, 32, 0},
-	{68, 56, 36, 0},
-	{80, 68, 36, 0},
-	{88, 76, 40, 0},
-	{100, 88, 44, 0},
-	{12, 16, 4, 0},
-	{20, 24, 4, 0},
-	{28, 32, 8, 0},
-	{32, 40, 12, 0},
-	{52, 60, 16, 0},
-	{64, 72, 16, 0},
-	{32, 32, 48, 0},
-	{20, 20, 20, 0},
-	{32, 24, 28, 0},
-	{32, 32, 32, 0},
-	{40, 32, 24, 0},
-	{40, 36, 36, 0},
-	{48, 44, 44, 0},
-	{60, 48, 56, 0},
-	{60, 56, 60, 0},
-	{72, 60, 48, 0},
-	{68, 52, 64, 0},
-	{84, 64, 72, 0},
-	{92, 100, 100, 0},
-	{108, 116, 120, 0},
-	{88, 78, 47, 0},
-	{77, 67, 44, 0},
-	{71, 59, 43, 0},
-	{75, 63, 47, 0},
-	{83, 67, 51, 0},
-	{67, 75, 103, 0},
-	{75, 83, 111, 0},
-	{83, 91, 123, 0},
-	{91, 99, 135, 0},
-	{255, 255, 255, 0},
-};
 
 struct vr4_entry {
 	using bitmap_t = std::conditional<is_native_fast_int<uint64_t>::value, uint64_t, uint32_t>::type;
@@ -302,9 +51,13 @@ struct pcx_image {
 };
 
 struct image_data {
+	a_vector<uint8_t> wpe;
 	a_vector<vr4_entry> vr4;
 	a_vector<vx4_entry> vx4;
 	pcx_image dark_pcx;
+	std::array<pcx_image, 7> light_pcx;
+	std::array<std::array<uint8_t, 8>, 16> player_unit_colors;
+	std::array<uint8_t, 16> player_minimap_colors;
 };
 
 template<typename data_T>
@@ -368,7 +121,7 @@ pcx_image load_pcx_data(const data_T& data) {
 }
 
 template<typename load_data_file_F>
-void load_image_data(image_data& img, game_state& game_st, load_data_file_F&& load_data_file) {
+void load_image_data(image_data& img, size_t tileset_index, load_data_file_F&& load_data_file) {
 	using namespace data_loading;
 
 	std::array<const char*, 8> tileset_names = {
@@ -378,10 +131,11 @@ void load_image_data(image_data& img, game_state& game_st, load_data_file_F&& lo
 	a_vector<uint8_t> vr4_data;
 	a_vector<uint8_t> vx4_data;
 
-	const char* tileset_name = tileset_names.at(game_st.tileset_index);
+	const char* tileset_name = tileset_names.at(tileset_index);
 
 	load_data_file(vr4_data, format("Tileset/%s.vr4", tileset_name));
 	load_data_file(vx4_data, format("Tileset/%s.vx4", tileset_name));
+	load_data_file(img.wpe, format("Tileset/%s.wpe", tileset_name));
 
 	data_reader<true, false> vr4_r(vr4_data.data(), nullptr);
 	img.vr4.resize(vr4_data.size() / 64);
@@ -419,7 +173,24 @@ void load_image_data(image_data& img, game_state& game_st, load_data_file_F&& lo
 	for (size_t x = 0; x != 256; ++x) {
 		img.dark_pcx.data[256 * 31 + x] = (uint8_t)x;
 	}
-
+	
+	std::array<const char*, 7> light_names = {"ofire", "gfire", "bfire", "bexpl", "trans50", "red", "green"};
+	for (size_t i = 0; i != 7; ++i) {
+		img.light_pcx[i] = load_pcx_file(format("Tileset/%s/%s.pcx", tileset_name, light_names[i]));
+	}
+	
+	auto tunit_pcx = load_pcx_file("game/tunit.pcx");
+	if (tunit_pcx.width != 128 || tunit_pcx.height != 1) xcept("tunit.pcx dimensions are %dx%d (128x1 required)", tunit_pcx.width, tunit_pcx.height);
+	for (size_t i = 0; i != 16; ++i) {
+		for (size_t i2 = 0; i2 != 8; ++i2) {
+			img.player_unit_colors[i][i2] = tunit_pcx.data[i * 8 + i2];
+		}
+	}
+	auto tminimap_pcx = load_pcx_file("game/tminimap.pcx");
+	if (tminimap_pcx.width != 16 || tminimap_pcx.height != 1) xcept("tminimap.pcx dimensions are %dx%d (16x16 required)", tminimap_pcx.width, tminimap_pcx.height);
+	for (size_t i = 0; i != 16; ++i) {
+		img.player_minimap_colors[i] = tminimap_pcx.data[i];
+	}
 }
 
 template<bool bounds_check>
@@ -535,10 +306,39 @@ void draw_frame(const grp_t::frame_t& frame, bool flipped, uint8_t* dst, size_t 
 
 }
 
-#include <chrono>
-#include <thread>
+struct apm_t {
+	a_deque<int> history;
+	int current_apm = 0;
+	int last_frame_div = 0;
+	static const int resolution = 1;
+	void add_action(int frame) {
+		if (!history.empty() && frame / resolution == last_frame_div) {
+			++history.back();
+		} else {
+			if (history.size() >= 5 * 1000 / 42 / resolution) history.pop_front();
+			history.push_back(1);
+			last_frame_div = frame / 12;
+		}
+	}
+	void update(int frame) {
+		if (history.empty() || frame / resolution != last_frame_div) {
+			if (history.size() >= 5 * 1000 / 42 / resolution) history.pop_front();
+			history.push_back(0);
+			last_frame_div = frame / resolution;
+		}
+		if (frame % resolution) return;
+		//log("history.size() is %d\n", history.size());
+		if (history.size() == 0) {
+			current_apm = 0;
+			return;
+		}
+		int sum = 0;
+		for (auto& v : history) sum += v;
+		current_apm = (int)(sum * ((int64_t)256 * 60 * 1000 / 42 / resolution) / history.size() / 256);
+	}
+};
 
-struct main_t {
+struct ui_functions: replay_functions {
 	image_data img;
 	native_window::window wnd;
 
@@ -546,18 +346,18 @@ struct main_t {
 
 	size_t screen_width;
 	size_t screen_height;
-
-	rect_t<xy_t<size_t>> screen_tile;
-
+	
 	game_player player;
-	state& st = *player.st;
-	game_state& game_st = *st.game;
-	state_functions funcs{st};
+	replay_state current_replay_state;
+	action_state current_action_state;
+	std::array<apm_t, 12> apm;
+	ui_functions(game_player player) : replay_functions(player.st(), current_action_state, current_replay_state), player(std::move(player)) {}
+	
+	virtual void on_action(int owner, int action) override {
+		apm.at(owner).add_action(st.current_frame);
+	}
 
-	main_t(native_window::window wnd, game_player player) : wnd(std::move(wnd)), player(std::move(player)) {}
-
-	void draw_tiles(uint8_t* data) {
-
+	rect_t<xy_t<size_t>> screen_tile_bounds() {
 		size_t from_tile_y = screen_pos.y / 32u;
 		if (from_tile_y >= game_st.map_tile_height) from_tile_y = 0;
 		size_t to_tile_y = (screen_pos.y + screen_height + 31) / 32u;
@@ -567,14 +367,19 @@ struct main_t {
 		size_t to_tile_x = (screen_pos.x + screen_width + 31) / 32u;
 		if (to_tile_x > game_st.map_tile_width) to_tile_x = game_st.map_tile_width;
 
-		screen_tile = {{from_tile_x, from_tile_y}, {to_tile_x, to_tile_y}};
+		return {{from_tile_x, from_tile_y}, {to_tile_x, to_tile_y}};
+	}
 
-		size_t tile_index = from_tile_y * game_st.map_tile_width + from_tile_x;
+	void draw_tiles(uint8_t* data) {
+
+		auto screen_tile = screen_tile_bounds();
+
+		size_t tile_index = screen_tile.from.y * game_st.map_tile_width + screen_tile.from.x;
 		auto* megatile_index = &st.tiles_mega_tile_index[tile_index];
-		size_t width = to_tile_x - from_tile_x;
+		size_t width = screen_tile.to.x - screen_tile.from.x;
 
-		for (size_t tile_y = from_tile_y; tile_y != to_tile_y; ++tile_y) {
-			for (size_t tile_x = from_tile_x; tile_x != to_tile_x; ++tile_x) {
+		for (size_t tile_y = screen_tile.from.y; tile_y != screen_tile.to.y; ++tile_y) {
+			for (size_t tile_x = screen_tile.from.x; tile_x != screen_tile.to.x; ++tile_x) {
 
 				int screen_x = tile_x * 32 - screen_pos.x;
 				int screen_y = tile_y * 32 - screen_pos.y;
@@ -605,8 +410,8 @@ struct main_t {
 		}
 	}
 
-	void draw_image(const image_t* image, uint8_t* data) {
-		xy map_pos = funcs.get_image_map_position(image);
+	void draw_image(const image_t* image, uint8_t* data, size_t color_index) {
+		xy map_pos = get_image_map_position(image);
 
 		int screen_x = map_pos.x - screen_pos.x;
 		int screen_y = map_pos.y - screen_pos.y;
@@ -634,47 +439,62 @@ struct main_t {
 		width = std::min(width, screen_width - screen_x);
 		height = std::min(height, screen_height - screen_y);
 
-		if (image->modifier == 0) {
-
-			draw_frame(frame, funcs.i_flag(image, image_t::flag_horizontally_flipped), dst, screen_width, offset_x, offset_y, width, height);
-
+		if (image->modifier == 0 || image->modifier == 2 || image->modifier == 3 || image->modifier == 4) {
+			uint8_t* ptr = img.player_unit_colors.at(color_index).data();
+			auto player_color = [ptr](uint8_t new_value, uint8_t) {
+				if (new_value >= 8 && new_value < 16) return ptr[new_value - 8];
+				return new_value;
+			};
+			draw_frame(frame, i_flag(image, image_t::flag_horizontally_flipped), dst, screen_width, offset_x, offset_y, width, height, player_color);
 		} else if (image->modifier == 10) {
-
 			uint8_t* ptr = &img.dark_pcx.data[256 * 18];
 			auto shadow = [ptr](uint8_t, uint8_t old_value) {
 				return ptr[old_value];
 			};
-
-			draw_frame(frame, funcs.i_flag(image, image_t::flag_horizontally_flipped), dst, screen_width, offset_x, offset_y, width, height, shadow);
-
+			draw_frame(frame, i_flag(image, image_t::flag_horizontally_flipped), dst, screen_width, offset_x, offset_y, width, height, shadow);
+		} else if (image->modifier == 9) {
+			size_t index = image->image_type->color_shift;
+			auto& data = img.light_pcx.at(index - 1).data;
+			uint8_t* ptr = data.data();
+			size_t size = data.size() / 256;
+			auto glow = [ptr, size](uint8_t new_value, uint8_t old_value) {
+				if (new_value >= size) return (uint8_t)0;
+				return ptr[256u * new_value + old_value];
+			};
+			draw_frame(frame, i_flag(image, image_t::flag_horizontally_flipped), dst, screen_width, offset_x, offset_y, width, height, glow);
 		} else xcept("don't know how to draw image modifier %d", image->modifier);
 
 	}
 
 	void draw_sprite(const sprite_t* sprite, uint8_t* data) {
 		for (auto* image : ptr(reverse(sprite->images))) {
-			if (!funcs.i_flag(image, image_t::flag_hidden)) {
-				draw_image(image, data);
-			}
+			if (i_flag(image, image_t::flag_hidden)) continue;
+			draw_image(image, data, st.players[sprite->owner].color);
 		}
 	}
 
 	void draw_sprites(uint8_t* data) {
 
 		a_vector<std::pair<uint_fast32_t, const sprite_t*>> sorted_sprites;
+		
+		auto screen_tile = screen_tile_bounds();
 
-		for (size_t y = screen_tile.from.y; y != screen_tile.to.y; ++y) {
+		size_t from_y = screen_tile.from.y;
+		if (from_y < 4) from_y = 0;
+		else from_y -= 4;
+		size_t to_y = screen_tile.to.y;
+		if (to_y >= game_st.map_tile_height - 4) to_y = game_st.map_tile_height - 1;
+		else to_y += 4;
+		for (size_t y = from_y; y != to_y; ++y) {
 			for (auto* sprite : ptr(st.sprites_on_tile_line.at(y))) {
-				if (sprite->visibility_flags != 0) {
-					uint_fast32_t score = 0;
-					score |= sprite->elevation_level;
-					score <<= 13;
-					score |= sprite->elevation_level <= 4 ? sprite->position.y : 0;
-					score <<= 5;
-					score |= funcs.s_flag(sprite, (sprite_t::flags_t)0x10) ? 1 : 0;
-					//score = sprite->position.y;
-					sorted_sprites.emplace_back(score, sprite);
-				}
+				if (s_hidden(sprite)) continue;
+				uint_fast32_t score = 0;
+				score |= sprite->elevation_level;
+				score <<= 13;
+				score |= sprite->elevation_level <= 4 ? sprite->position.y : 0;
+				score <<= 1;
+				score |= s_flag(sprite, sprite_t::flag_turret) ? 1 : 0;
+				sorted_sprites.emplace_back(score, sprite);
 			}
 		}
 
@@ -685,101 +505,717 @@ struct main_t {
 		}
 
 	}
-
-	uint32_t random_state = 42;
-
-	auto random() {
-		random_state = random_state * 22695477 + 1;
-		return (random_state >> 16) & 0x7fff;
+	
+	void fill_rectangle(uint8_t* data, rect area, uint8_t index) {
+		if (area.from.x < 0) area.from.x = 0;
+		if (area.from.y < 0) area.from.y = 0;
+		if (area.to.x > (int)screen_width) area.to.x = screen_width;
+		if (area.to.y > (int)screen_height) area.to.y = screen_height;
+		if (area.from.x >= area.to.x || area.from.y >= area.to.y) return;
+		size_t width = area.to.x - area.from.x;
+		size_t pitch = screen_width;
+		size_t from_y = area.from.y;
+		size_t to_y = area.to.y;
+		uint8_t* ptr = data + screen_width * from_y + area.from.x;
+		for (size_t i = from_y; i != to_y; ++i) {
+			memset(ptr, index, width);
+			ptr += pitch;
+		}
+	}
+	
+	void line_rectangle(uint8_t* data, rect area, uint8_t index) {
+		size_t width = area.to.x - area.from.x;
+		size_t height = area.to.y - area.from.y;
+		uint8_t* p = data + screen_width * (size_t)area.from.y + (size_t)area.from.x;
+		memset(p, index, width);
+		memset(p + screen_width * height, index, width);
+		for (size_t y = 0; y != height; ++y) {
+			p[screen_width * y] = index;
+			p[screen_width * y + width - 1] = index;
+		}
+	}
+	
+	bool unit_visble_on_minimap(unit_t* u) {
+		if (ut_turret(u)) return false;
+		if (unit_is_trap(u)) return false;
+		if (unit_is(u, UnitTypes::Spell_Dark_Swarm)) return false;
+		if (unit_is(u, UnitTypes::Spell_Disruption_Web)) return false;
+		return true;
+	}
+	
+	rect get_minimap_area() {
+		size_t minimap_width = std::max(game_st.map_tile_width, game_st.map_tile_height);
+		size_t minimap_height = std::max(game_st.map_tile_width, game_st.map_tile_height);
+		if (game_st.map_width < game_st.map_height) {
+			minimap_width = minimap_width * minimap_width * game_st.map_tile_width / (minimap_height * game_st.map_tile_height);
+		} else if (game_st.map_height < game_st.map_width) {
+			minimap_height = minimap_height * minimap_height * game_st.map_tile_height / (minimap_width* game_st.map_tile_width);
+		}
+		if (screen_width < minimap_width || screen_height < minimap_height) return {};
+		int map_screen_x = 4;
+		int map_screen_y = screen_height - 4 - minimap_height;
+		rect area;
+		area.from = {map_screen_x, map_screen_y};
+		area.to = area.from + xy{(int)minimap_width, (int)minimap_height};
+		return area;
 	}
 
-
-	void order_move(int unit_id, int x, int y) {
-		funcs.set_unit_order(&st.units[unit_id], funcs.get_order_type(Orders::Move), xy(x, y));
+	void draw_minimap(uint8_t* data) {
+		auto area = get_minimap_area();
+		size_t minimap_width = area.to.x - area.from.x;
+		size_t minimap_height = area.to.y - area.from.y;
+		if (minimap_width != game_st.map_tile_width) return;
+		if (minimap_height != game_st.map_tile_height) return;
+		fill_rectangle(data, area, 0);
+		line_rectangle(data, {area.from - xy(1, 1), area.to + xy(1, 1)}, 0);
+		
+		uint8_t* p = data + screen_width * (size_t)area.from.y + (size_t)area.from.x;
+		
+		size_t pitch = screen_width - game_st.map_tile_width;
+		for (size_t y = 0; y != game_st.map_tile_height; ++y) {
+			for (size_t x = 0; x != game_st.map_tile_width; ++x) {
+				auto* images = &img.vx4.at(st.tiles_mega_tile_index[y * game_st.map_tile_width + x]).images[0];
+				auto* bitmap = &img.vr4.at(*images / 2).bitmap[0];
+				auto val = bitmap[55 / sizeof(vr4_entry::bitmap_t)];
+				size_t shift = 8 * (55 % sizeof(vr4_entry::bitmap_t));
+				val >>= shift;
+				*p++ = (uint8_t)val;
+			}
+			p += pitch;
+		}
+		
+		for (size_t i = 12; i != 0;) {
+			--i;
+			for (unit_t* u : ptr(st.player_units[i])) {
+				if (!unit_visble_on_minimap(u)) continue;
+				int color = img.player_minimap_colors.at(st.players[u->owner].color);
+				size_t w = u->unit_type->placement_size.x / 32u;
+				size_t h = u->unit_type->placement_size.y / 32u;
+				if (ut_building(u)) {
+					if (w > 2) w = 4;
+					if (h > 2) h = 4;
+				} else {
+					if (w < 2) w = 2;
+					if (h < 2) h = 2;
+				}
+				rect unit_area;
+				unit_area.from = area.from + (u->sprite->position - u->unit_type->placement_size / 2) / 32u;
+				unit_area.to = unit_area.from + xy(w, h);
+				fill_rectangle(data, unit_area, color);
+			}
+		}
+		
+		rect screen_rect;
+		screen_rect.from = area.from + xy(screen_pos.x / 32u, screen_pos.y / 32u);
+		screen_rect.to = screen_rect.from + xy((screen_width + 31) / 32u, (screen_height + 31) / 32u);
+		line_rectangle(data, screen_rect, 255);
+		
 	}
-
-	std::chrono::high_resolution_clock clock;
-	template<typename T>
-	auto elapsed(T since) {
-		return std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1000>>>(clock.now() - since).count();
+	
+	int replay_frame = 0;
+	
+	rect get_replay_slider_area() {
+		return {};
+		rect r;
+		int width = 192;
+		int height = 32;
+		r.from.x = (int)screen_width - 8 - width;
+		r.from.y = (int)screen_height - 8 - 128 - height;
+		r.to.x = r.from.x + width;
+		r.to.y = r.from.y + height;
+		if (r.from.x < 0 || r.from.y < 0) return {};
+		return r;
 	}
+	
+	void draw_ui(uint8_t* data) {
+		auto area = get_replay_slider_area();
+		if (area == rect{}) return;
+		fill_rectangle(data, area, 1);
+		line_rectangle(data, area, 12);
+		
+		int button_w = 16;
+		int button_h = 32;
+		int ow = (area.to.x - area.from.x) - button_w;
+		int ox = replay_frame * ow / replay_st.end_frame;
+		
+		if (st.current_frame != replay_frame) {
+			int cox = st.current_frame * ow / replay_st.end_frame;
+			line_rectangle(data, rect{area.from + xy(cox + button_w / 2, 0), area.from + xy(cox + button_w / 2 + 1, button_h)}, 50);
+		}
+		
+		fill_rectangle(data, rect{area.from + xy(ox, 0), area.from + xy(ox, 0) + xy(button_w, button_h)}, 10);
+		line_rectangle(data, rect{area.from + xy(ox, 0), area.from + xy(ox, 0) + xy(button_w, button_h)}, 51);
+		
+	}
+	
+	fp8 game_speed = fp8::integer(1);
+	
+//	void draw_text() {
+//		auto replay_slider_area = get_replay_slider_area();
+//		int seconds = st.current_frame * 42 / 1000;
+//		int minutes = seconds / 60;
+//		seconds = seconds % 60;
+//		auto center_text = [&](int x, int y, a_string str) {
+//			auto text_size = surface->size_text(str.c_str());
+//			x -= text_size.first / 2;
+//			surface->draw_text(x, y, str.c_str());
+//		};
+//		int time_x = replay_slider_area.from.x + (replay_slider_area.to.x - replay_slider_area.from.x) / 2;
+//		int time_y = replay_slider_area.to.y + 4;
+//		center_text(time_x, time_y, format("%02d:%02d", minutes, seconds));
+//		if (game_speed >= fp8::integer(1)) {
+//			center_text(time_x, time_y + 24, format("%dx speed", game_speed.integer_part()));
+//		} else {
+//			center_text(time_x, time_y + 24, format("1/%dx speed", (fp8::integer(1) / game_speed).integer_part()));
+//		}
+//	}
 
 	native_window_drawing::surface* surface = nullptr;
-	std::chrono::high_resolution_clock::time_point last_tick;
-	void tick() {
-		wnd.peek_message();
-
-		auto frame_start = clock.now();
-		for (unit_t* u : ptr(st.visible_units)) {
-			if (random() % 30 == 0) order_move(u - &st.units.front(), u->position.x - 256 + random() % 512, u->position.y - 256 + random() % 512);
+	native_window_drawing::palette* palette = nullptr;
+	std::chrono::high_resolution_clock clock;
+	std::chrono::high_resolution_clock::time_point last_draw;
+	std::chrono::high_resolution_clock::time_point last_input_poll;
+	std::chrono::high_resolution_clock::time_point last_fps;
+	int fps_counter = 0;
+	size_t scroll_speed_n = 0;
+	
+	void resize(int width, int height) {
+		screen_width = width;
+		screen_height = height;
+		if (surface) native_window_drawing::delete_surface(surface);
+		surface = nullptr;
+	}
+	
+	bool is_moving_minimap = false;
+	bool is_moving_replay_slider = false;
+	bool is_paused = false;
+	
+	void update() {
+		auto now = clock.now();
+		
+		if (now - last_fps >= std::chrono::seconds(1)) {
+			//log("draw fps: %g\n", fps_counter / std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1>>>(now - last_fps).count());
+			last_fps = now;
+			fps_counter = 0;
 		}
-		player.next_frame();
-		log("next_frame took %gms\n", elapsed(frame_start));
+		++fps_counter;
+		
+		auto minimap_area = get_minimap_area();
+		auto replay_slider_area = get_replay_slider_area();
+		
+		auto move_minimap = [&](int mouse_x, int mouse_y) {
+			if (mouse_x < minimap_area.from.x) mouse_x = minimap_area.from.x;
+			else if (mouse_x >= minimap_area.to.x) mouse_x = minimap_area.to.x - 1;
+			if (mouse_y < minimap_area.from.y) mouse_y = minimap_area.from.y;
+			else if (mouse_y >= minimap_area.to.y) mouse_y = minimap_area.to.y - 1;
+			int x = mouse_x - minimap_area.from.x;
+			int y = mouse_y - minimap_area.from.y;
+			x = x * game_st.map_tile_width / (minimap_area.to.x - minimap_area.from.x);
+			y = y * game_st.map_tile_height / (minimap_area.to.y - minimap_area.from.y);
+			screen_pos = xy(32 * x - screen_width / 2, 32 * y - screen_height / 2);
+		};
+		
+		auto check_move_minimap = [&](auto& e) {
+			if (e.mouse_x >= minimap_area.from.x && e.mouse_x < minimap_area.to.x) {
+				if (e.mouse_y >= minimap_area.from.y && e.mouse_y < minimap_area.to.y) {
+					is_moving_minimap = true;
+					move_minimap(e.mouse_x, e.mouse_y);
+				}
+			}
+		};
+		
+		auto move_replay_slider = [&](int mouse_x, int mouse_y) {
+			(void)mouse_y;
+			int x = mouse_x - replay_slider_area.from.x;
+			int button_w = 16;
+			x -= button_w / 2;
+			int ow = (replay_slider_area.to.x - replay_slider_area.from.x) - button_w;
+			if (x < 0) x = 0;
+			if (x >= ow) x = ow - 1;
+			replay_frame = x * replay_st.end_frame / ow;
+			
+		};
+		
+		auto check_move_replay_slider = [&](auto& e) {
+			if (e.mouse_x >= replay_slider_area.from.x && e.mouse_x < replay_slider_area.to.x) {
+				if (e.mouse_y >= replay_slider_area.from.y && e.mouse_y < replay_slider_area.to.y) {
+					is_moving_replay_slider = true;
+					move_replay_slider(e.mouse_x, e.mouse_y);
+				}
+			}
+		};
+	
+		native_window::event_t e;
+		while (wnd.peek_message(e)) {
+			switch (e.type) {
+			case native_window::event_t::type_quit:
+				exit(0);
+				break;
+			case native_window::event_t::type_resize:
+				resize(e.width, e.height);
+				break;
+			case native_window::event_t::type_mouse_button_down:
+				if (e.button == 1) {
+					check_move_minimap(e);
+					check_move_replay_slider(e);
+				}
+				break;
+			case native_window::event_t::type_mouse_motion:
+				if (e.button_state & 1) {
+					check_move_minimap(e);
+					check_move_replay_slider(e);
+				} else if (e.button_state & 4) {
+					screen_pos -= xy(e.mouse_xrel, e.mouse_yrel);
+				}
+				break;
+			case native_window::event_t::type_mouse_button_up:
+				if (e.button == 1) {
+					if (is_moving_minimap) is_moving_minimap = false;
+					if (is_moving_replay_slider) is_moving_replay_slider = false;
+				}
+				break;
+			case native_window::event_t::type_key_down:
+//				if (e.sym == ' ' || e.sym == 'p') {
+//					is_paused = !is_paused;
+//				}
+//				if (e.sym == 'a' || e.sym == 'u') {
+//					if (game_speed < fp8::integer(128)) game_speed *= 2;
+//				}
+//				if (e.sym == 'z' || e.sym == 'd') {
+//					if (game_speed > 2_fp8) game_speed /= 2;
+//				}
+//				if (e.sym == '\b') {
+//					int t = 5 * 42 / 1000;
+//					if (replay_frame < t) replay_frame = 0;
+//					else replay_frame -= t;
+//				}
+				break;
+			}
+		}
+		
+		if (!surface) {
+			surface = native_window_drawing::new_surface();
+			surface->create(&wnd);
+			surface->set_palette(palette);
+			
+			screen_width = surface->pitch();
+		}
+		
+		auto input_poll_speed = std::chrono::milliseconds(12);
+		
+		auto input_poll_t = now - last_input_poll;
+		if (input_poll_t >= input_poll_speed) {
+			last_input_poll = now;
+			if (input_poll_t >= input_poll_speed * 2) last_input_poll = now - input_poll_speed;
+			else last_input_poll += input_poll_speed;
+			std::array<int, 6> scroll_speeds = {4, 4, 8, 12, 12, 16};
+			
+			fp8 mult = fp8::integer(std::chrono::duration_cast<std::chrono::milliseconds>(input_poll_t).count()) / fp8::integer(std::chrono::milliseconds(24).count());
+			for (auto& v : scroll_speeds) v = (fp8::integer(v) * mult).integer_part();
+			int scroll_speed = scroll_speeds[scroll_speed_n];
+			auto prev_screen_pos = screen_pos;
+			if (wnd.get_key_state(81)) screen_pos.y += scroll_speed;
+			else if (wnd.get_key_state(82)) screen_pos.y -= scroll_speed;
+			if (wnd.get_key_state(79)) screen_pos.x += scroll_speed;
+			else if (wnd.get_key_state(80)) screen_pos.x -= scroll_speed;
+			if (screen_pos != prev_screen_pos) {
+				if (scroll_speed_n != scroll_speeds.size() - 1) ++scroll_speed_n;
+			} else scroll_speed_n = 0;
+			
+			if (is_moving_minimap) {
+				int x = -1;
+				int y = -1;
+				wnd.get_cursor_pos(&x, &y);
+				if (x != -1) move_minimap(x, y);
+			}
+			if (is_moving_replay_slider) {
+				int x = -1;
+				int y = -1;
+				wnd.get_cursor_pos(&x, &y);
+				if (x != -1) move_replay_slider(x, y);
+			}
+		}
+		if (screen_pos.y + screen_height > game_st.map_height) screen_pos.y = game_st.map_height - screen_height;
+		else if (screen_pos.y < 0) screen_pos.y = 0;
+		if (screen_pos.x + screen_width > game_st.map_width) screen_pos.x = game_st.map_width - screen_width;
+		else if (screen_pos.x < 0) screen_pos.x = 0;
 
-
-		auto draw_start = clock.now();
 		uint8_t* data = (uint8_t*)surface->lock();
 		draw_tiles(data);
 		draw_sprites(data);
-		log("drawing took %gms\n", elapsed(draw_start));
+		draw_minimap(data);
+		draw_ui(data);
 		surface->unlock();
-
-		auto now = clock.now();
-		double t = std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1000>>>(now - last_tick).count();
-		if (t < 42.0) {
-			std::this_thread::sleep_for(std::chrono::milliseconds((int)(42 - t)));
-		}
-		last_tick = clock.now();
+		//draw_text();
+		
+		surface->refresh();
 	}
 };
+
+struct saved_state {
+	state st;
+	action_state action_st;
+	std::array<apm_t, 12> apm;
+};
+
+struct main_t {
+	ui_functions ui;
+	
+	main_t(game_player player) : ui(std::move(player)) {}
+	
+	std::chrono::high_resolution_clock clock;
+	std::chrono::high_resolution_clock::time_point last_tick;
+	
+	std::chrono::high_resolution_clock::time_point last_fps;
+	int fps_counter = 0;
+	
+	a_map<int, std::unique_ptr<saved_state>> saved_states;
+	
+	std::array<image_data, 8> tileset_img;
+	
+	template<typename load_data_file_F>
+	void load_all_image_data(load_data_file_F&& load_data_file) {
+		for (size_t i = 0; i != 8; ++i) {
+			load_image_data(tileset_img[i], i, std::forward<load_data_file_F>(load_data_file));
+		}
+	}
+	
+	void set_image_data() {
+		ui.img = tileset_img.at(ui.game_st.tileset_index);
+		
+		native_window_drawing::color palette_colors[256];
+		if (ui.img.wpe.size() != 256 * 4) xcept("wpe size invalid (%d)", ui.img.wpe.size());
+		for (size_t i = 0; i != 256; ++i) {
+			palette_colors[i].r = ui.img.wpe[4 * i + 0];
+			palette_colors[i].g = ui.img.wpe[4 * i + 1];
+			palette_colors[i].b = ui.img.wpe[4 * i + 2];
+			palette_colors[i].a = ui.img.wpe[4 * i + 3];
+		}
+		ui.palette->set_colors(palette_colors);
+	}
+	
+	void reset() {
+		saved_states.clear();
+		ui.apm = {};
+		ui.replay_frame = 0;
+		auto& game = *ui.st.game;
+		ui.st = state();
+		game = game_state();
+		ui.replay_st = replay_state();
+		ui.action_st = action_state();
+		
+		ui.st.global = &ui.global_st;
+		ui.st.game = &game;
+	}
+	
+	void update() {
+		auto now = clock.now();
+		
+		auto tick_speed = std::chrono::milliseconds((fp8::integer(42) / ui.game_speed).integer_part());
+		
+		if (now - last_fps >= std::chrono::seconds(1)) {
+			//log("game fps: %g\n", fps_counter / std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1>>>(now - last_fps).count());
+			last_fps = now;
+			fps_counter = 0;
+		}
+		
+		auto next = [&]() {
+			int save_interval = ui.replay_st.end_frame / 20;
+			if (ui.st.current_frame == 0 || ui.st.current_frame % save_interval == 0) {
+				auto i = saved_states.find(ui.st.current_frame);
+				if (i == saved_states.end()) {
+					auto v = std::make_unique<saved_state>();
+					v->st = copy_state(ui.st);
+					v->action_st = copy_state(ui.action_st, ui.st, v->st);
+					v->apm = ui.apm;
+					saved_states[ui.st.current_frame] = std::move(v);
+				}
+			}
+			ui.replay_functions::next_frame();
+			for (auto& v : ui.apm) v.update(ui.st.current_frame);
+		};
+		
+		if (!ui.is_done() || ui.st.current_frame != ui.replay_frame) {
+			if (ui.st.current_frame != ui.replay_frame) {
+				if (ui.st.current_frame != ui.replay_frame) {
+					auto i = saved_states.lower_bound(ui.replay_frame);
+					if (i != saved_states.begin()) --i;
+					auto& v = i->second;
+					if (ui.st.current_frame > ui.replay_frame || v->st.current_frame > ui.st.current_frame) {
+						ui.st = copy_state(v->st);
+						ui.action_st = copy_state(v->action_st, v->st, ui.st);
+						ui.apm = v->apm;
+					}
+				}
+				if (ui.st.current_frame < ui.replay_frame) {
+					for (size_t i = 0; i != 128 && ui.st.current_frame != ui.replay_frame; ++i) {
+						next();
+					}
+				}
+				last_tick = now;
+			} else {
+				if (ui.is_paused) {
+					last_tick = now;
+				} else {
+					auto tick_t = now - last_tick;
+					if (tick_t >= tick_speed * 16) {
+						last_tick = now - tick_speed * 16;
+						tick_t = tick_speed * 16;
+					}
+					size_t tick_n = tick_speed.count() == 0 ? 128 : tick_t / tick_speed;
+					for (size_t i = 0; i != tick_n; ++i) {
+						++fps_counter;
+						last_tick += tick_speed;
+						
+						if (!ui.is_done()) next();
+						else break;
+					}
+					ui.replay_frame = ui.st.current_frame;
+				}
+			}
+		}
+		
+		ui.update();
+	}
+};
+
+#ifdef EMSCRIPTEN
+
+namespace bwgame {
+namespace data_loading {
+
+template<bool default_little_endian = true>
+struct js_file_reader {
+	a_string filename;
+	size_t index = ~(size_t)0;
+	size_t file_pointer = 0;
+	js_file_reader() = default;
+	explicit js_file_reader(a_string filename) {
+		open(std::move(filename));
+	}
+	void open(a_string filename) {
+		if (filename == "StarDat.mpq") index = 0;
+		else if (filename == "BrooDat.mpq") index = 1;
+		else if (filename == "Patch_rt.mpq") index = 2;
+		else xcept("js_file_reader: unknown filename '%s'", filename);
+		this->filename = std::move(filename);
+	}
+
+	void get_bytes(uint8_t* dst, size_t n) {
+		EM_ASM_({js_read_data($0, $1, $2, $3);}, index, dst, file_pointer, n);
+		file_pointer += n;
+	}
+
+	void seek(size_t offset) {
+		file_pointer = offset;
+	}
+	size_t tell() const {
+		file_pointer;
+	}
+	
+	size_t size() {
+		return EM_ASM_INT({return js_file_size($0);}, index);
+	}
+
+};
+
+}
+}
+
+main_t* m;
+
+int current_width = -1;
+int current_height = -1;
+
+extern "C" void ui_resize(int width, int height) {
+	if (width == current_width && height == current_height) return;
+	if (width <= 0 || height <= 0) return;
+	current_width = width;
+	current_height = height;
+	if (!m) return;
+	if (m->ui.surface) {
+		native_window_drawing::delete_surface(m->ui.surface);
+		m->ui.surface = nullptr;
+	}
+	m->ui.wnd.destroy();
+	m->ui.wnd.create("test", 0, 0, width, height);
+	m->ui.resize(width, height);
+}
+
+extern "C" double replay_get_value(int index) {
+	switch (index) {
+	case 0:
+		return m->ui.game_speed.raw_value / 256.0;
+	case 1:
+		return m->ui.is_paused ? 1 : 0;
+	case 2:
+		return (double)m->ui.st.current_frame;
+	case 3:
+		return (double)m->ui.replay_frame;
+	case 4:
+		return (double)m->ui.replay_st.end_frame;
+	case 5:
+		return (double)(uintptr_t)m->ui.replay_st.map_name.data();
+	case 6:
+		return (double)m->ui.replay_frame / m->ui.replay_st.end_frame;
+	default:
+		return 0;
+	}
+}
+
+extern "C" void replay_set_value(int index, double value) {
+	switch (index) {
+	case 0:
+		m->ui.game_speed.raw_value = (int)(value * 256.0);
+		if (m->ui.game_speed < 1_fp8) m->ui.game_speed = 1_fp8;
+		break;
+	case 1:
+		m->ui.is_paused = value != 0.0;
+		break;
+	case 3:
+		m->ui.replay_frame = (int)value;
+		if (m->ui.replay_frame < 0) m->ui.replay_frame = 0;
+		if (m->ui.replay_frame > m->ui.replay_st.end_frame) m->ui.replay_frame = m->ui.replay_st.end_frame;
+		break;
+	case 6:
+		m->ui.replay_frame = (int)(m->ui.replay_st.end_frame * value);
+		if (m->ui.replay_frame < 0) m->ui.replay_frame = 0;
+		if (m->ui.replay_frame > m->ui.replay_st.end_frame) m->ui.replay_frame = m->ui.replay_st.end_frame;
+		break;
+	}
+}
+
+struct util_funcs: state_functions {
+	util_funcs(state& st) : state_functions(st) {}
+	
+	double worker_supply(int owner) {
+		double r = 0.0;
+		for (const unit_t* u : ptr(st.player_units.at(owner))) {
+			if (!ut_worker(u)) continue;
+			r += u->unit_type->supply_required.raw_value / 2.0;
+		}
+		return r;
+	}
+	
+	double army_supply(int owner) {
+		double r = 0.0;
+		for (const unit_t* u : ptr(st.player_units.at(owner))) {
+			if (ut_worker(u)) continue;
+			r += u->unit_type->supply_required.raw_value / 2.0;
+		}
+		return r;
+	}
+	
+};
+
+extern "C" double player_get_value(int player, int index) {
+	if (player < 0 || player >= 12) return 0;
+	switch (index) {
+	case 0:
+		return m->ui.st.players.at(player).controller == state::player_t::controller_occupied ? 1 : 0;
+	case 1:
+		return (double)m->ui.st.players.at(player).color;
+	case 2:
+		return (double)(uintptr_t)m->ui.replay_st.player_name.at(player).data();
+	case 3:
+		return m->ui.st.supply_used.at(player)[0].raw_value / 2.0;
+	case 4:
+		return m->ui.st.supply_used.at(player)[1].raw_value / 2.0;
+	case 5:
+		return m->ui.st.supply_used.at(player)[2].raw_value / 2.0;
+	case 6:
+		return m->ui.st.supply_available.at(player)[0].raw_value / 2.0;
+	case 7:
+		return m->ui.st.supply_available.at(player)[1].raw_value / 2.0;
+	case 8:
+		return m->ui.st.supply_available.at(player)[2].raw_value / 2.0;
+	case 9:
+		return (double)m->ui.st.current_minerals.at(player);
+	case 10:
+		return (double)m->ui.st.current_gas.at(player);
+	case 11:
+		return util_funcs(m->ui.st).worker_supply(player);
+	case 12:
+		return util_funcs(m->ui.st).army_supply(player);
+	case 13:
+		return (double)(int)m->ui.st.players.at(player).race;
+	case 14:
+		return (double)m->ui.apm.at(player).current_apm;
+	default:
+		return 0;
+	}
+}
+
+bool any_replay_loaded = false;
+
+extern "C" void load_replay(const uint8_t* data, size_t len) {
+	m->reset();
+	m->ui.load_replay_data(data, len);
+	m->set_image_data();
+	any_replay_loaded = true;
+}
+
+#endif
 
 int main() {
 
 	using namespace bwgame;
 
+	size_t screen_width = 100;
+	size_t screen_height = 100;
+	
 	std::chrono::high_resolution_clock clock;
-	auto load_start = clock.now();
-
-	size_t screen_width = 1280;
-	size_t screen_height = 800;
-
-	native_window::window wnd;
-	wnd.create("test", 0, 0, screen_width, screen_height);
-
-	auto* surface = native_window_drawing::new_surface();
-	auto* palette = native_window_drawing::new_palette();
-	palette->set_colors(palette_colors);
-
-	surface->create(&wnd);
-	surface->set_palette(palette);
-
-	auto load_data_file = data_loading::data_files_directory(".");
-
-	main_t m(std::move(wnd), game_player(load_data_file));
-	m.surface = surface;
-	m.screen_width = screen_width;
-	m.screen_height = screen_height;
-
-	m.player.load_map_file("maps/testone.scm");
-
-	m.screen_pos = {32 * 46 + 16, 32 * 41 + 3};
-
-	load_image_data(m.img, m.game_st, load_data_file);
-
-	auto elapsed = [&](auto since) {
-		return std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1000>>>(clock.now() - since).count();
-	};
-
-	log("loaded in %gms\n", elapsed(load_start));
+	auto start = clock.now();
 
 #ifdef EMSCRIPTEN
-	main_t* nm = new main_t(std::move(m));
+	if (current_width != -1) {
+		screen_width = current_width;
+		screen_height = current_height;
+	}
+	auto load_data_file = data_loading::data_files_directory<data_loading::data_files_loader<data_loading::mpq_file<data_loading::js_file_reader<>>>>("");
+#else
+	auto load_data_file = data_loading::data_files_directory("");
+#endif
+	
+	game_player player(load_data_file);
+
+	main_t m(std::move(player));
+	auto& ui = m.ui;
+	
+	m.load_all_image_data(load_data_file);
+
+	//ui.load_replay_file("maps/ff1.rep");
+//	game_load_functions funcs(m.ui.st);
+//	funcs.reset();
+
+	auto& wnd = ui.wnd;
+	wnd.create("test", 0, 0, screen_width, screen_height);
+
+	auto* palette = native_window_drawing::new_palette();
+
+	ui.palette = palette;
+	ui.screen_width = screen_width;
+	ui.screen_height = screen_height;
+	ui.screen_pos = {(int)ui.game_st.map_width / 2 - (int)screen_width / 2, (int)ui.game_st.map_height / 2 - (int)screen_height / 2};
+	
+	m.set_image_data();
+	
+	log("loaded in %dms\n", std::chrono::duration_cast<std::chrono::milliseconds>(clock.now() - start).count());
+	log("v3\n");
+
+#ifdef EMSCRIPTEN
+	::m = &m;
+	EM_ASM({js_load_done();});
 	emscripten_set_main_loop_arg([](void* ptr) {
-		((main_t*)ptr)->tick();
-	}, nm, 0, 0);
+		if (!any_replay_loaded) return;
+		EM_ASM({js_pre_main_loop();});
+		((main_t*)ptr)->update();
+		EM_ASM({js_post_main_loop();});
+	}, &m, 0, 1);
 #else
 	while (true) {
-		m.tick();
+		m.update();
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	}
 #endif
 

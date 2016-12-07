@@ -27,12 +27,16 @@ namespace native_window_drawing {
 		virtual void set_palette(palette* pal) = 0;
 		virtual void* lock() = 0;
 		virtual void unlock() = 0;
+		virtual void refresh() = 0;
+		virtual int pitch() = 0;
 	};
 
 	palette* new_palette();
 	void delete_palette(palette*);
 	surface* new_surface();
 	void delete_surface(surface*);
+	
+	
 
 }
 
