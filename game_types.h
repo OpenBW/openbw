@@ -494,7 +494,7 @@ struct unit_t: flingy_t {
 			int flag_spawn_frame;
 		} beacon;
 		struct {
-			sprite_t* nuke_dot;
+			thingy_t* nuke_dot;
 		} ghost;
 	};
 
@@ -588,7 +588,7 @@ struct unit_t: flingy_t {
 	int irradiate_owner;
 	int parasite_flags;
 	int cycle_counter;
-	bool is_blind;
+	int blinded_by;
 	int maelstrom_timer;
 	int unused_0x125;
 	int acid_spore_count;

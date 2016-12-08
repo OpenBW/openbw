@@ -537,7 +537,7 @@ enum struct Orders : int {
 	EnableDoodad,
 	DisableDoodad,
 	WarpIn,
-	Medic,
+	MedicIdle,
 	MedicHeal,
 	HealMove,
 	MedicHoldPosition,

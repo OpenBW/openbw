@@ -312,7 +312,7 @@ struct action_functions: state_functions {
 		if (u->owner != owner) return false;
 		if (!unit_build_order_valid(u, order_type, unit_type, owner)) return false;
 		if (ut_addon(unit_type)) {
-			xy pos(int(32 * tile_pos.x + unit_type->placement_size.x / 2), int(32 * tile_pos.y + unit_type->placement_size.y / 2));
+			xy pos(int(32 * tile_pos.x) + unit_type->placement_size.x / 2, int(32 * tile_pos.y) + unit_type->placement_size.y / 2);
 			if (can_place_building(u, owner, unit_type, pos, false, false)) {
 				xy builder_pos(int(32 * tile_pos.x + u->unit_type->placement_size.x / 2), int(32 * tile_pos.y + u->unit_type->placement_size.y / 2));
 				builder_pos.x -= unit_type->addon_position.x / 32 * 32;
@@ -322,7 +322,7 @@ struct action_functions: state_functions {
 				}
 			}
 		} else {
-			xy pos(int(32 * tile_pos.x + unit_type->placement_size.x / 2), int(32 * tile_pos.y + unit_type->placement_size.y / 2));
+			xy pos(int(32 * tile_pos.x) + unit_type->placement_size.x / 2, int(32 * tile_pos.y) + unit_type->placement_size.y / 2);
 			if (can_place_building(u, owner, unit_type, pos, false, false)) {
 				place_building(u, order_type, unit_type, pos);
 			}
@@ -798,6 +798,34 @@ struct action_functions: state_functions {
 		cancel_building_unit(addon);
 		return true;
 	}
+	
+	bool action_stim_pack(int owner) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (!unit_can_use_tech(u, get_tech_type(TechTypes::Stim_Packs))) continue;
+			if (u->hp <= fp8::integer(10)) continue;
+			lcg_rand(31, 0, 1); // todo: callback for sound
+			unit_deal_damage(u, fp8::integer(10), nullptr, ~0);
+			if (u->stim_timer < 37) {
+				u->stim_timer = 37;
+				update_unit_speed(u);
+			}
+			retval = true;
+		}
+		return retval;
+	}
+	
+	bool action_cancel_nuke(int owner) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (!unit_is_ghost(u)) continue;
+			if (!u->connected_unit || !unit_is(u->connected_unit, UnitTypes::Terran_Nuclear_Missile)) continue;
+			u->connected_unit->connected_unit = nullptr;
+			u->connected_unit = nullptr;
+			retval = true;
+		}
+		return retval;
+	}
 
 	template<typename reader_T>
 	bool read_action_select(int owner, reader_T&& r) {
@@ -1017,6 +1045,23 @@ struct action_functions: state_functions {
 		return action_cancel_addon(owner);
 	}
 	
+	template<typename reader_T>
+	bool read_action_stim_pack(int owner, reader_T&& r) {
+		return action_stim_pack(owner);
+	}
+	
+	template<typename reader_T>
+	bool read_action_cancel_nuke(int owner, reader_T&& r) {
+		return action_cancel_nuke(owner);
+	}
+	
+	template<typename reader_T>
+	bool read_action_ping_minimap(int owner, reader_T&& r) {
+		r.template get<uint16_t>();
+		r.template get<uint16_t>();
+		return true;
+	}
+	
 	virtual void on_action(int owner, int action) {
 	}
 
@@ -1072,6 +1117,8 @@ struct action_functions: state_functions {
 			return read_action_unload(owner, r);
 		case 43:
 			return read_action_hold_position(owner, r);
+		case 46:
+			return read_action_cancel_nuke(owner, r);
 		case 47:
 			return read_action_liftoff(owner, r);
 		case 48:
@@ -1084,8 +1131,12 @@ struct action_functions: state_functions {
 			return read_action_cancel_upgrade(owner, r);
 		case 52:
 			return read_action_cancel_addon(owner, r);
+		case 54:
+			return read_action_stim_pack(owner, r);
 		case 87:
 			return read_action_player_leave(owner, r);
+		case 88:
+			return read_action_ping_minimap(owner, r);
 		case 92:
 			return read_action_chat(owner, r);
 		default:
