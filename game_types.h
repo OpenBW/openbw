@@ -27,6 +27,35 @@ struct unit_id {
 	}
 };
 
+enum struct race {
+	zerg,
+	terran,
+	protoss,
+	none
+};
+
+
+struct player_t {
+	enum {
+		controller_inactive,
+		controller_computer_game,
+		controller_occupied,
+		controller_rescue_passive,
+		controller_unused_rescue_active,
+		controller_computer,
+		controller_open,
+		controller_neutral,
+		controller_closed,
+		controller_unused_observer,
+		controller_user_left,
+		controller_computer_defeated
+	};
+	int controller = controller_inactive;
+	race race = race::zerg;
+	int force = 0;
+	int color = 0;
+};
+
 struct sight_values_t {
 	struct maskdat_node_t;
 	typedef a_vector<maskdat_node_t> maskdat_t;
@@ -208,7 +237,77 @@ struct regions_t {
 
 };
 
-
+struct creep_life_t {
+	int recede_timer = 0;
+	int check_dead_unit_timer = 0;
+	
+	struct entry {
+		std::pair<entry*, entry*> hash_link;
+		std::pair<entry*, entry*> list_link;
+		xy_t<size_t> tile_pos;
+		size_t n_neighboring_creep_tiles = 0;
+	};
+	struct entry_hash_table {
+		std::array<intrusive_list<entry, void, &entry::hash_link>, 0x200> buckets;
+		entry* find(xy_t<size_t> tile_pos) {
+			size_t index = tile_pos.y * 7 + tile_pos.x;
+			for (auto& v : buckets[index]) {
+				if (v.tile_pos == tile_pos) return &v;
+			}
+			return nullptr;
+		}
+		void remove(entry* v) {
+			size_t index = v->tile_pos.y * 7 + v->tile_pos.x;
+			buckets[index].remove(*v);
+		}
+		void insert(entry* v) {
+			size_t index = v->tile_pos.y * 7 + v->tile_pos.x;
+			buckets[index].push_front(*v);
+		}
+	};
+	std::array<intrusive_list<entry, void, &entry::list_link>, 9> lists;
+	std::array<size_t, 9> lists_size{};
+	intrusive_list<entry, void, &entry::list_link> free_list;
+	size_t free_list_size = 0;
+	entry_hash_table table;
+	
+	a_vector<entry> entry_container = a_vector<entry>(1024);
+	
+	creep_life_t() {
+		for (auto& v : entry_container) {
+			free_list.push_back(v);
+			++free_list_size;
+		}
+	}
+	creep_life_t(creep_life_t&&) = default;
+	creep_life_t(const creep_life_t& n) {
+		*this = n;
+	}
+	creep_life_t& operator=(creep_life_t&&) = default;
+	creep_life_t& operator=(const creep_life_t& n) {
+		for (size_t i = 0; i != entry_container.size(); ++i) {
+			entry_container[i].tile_pos = n.entry_container[i].tile_pos;
+			entry_container[i].n_neighboring_creep_tiles = n.entry_container[i].n_neighboring_creep_tiles;
+		}
+		auto assemble = [&](auto& dst, auto& src) {
+			dst.clear();
+			for (auto& v : src) {
+				dst.push_back(entry_container[&v - n.entry_container.data()]);
+			}
+		};
+		for (size_t i = 0; i != lists.size(); ++i) {
+			assemble(lists[i], n.lists[i]);
+			lists_size[i] = n.lists_size[i];
+		}
+		assemble(free_list, n.free_list);
+		free_list_size = n.free_list_size;
+		for (size_t i = 0; i != table.buckets.size(); ++i) {
+			assemble(table.buckets[i], n.table.buckets[i]);
+		}
+		for (auto& v : free_list) log("copy free %p\n", &v);
+		return *this;
+	}
+};
 
 struct target_t {
 	xy pos;
@@ -400,7 +499,7 @@ struct unit_t: flingy_t {
 		status_flag_800 = 0x800,
 		status_flag_order_not_interruptible = 0x1000,
 		status_flag_iscript_nobrk = 0x2000,
-
+		status_flag_4000 = 0x4000,
 		status_flag_cannot_attack = 0x8000,
 		status_flag_can_turn = 0x10000,
 		status_flag_can_move = 0x20000,

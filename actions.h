@@ -11,7 +11,7 @@ struct action_state {
 	action_state(const action_state&) = delete;
 	action_state& operator=(action_state&) = delete;
 	action_state& operator=(action_state&&) = default;
-	
+
 	std::array<int, 12> player_id{};
 
 	size_t actions_data_position = 0;
@@ -636,7 +636,7 @@ struct action_functions: state_functions {
 	bool action_research(int owner, const tech_type_t* tech) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
-		if (!unit_can_research(u, tech, u->owner)) return false;
+		if (!unit_can_research(u, tech, owner)) return false;
 		if (!has_available_resources_for(u->owner, tech, true)) return false;
 		st.current_minerals[u->owner] -= tech->mineral_cost;
 		st.current_gas[u->owner] -= tech->gas_cost;
@@ -661,7 +661,7 @@ struct action_functions: state_functions {
 	bool action_upgrade(int owner, const upgrade_type_t* upgrade) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
-		if (!unit_can_upgrade(u, upgrade, u->owner)) return false;
+		if (!unit_can_upgrade(u, upgrade, owner)) return false;
 		if (!has_available_resources_for(u->owner, upgrade, true)) return false;
 		st.current_minerals[u->owner] -= upgrade_mineral_cost(owner, upgrade);
 		st.current_gas[u->owner] -= upgrade_gas_cost(owner, upgrade);
@@ -687,6 +687,7 @@ struct action_functions: state_functions {
 	bool action_unsiege(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
+			if (u->owner != owner) continue;
 			if (!unit_is_sieged_tank(u)) continue;
 			if (u->order_type->id == Orders::Unsieging) continue;
 			if (!unit_can_use_tech(u, get_tech_type(TechTypes::Tank_Siege_Mode))) continue;
@@ -699,6 +700,7 @@ struct action_functions: state_functions {
 	bool action_siege(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
+			if (u->owner != owner) continue;
 			if (!unit_is_unsieged_tank(u)) continue;
 			if (u->order_type->id == Orders::Sieging) continue;
 			if (!unit_can_use_tech(u, get_tech_type(TechTypes::Tank_Siege_Mode))) continue;
@@ -707,7 +709,7 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
-	
+
 	bool action_return_cargo(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
@@ -721,7 +723,7 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
-	
+
 	bool action_hold_position(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
@@ -737,10 +739,11 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
-	
+
 	bool action_cloak(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
+			if (u->owner != owner) continue;
 			const tech_type_t* tech = nullptr;
 			if (unit_is_ghost(u)) tech = get_tech_type(TechTypes::Personnel_Cloaking);
 			else if (unit_is_wraith(u)) tech = get_tech_type(TechTypes::Cloaking_Field);
@@ -753,10 +756,11 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
-	
+
 	bool action_decloak(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
+			if (u->owner != owner) continue;
 			const tech_type_t* tech = nullptr;
 			if (unit_is_ghost(u)) tech = get_tech_type(TechTypes::Personnel_Cloaking);
 			else if (unit_is_wraith(u)) tech = get_tech_type(TechTypes::Cloaking_Field);
@@ -766,7 +770,7 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
-	
+
 	bool action_set_alliances(int owner, std::array<int, 12> alliances) {
 		st.alliances.at(owner) = alliances;
 		for (unit_t* u : ptr(st.player_units[owner])) {
@@ -778,14 +782,14 @@ struct action_functions: state_functions {
 		}
 		return true;
 	}
-	
+
 	bool action_set_shared_vision(int owner, uint32_t flags) {
 		flags &= 0xff;
 		flags |= st.shared_vision.at(owner) & 0xff00;
 		st.shared_vision.at(owner) = flags;
 		return true;
 	}
-	
+
 	bool action_cancel_addon(int owner) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u || u->owner != owner) return false;
@@ -798,10 +802,11 @@ struct action_functions: state_functions {
 		cancel_building_unit(addon);
 		return true;
 	}
-	
+
 	bool action_stim_pack(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
+			if (u->owner != owner) continue;
 			if (!unit_can_use_tech(u, get_tech_type(TechTypes::Stim_Packs))) continue;
 			if (u->hp <= fp8::integer(10)) continue;
 			lcg_rand(31, 0, 1); // todo: callback for sound
@@ -814,7 +819,7 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
-	
+
 	bool action_cancel_nuke(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
@@ -823,6 +828,35 @@ struct action_functions: state_functions {
 			u->connected_unit->connected_unit = nullptr;
 			u->connected_unit = nullptr;
 			retval = true;
+		}
+		return retval;
+	}
+
+	bool action_morph(int owner, const unit_type_t* unit_type) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (u->owner != owner) continue;
+			if (unit_is(u, UnitTypes::Zerg_Hydralisk) && unit_is(unit_type, UnitTypes::Zerg_Lurker)) {
+				if (!unit_can_use_tech(u, get_tech_type(TechTypes::Lurker_Aspect))) continue;
+			} else if (unit_is(u, UnitTypes::Zerg_Larva) || unit_is(u, UnitTypes::Zerg_Mutalisk)) {
+				if (!unit_can_build(u, unit_type)) continue;
+			} else continue;
+			if (u->order_type->id == Orders::ZergUnitMorph) continue;
+			if (!build_queue_push(u, unit_type)) continue;
+			set_unit_order(u, get_order_type(Orders::ZergUnitMorph));
+		}
+		return retval;
+	}
+
+	bool action_morph_building(int owner, const unit_type_t* unit_type) {
+		if (!unit_is_zerg_building(unit_type)) return false;
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (u->owner != owner) continue;
+			if (!unit_is_zerg_building(u)) continue;
+			if (!unit_can_build(u, unit_type)) continue;
+			build_queue_push(u, unit_type);
+			if (u->order_type->id != Orders::ZergBuildingMorph) set_unit_order(u, get_order_type(Orders::ZergBuildingMorph));
 		}
 		return retval;
 	}
@@ -987,7 +1021,7 @@ struct action_functions: state_functions {
 		bool queue = r.template get<uint8_t>() != 0;
 		return action_siege(owner, queue);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_chat(int owner, reader_T&& r) {
 		auto buf = r.template get<std::array<uint8_t, 81>>();
@@ -998,31 +1032,31 @@ struct action_functions: state_functions {
 		}
 		return true;
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_return_cargo(int owner, reader_T&& r) {
 		bool queue = r.template get<uint8_t>() != 0;
 		return action_return_cargo(owner, queue);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_hold_position(int owner, reader_T&& r) {
 		bool queue = r.template get<uint8_t>() != 0;
 		return action_hold_position(owner, queue);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_cloak(int owner, reader_T&& r) {
 		r.template get<uint8_t>();
 		return action_cloak(owner);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_decloak(int owner, reader_T&& r) {
 		r.template get<uint8_t>();
 		return action_decloak(owner);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_set_alliances(int owner, reader_T&& r) {
 		std::array<int, 12> arr;
@@ -1033,35 +1067,47 @@ struct action_functions: state_functions {
 		}
 		return action_set_alliances(owner, arr);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_set_shared_vision(int owner, reader_T&& r) {
 		uint32_t flags = r.template get<uint16_t>();
 		return action_set_shared_vision(owner, flags);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_cancel_addon(int owner, reader_T&& r) {
 		return action_cancel_addon(owner);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_stim_pack(int owner, reader_T&& r) {
 		return action_stim_pack(owner);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_cancel_nuke(int owner, reader_T&& r) {
 		return action_cancel_nuke(owner);
 	}
-	
+
 	template<typename reader_T>
 	bool read_action_ping_minimap(int owner, reader_T&& r) {
 		r.template get<uint16_t>();
 		r.template get<uint16_t>();
 		return true;
 	}
-	
+
+	template<typename reader_T>
+	bool read_action_morph(int owner, reader_T&& r) {
+		auto* unit_type = get_unit_type((UnitTypes)r.template get<uint16_t>());
+		return action_morph(owner, unit_type);
+	}
+
+	template<typename reader_T>
+	bool read_action_morph_building(int owner, reader_T&& r)  {
+		auto* unit_type = get_unit_type((UnitTypes)r.template get<uint16_t>());
+		return action_morph_building(owner, unit_type);
+	}
+
 	virtual void on_action(int owner, int action) {
 	}
 
@@ -1107,6 +1153,8 @@ struct action_functions: state_functions {
 			return read_action_cloak(owner, r);
 		case 34:
 			return read_action_decloak(owner, r);
+		case 35:
+			return read_action_morph(owner, r);
 		case 37:
 			return read_action_unsiege(owner, r);
 		case 38:
@@ -1131,6 +1179,8 @@ struct action_functions: state_functions {
 			return read_action_cancel_upgrade(owner, r);
 		case 52:
 			return read_action_cancel_addon(owner, r);
+		case 53:
+			return read_action_morph_building(owner, r);
 		case 54:
 			return read_action_stim_pack(owner, r);
 		case 87:

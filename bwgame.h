@@ -76,13 +76,6 @@ static void bw_insert_list(cont_T& cont, T& v) {
 	else cont.insert(std::next(cont.begin()), v);
 }
 
-enum struct race {
-	zerg,
-	terran,
-	protoss,
-	none
-};
-
 template<typename T>
 struct autocast {
 	T val;
@@ -208,26 +201,6 @@ struct state_base_copyable {
 	int secondary_order_timer_counter;
 	int current_frame;
 
-	struct player_t {
-		enum {
-			controller_inactive,
-			controller_computer_game,
-			controller_occupied,
-			controller_rescue_passive,
-			controller_unused_rescue_active,
-			controller_computer,
-			controller_open,
-			controller_neutral,
-			controller_closed,
-			controller_unused_observer,
-			controller_user_left,
-			controller_computer_defeated
-		};
-		int controller = controller_inactive;
-		race race = race::zerg;
-		int force = 0;
-		int color = 0;
-	};
 	std::array<player_t, 12> players;
 
 	std::array<std::array<int, 12>, 12> alliances;
@@ -267,6 +240,7 @@ struct state_base_copyable {
 	uint32_t lcg_rand_state;
 
 	int last_error;
+	int triggers_state;
 
 	size_t active_orders_size;
 	size_t active_bullets_size;
@@ -283,9 +257,9 @@ struct state_base_copyable {
 	std::array<int, 12> total_gas_gathered;
 
 	std::array<static_vector<std::pair<const unit_t*, const unit_t*>, 16>, 32> recent_lurker_hits;
-	size_t recent_lurker_hit_current_index = 0;
+	size_t recent_lurker_hit_current_index;
 
-	int triggers_state = 0;
+	creep_life_t creep_life;
 };
 
 struct state_base_non_copyable {
@@ -762,32 +736,36 @@ struct state_functions {
 		return false;
 	}
 
-	void tiles_flags_and(int offset_x, int offset_y, int width, int height, int flags) {
-		if (std::max((size_t)offset_x, (size_t)(offset_x + width)) > game_st.map_tile_width) xcept("attempt to mask tile out of bounds");
-		if (std::max((size_t)offset_y, (size_t)(offset_y + height)) > game_st.map_tile_height) xcept("attempt to mask tile out of bounds");
-		for (int y = offset_y; y != offset_y + height; ++y) {
-			for (int x = offset_x; x != offset_x + width; ++x) {
+	void tiles_flags_and(size_t offset_x, size_t offset_y, size_t width, size_t height, int flags) {
+		if (offset_x >= game_st.map_tile_width) xcept("attempt to mask tile out of bounds");
+		if (offset_y >= game_st.map_tile_height) xcept("attempt to mask tile out of bounds");
+		if (width > game_st.map_tile_width || offset_x + width > game_st.map_tile_width) xcept("attempt to mask tile out of bounds");
+		if (height > game_st.map_tile_height || offset_y + height > game_st.map_tile_height) xcept("attempt to mask tile out of bounds");
+		for (size_t y = offset_y; y != offset_y + height; ++y) {
+			for (size_t x = offset_x; x != offset_x + width; ++x) {
 				st.tiles[x + y * game_st.map_tile_width].flags &= flags;
 			}
 		}
 	}
-	void tiles_flags_or(int offset_x, int offset_y, int width, int height, int flags) {
-		if (std::max((size_t)offset_x, (size_t)(offset_x + width)) > game_st.map_tile_width) xcept("attempt to mask tile out of bounds");
-		if (std::max((size_t)offset_y, (size_t)(offset_y + height)) > game_st.map_tile_height) xcept("attempt to mask tile out of bounds");
-		for (int y = offset_y; y != offset_y + height; ++y) {
-			for (int x = offset_x; x != offset_x + width; ++x) {
+	void tiles_flags_or(size_t offset_x, size_t offset_y, size_t width, size_t height, int flags) {
+		if (offset_x >= game_st.map_tile_width) xcept("attempt to mask tile out of bounds");
+		if (offset_y >= game_st.map_tile_height) xcept("attempt to mask tile out of bounds");
+		if (width > game_st.map_tile_width || offset_x + width > game_st.map_tile_width) xcept("attempt to mask tile out of bounds");
+		if (height > game_st.map_tile_height || offset_y + height > game_st.map_tile_height) xcept("attempt to mask tile out of bounds");
+		for (size_t y = offset_y; y != offset_y + height; ++y) {
+			for (size_t x = offset_x; x != offset_x + width; ++x) {
 				st.tiles[x + y * game_st.map_tile_width].flags |= flags;
 			}
 		}
 	}
 
-	bool unit_type_spreads_creep(const unit_type_t* ut, bool unit_is_completed = true) const {
-		if (ut->id == UnitTypes::Zerg_Hatchery && unit_is_completed) return true;
-		if (ut->id == UnitTypes::Zerg_Lair) return true;
-		if (ut->id == UnitTypes::Zerg_Hive) return true;
-		if (ut->id == UnitTypes::Zerg_Creep_Colony && unit_is_completed) return true;
-		if (ut->id == UnitTypes::Zerg_Spore_Colony) return true;
-		if (ut->id == UnitTypes::Zerg_Sunken_Colony) return true;
+	bool unit_type_spreads_creep(unit_type_autocast ut, bool unit_is_completed = true) const {
+		if (unit_is(ut, UnitTypes::Zerg_Hatchery) && unit_is_completed) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Lair)) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Hive)) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Creep_Colony) && unit_is_completed) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Spore_Colony)) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Sunken_Colony)) return true;
 		return false;
 	}
 
@@ -998,7 +976,7 @@ struct state_functions {
 		u_set_status_flag(u, unit_t::status_flag_invincible, ut_invincible(u));
 		disable_effect_end(u, ImageTypes::IMAGEID_Stasis_Field_Small, ImageTypes::IMAGEID_Stasis_Field_Large);
 	}
-	
+
 	void deal_irradiate_damage(unit_t* source_unit) {
 		auto damage = [&](unit_t* target) {
 			if (!ut_organic(target)) return;
@@ -1023,35 +1001,35 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void remove_irradiate(unit_t* u) {
 		u->irradiate_timer = 0;
 		u->irradiated_by = 0;
 		u->irradiate_owner = 8;
 		destroy_image_from_to(u->sprite, ImageTypes::IMAGEID_Irradiate_Small, ImageTypes::IMAGEID_Irradiate_Large);
 	}
-	
+
 	void remove_ensnare(unit_t* u) {
 		u->ensnare_timer = 0;
 		destroy_image_from_to(u->sprite, ImageTypes::IMAGEID_Ensnare_Overlay_Small, ImageTypes::IMAGEID_Ensnare_Overlay_Large);
 		update_unit_speed(u);
 	}
-	
+
 	void remove_lockdown(unit_t* u) {
 		u->lockdown_timer = 0;
 		disable_effect_end(u, ImageTypes::IMAGEID_Lockdown_Field_Small, ImageTypes::IMAGEID_Lockdown_Field_Large);
 	}
-	
+
 	void remove_plague(unit_t* u) {
 		u->plague_timer = 0;
 		destroy_image_from_to(u->sprite, ImageTypes::IMAGEID_Plague_Overlay_Small, ImageTypes::IMAGEID_Plague_Overlay_Large);
 	}
-	
+
 	void remove_maelstrom(unit_t* u) {
 		u->maelstrom_timer = 0;
 		disable_effect_end(u, ImageTypes::IMAGEID_Maelstorm_Overlay_Small, ImageTypes::IMAGEID_Maelstorm_Overlay_Large);
 	}
-	
+
 	void remove_acid_spores(unit_t* u) {
 		u->acid_spore_count = 0;
 		u->acid_spore_time = {};
@@ -1404,6 +1382,10 @@ struct state_functions {
 
 	bool unit_is_trap(unit_type_autocast ut) const {
 		return ut->id >= UnitTypes::Special_Floor_Missile_Trap && ut->id <= UnitTypes::Special_Right_Wall_Flame_Trap;
+	}
+
+	bool unit_is_zerg_building(unit_type_autocast ut) const {
+		return ut->id >= UnitTypes::Zerg_Infested_Command_Center && ut->id <= UnitTypes::Special_Cerebrate_Daggoth;
 	}
 
 	bool unit_target_is_undetected(const unit_t* u, const unit_t* target) const {
@@ -2247,14 +2229,64 @@ struct state_functions {
 		} else return false;
 	}
 
-	void refund_unit_costs(int owner, const unit_type_t* unit_type) {
+	void refund_unit_costs(int owner, unit_type_autocast unit_type) {
 		st.current_minerals[owner] += unit_type->mineral_cost;
 		st.current_gas[owner] += unit_type->gas_cost;
 	}
 
-	void partially_refund_unit_costs(int owner, const unit_type_t* unit_type) {
+	void partially_refund_unit_costs(int owner, unit_type_autocast unit_type) {
 		st.current_minerals[owner] += unit_type->mineral_cost * 3 / 4;
 		st.current_gas[owner] += unit_type->gas_cost * 3 / 4;
+	}
+
+	void cancel_morphing_building(unit_t* u) {
+		if (unit_is_morphing_building(u)) {
+			if (u->build_queue.empty()) xcept("cancel_morphing_building: build queue is empty");
+			const unit_type_t* build_type = u->build_queue.front();
+			u->build_queue.erase(u->build_queue.begin());
+			partially_refund_unit_costs(u->owner, build_type);
+			u_set_status_flag(u, unit_t::status_flag_completed);
+			add_completed_unit(u, -1, false);
+			u_unset_status_flag(u, unit_t::status_flag_completed);
+			auto hp = u->hp;
+			finish_building_unit(u);
+			complete_unit(u);
+			set_unit_hp(u, hp);
+			sprite_run_anim(u->sprite, iscript_anims::AlmostBuilt);
+			// todo: callback for sound
+		} else {
+			partially_refund_unit_costs(u->owner, u);
+			st.unit_score[u->owner] -= u->unit_type->build_score;
+			--st.total_non_buildings_ever_completed[u->owner];
+			auto prev_hp = fp8::integer(u->previous_hp);
+			if (unit_is(u, UnitTypes::Zerg_Extractor)) {
+				unit_t* drone = create_unit(UnitTypes::Zerg_Drone, u->sprite->position, u->owner);
+				if (drone) {
+					finish_building_unit(drone);
+					complete_unit(drone);
+					set_unit_hp(drone, prev_hp);
+				} else {
+					display_last_error_for_player(u->owner);
+				}
+				kill_unit(u);
+			} else {
+				thingy_t* t = create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Zerg_Building_Spawn_Small), u->sprite->position, 0);
+				if (t) {
+					t->sprite->elevation_level = u->sprite->elevation_level + 1;
+					if (!us_hidden(t)) set_sprite_visibility(t->sprite, tile_visibility(t->sprite->position));
+				}
+				const unit_type_t* build_type = u->unit_type;
+				morph_unit(u, get_unit_type(UnitTypes::Zerg_Drone));
+				finish_building_unit(u);
+				complete_unit(u);
+				if (u->sprite->images.back().modifier == 10) u->sprite->images.back().offset.y = 7;
+				set_unit_order(u, get_order_type(Orders::ResetCollision));
+				set_queued_order(u, false, u->unit_type->return_to_idle, {});
+				set_unit_hp(u, prev_hp);
+				remove_creep_provider(build_type, u->sprite->position, false);
+				// todo: callback for sound
+			}
+		}
 	}
 
 	void cancel_building_unit(unit_t* u) {
@@ -2269,7 +2301,7 @@ struct state_functions {
 		if (unit_is_nydus(u) && !u->building.nydus.exit) return;
 		if (u_grounded_building(u)) {
 			if (unit_race(u) == race::zerg) {
-				xcept("cancel_building_unit: zerg fixme");
+				cancel_morphing_building(u);
 				return;
 			}
 			partially_refund_unit_costs(u->owner, u->unit_type);
@@ -2362,7 +2394,7 @@ struct state_functions {
 		return nullptr;
 	}
 
-	bool can_place_building(const unit_t* u, int owner, const unit_type_t* unit_type, xy pos, bool check_undetected_units, bool check_invisible_units) const {
+	bool can_place_building(const unit_t* u, int owner, const unit_type_t* unit_type, xy pos, bool check_undetected_units, bool check_invisible_tiles) const {
 		xy_t<size_t> tile_pos;
 		tile_pos.x = (pos.x - unit_type->placement_size.x / 2) / 32u;
 		tile_pos.y = (pos.y - unit_type->placement_size.y / 2) / 32u;
@@ -2381,7 +2413,7 @@ struct state_functions {
 			xy gas_placement_size = get_unit_type(UnitTypes::Resource_Vespene_Geyser)->placement_size;
 			tile_size.x = gas_placement_size.x / 32u;
 			tile_size.y = gas_placement_size.y / 32u;
-			
+
 			bool any_visible = false;
 			for (size_t y = tile_pos.y; y != tile_pos.y + tile_size.y; ++y) {
 				for (size_t x = tile_pos.x; x != tile_pos.x + tile_size.x; ++x) {
@@ -2391,7 +2423,7 @@ struct state_functions {
 				}
 			}
 			if (!any_visible) return true;
-			
+
 			xy gas_pos(int(tile_pos.x * 32), int(tile_pos.y * 32));
 			gas_pos += gas_placement_size / 2;
 			return get_building_at_center_position(gas_pos, get_unit_type(UnitTypes::Resource_Vespene_Geyser)) != nullptr;
@@ -2402,11 +2434,20 @@ struct state_functions {
 		if (u && unit_is_nydus(unit_type)) {
 			xcept("can_place_building: fixme nydus");
 		} else if (ut_requires_creep(unit_type)) {
-			xcept("can_place_building: fixme creep");
+			for (size_t y = tile_pos.y; y != tile_pos.y + tile_size.y; ++y) {
+				for (size_t x = tile_pos.x; x != tile_pos.x + tile_size.x; ++x) {
+					auto& tile = st.tiles[y * game_st.map_tile_width + x];
+					if (tile.explored & visibility_mask) return false;
+					if (check_invisible_tiles || ~tile.visible & visibility_mask) {
+						if (~tile.flags & tile_t::flag_has_creep) return false;
+					}
+				}
+			}
 		} else {
 			bool check_unk4 = !unit_is_non_flag_beacon(unit_type);
 			bool is_resource_depot = ut_resource_depot(unit_type);
 			int flags_mask = tile_t::flag_partially_walkable | tile_t::flag_unbuildable;
+			if (unit_race(unit_type) != race::zerg) flags_mask |= tile_t::flag_has_creep;
 
 			for (size_t y = tile_pos.y; y != tile_pos.y + tile_size.y; ++y) {
 				for (size_t x = tile_pos.x; x != tile_pos.x + tile_size.x; ++x) {
@@ -2427,7 +2468,7 @@ struct state_functions {
 		for (size_t y = tile_pos.y; y != tile_pos.y + tile_size.y; ++y) {
 			for (size_t x = tile_pos.x; x != tile_pos.x + tile_size.x; ++x) {
 				auto& tile = st.tiles[y * game_st.map_tile_width + x];
-				if (check_invisible_units || (tile.visible & visibility_mask) == 0) {
+				if (check_invisible_tiles || (tile.visible & visibility_mask) == 0) {
 					if (tile.flags & tile_t::flag_occupied) {
 						if (!u) return false;
 						if (!u_grounded_building(u)) return false;
@@ -2457,7 +2498,7 @@ struct state_functions {
 			for (size_t y = tile_pos.y; y != tile_pos.y + tile_size.y; ++y) {
 				for (size_t x = tile_pos.x; x != tile_pos.x + tile_size.x; ++x) {
 					auto& tile = st.tiles[y * game_st.map_tile_width + x];
-					if (check_invisible_units || (tile.visible & visibility_mask) == 0) {
+					if (check_invisible_tiles || (tile.visible & visibility_mask) == 0) {
 						if (n->unit_finder_bounding_box.from.x >= int(x * 32 + 32)) continue;
 						if (n->unit_finder_bounding_box.to.x <= int(x * 32)) continue;
 						if (n->unit_finder_bounding_box.from.y >= int(y * 32 + 32)) continue;
@@ -2506,8 +2547,8 @@ struct state_functions {
 	}
 
 	bool unit_is_rescuable(const unit_t* u) const {
-		if (st.players[u->owner].controller == state::player_t::controller_rescue_passive) return true;
-		if (st.players[u->owner].controller == state::player_t::controller_unused_rescue_active) return true;
+		if (st.players[u->owner].controller == player_t::controller_rescue_passive) return true;
+		if (st.players[u->owner].controller == player_t::controller_unused_rescue_active) return true;
 		return false;
 	}
 
@@ -2531,7 +2572,7 @@ struct state_functions {
 		if (unit_can_see_target(u, target) & u_movement_flag(target, 2)) {
 			xy move_target = target->sprite->position;
 			fp8 halt_distance = unit_halt_distance(u);
-			xy pos = to_xy(direction_xy(target->next_velocity_direction, halt_distance * 3));
+			xy pos = target->sprite->position + to_xy(direction_xy(target->next_velocity_direction, halt_distance * 3));
 			if (is_in_map_bounds(pos)) move_target = pos;
 			set_unit_move_target(u, move_target);
 		} else {
@@ -2787,7 +2828,8 @@ struct state_functions {
 		auto prev_sprite_owner = u->sprite->owner;
 		int prev_resources = ut_resource(u) ? u->building.resource.resource_count : 0;
 		std::array<int, 4> prev_larva_spawn_side_values;
-		if (unit_is_hatchery(u)) prev_larva_spawn_side_values = u->building.hatchery.larva_spawn_side_values;
+		bool was_hatchery = unit_is_hatchery(u);
+		if (was_hatchery) prev_larva_spawn_side_values = u->building.hatchery.larva_spawn_side_values;
 		u->previous_unit_type = prev_unit_type;
 		u->previous_hp = std::max(prev_hp.integer_part(), 1);
 		u->order_type = get_order_type(Orders::Die);
@@ -2811,7 +2853,7 @@ struct state_functions {
 		u->order_state = prev_order_state;
 		if (u_grounded_building(u) && !u->build_queue.empty()) u->build_queue.erase(u->build_queue.begin());
 		if (ut_resource(u)) set_unit_resources(u, prev_resources);
-		if (unit_is_hatchery(u)) u->building.hatchery.larva_spawn_side_values = prev_larva_spawn_side_values;
+		if (was_hatchery && unit_is_hatchery(u)) u->building.hatchery.larva_spawn_side_values = prev_larva_spawn_side_values;
 	}
 
 	void morph_unit(unit_t* u, const unit_type_t* unit_type) {
@@ -3201,9 +3243,9 @@ struct state_functions {
 		else if (unit_is(u, UnitTypes::Protoss_Scarab)) idle = false;
 		else if (unit_is(u, UnitTypes::Terran_Nuclear_Missile)) idle = false;
 		if (idle) {
-			if (st.players[new_owner].controller == state::player_t::controller_rescue_passive) {
+			if (st.players[new_owner].controller == player_t::controller_rescue_passive) {
 				set_unit_order(u, get_order_type(Orders::RescuePassive));
-			} else if (st.players[new_owner].controller == state::player_t::controller_neutral) {
+			} else if (st.players[new_owner].controller == player_t::controller_neutral) {
 				set_unit_order(u, get_order_type(Orders::Neutral));
 			} else {
 				set_unit_order(u, u->unit_type->human_ai_idle);
@@ -3552,7 +3594,7 @@ struct state_functions {
 		if (u->order_target.unit) return unit_can_see_target(u, u->order_target.unit);
 		return player_position_is_visible(u->owner, u->order_target.pos);
 	}
-	
+
 	bool medic_can_heal_target(const unit_t* u, const unit_t* target) const {
 		if (!target || target == u) return false;
 		if (!ut_organic(target) || ut_building(target)) return false;
@@ -3571,7 +3613,7 @@ struct state_functions {
 			return medic_can_heal_target(u, target);
 		});
 	}
-	
+
 	int medic_try_heal(unit_t* u) {
 		if (!unit_can_use_tech(u, get_tech_type(TechTypes::Healing))) return 0;
 		unit_t* target = u->order_target.unit;
@@ -3594,8 +3636,178 @@ struct state_functions {
 		return 1;
 	}
 
+	bool tile_has_creep(xy pos) {
+		return (st.tiles[tile_index(pos)].flags & tile_t::flag_has_creep) != 0;
+	}
+
 	void order_SelfDestructing(unit_t* u) {
 		kill_unit(u);
+	}
+
+	void copy_status_effects(unit_t* to, unit_t* from) {
+		to->remove_timer = from->remove_timer;
+		to->defensive_matrix_hp = from->defensive_matrix_hp;
+		to->defensive_matrix_timer = from->defensive_matrix_timer;
+		to->stim_timer = from->stim_timer;
+		to->ensnare_timer = from->ensnare_timer;
+		to->lockdown_timer = from->lockdown_timer;
+		to->irradiate_timer = from->irradiate_timer;
+		to->stasis_timer = from->stasis_timer;
+		to->plague_timer = from->plague_timer;
+		to->storm_timer = from->storm_timer;
+		to->irradiated_by = from->irradiated_by;
+		to->irradiate_owner = from->irradiate_owner;
+		to->parasite_flags = from->parasite_flags;
+		to->cycle_counter = from->cycle_counter;
+		to->blinded_by = from->blinded_by;
+		to->maelstrom_timer = from->maelstrom_timer;
+		to->unused_0x125 = from->unused_0x125;
+		to->acid_spore_count = from->acid_spore_count;
+		to->acid_spore_time = from->acid_spore_time;
+		apply_unit_effects(to);
+		update_unit_speed(to);
+	}
+
+	bool creep_is_being_sustained(xy_t<size_t> tile_pos) {
+		xy pos((int)tile_pos.x * 32 + 16, (int)tile_pos.y * 32 + 16);
+		rect area;
+		area.from = pos - xy(640, 400);
+		area.to = pos + xy(640, 400);
+		if (area.from.x < 0) area.from.x = 0;
+		else if (area.to.x >= (int)game_st.map_width) area.to.x = (int)game_st.map_width - 1;
+		if (area.from.y < 0) area.from.y = 0;
+		else if (area.to.y >= (int)game_st.map_height) area.to.y = (int)game_st.map_height - 1;
+		for (const unit_t* u : find_units_noexpand(area)) {
+			if (!u_grounded_building(u)) continue;
+			if (!ut_building(u)) continue;
+			if (unit_race(u) != race::zerg) continue;
+			auto bb = get_max_creep_bb(u, u->sprite->position, u_completed(u));
+			if (tile_pos.x < bb.from.x) continue;
+			if (tile_pos.y < bb.from.y) continue;
+			if (tile_pos.x > bb.to.x) continue;
+			if (tile_pos.y > bb.to.y) continue;
+			xy diff = pos - u->sprite->position;
+			int d = diff.x*diff.x * 25 + diff.y*diff.y * 64;
+			if (d > 320*320 * 25) continue;
+			return true;
+		}
+		return false;
+	}
+
+	bool set_creep_receding(xy_t<size_t> tile_pos) {
+		if (st.creep_life.free_list.empty()) return false;
+		auto* v = &st.creep_life.free_list.front();
+		st.creep_life.free_list.pop_front();
+		--st.creep_life.free_list_size;
+		size_t n_neighbors = count_neighboring_creep_tiles(tile_pos);
+		v->n_neighboring_creep_tiles = n_neighbors;
+		v->tile_pos = tile_pos;
+		st.creep_life.lists[n_neighbors].push_front(*v);
+		++st.creep_life.lists_size[n_neighbors];
+		st.creep_life.table.insert(v);
+
+		size_t index = tile_pos.y * game_st.map_tile_width + tile_pos.x;
+		st.tiles[index].flags |= tile_t::flag_creep_receding;
+		return true;
+	}
+
+	bool remove_creep_provider(unit_type_autocast unit_type, xy pos, bool is_completed) {
+		int flags_mask = tile_t::flag_creep_receding;
+		if (!unit_is(unit_type, UnitTypes::Zerg_Extractor)) flags_mask |= tile_t::flag_occupied;
+		bool spreads_creep = unit_type_spreads_creep(unit_type, is_completed);
+		auto area = get_max_creep_bb(unit_type, pos, is_completed);
+		int dy = (int)area.from.y * 32 - pos.y + 16;
+		for (size_t tile_y = area.from.y; tile_y != area.to.y + 1; ++tile_y, dy += 32) {
+			int dx = (int)area.from.x * 32 - pos.x + 16;
+			for (size_t tile_x = area.from.x; tile_x != area.to.x + 1; ++tile_x, dx += 32) {
+				size_t index = tile_y * game_st.map_tile_width + tile_x;
+				if (~st.tiles[index].flags & tile_t::flag_has_creep) continue;
+				if (st.tiles[index].flags & flags_mask) continue;
+				if (spreads_creep) {
+					int d = dx*dx * 25 + dy*dy * 64;
+					if (d > 320*320 * 25) continue;
+				}
+				if (!creep_is_being_sustained({tile_x, tile_y})) {
+					if (!set_creep_receding({tile_x, tile_y})) return false;
+				}
+			}
+		}
+		st.creep_life.check_dead_unit_timer = 0;
+		return true;
+	}
+
+	void add_creep_provider(unit_t* u) {
+		xy pos = u->position;
+		bool spreads_creep = unit_type_spreads_creep(u, u_completed(u));
+		auto area = get_max_creep_bb(u, pos, u_completed(u));
+		int dy = (int)area.from.y * 32 - pos.y + 16;
+		for (size_t tile_y = area.from.y; tile_y != area.to.y + 1; ++tile_y, dy += 32) {
+			int dx = (int)area.from.x * 32 - pos.x + 16;
+			for (size_t tile_x = area.from.x; tile_x != area.to.x + 1; ++tile_x, dx += 32) {
+				size_t index = tile_y * game_st.map_tile_width + tile_x;
+				auto flags = st.tiles[index].flags;
+				if (~flags & tile_t::flag_creep_receding) continue;
+				if (spreads_creep) {
+					int d = dx*dx * 25 + dy*dy * 64;
+					if (d > 320*320 * 25) continue;
+				}
+				auto* v = st.creep_life.table.find({tile_x, tile_y});
+				if (!v) continue;
+				if (!v) xcept("add_creep_provider: receding creep not found");
+				st.creep_life.table.remove(v);
+				st.creep_life.lists[v->n_neighboring_creep_tiles].remove(*v);
+				--st.creep_life.lists_size[v->n_neighboring_creep_tiles];
+				v->n_neighboring_creep_tiles = 9;
+				st.creep_life.free_list.push_front(*v);
+				++st.creep_life.free_list_size;
+
+				st.tiles[index].flags &= ~tile_t::flag_creep_receding;
+			}
+		}
+	}
+
+	void zerg_building_start_construction(unit_t* u) {
+		add_creep_provider(u);
+		set_construction_graphic(u, true);
+		u->hp = u->unit_type->hitpoints / 10;
+		if (!u->build_queue.empty()) u->build_queue.erase(u->build_queue.begin());
+		set_unit_order(u, get_order_type(Orders::IncompleteMorphing));
+	}
+
+	void set_creep_building_tiles(unit_type_autocast unit_type, xy pos) {
+		if (!unit_type_spreads_creep(unit_type, true) && ut_requires_creep(unit_type)) return;
+
+		set_unit_tiles_unoccupied(unit_type, pos);
+
+		rect_t<xy_t<size_t>> creep_area;
+		creep_area.from.x = pos.x / 32u - unit_type->placement_size.x / 32u / 2;
+		creep_area.from.y = pos.y / 32u - unit_type->placement_size.y / 32u / 2;
+		creep_area.to.x = creep_area.from.x + unit_type->placement_size.x / 32u;
+		creep_area.to.y = creep_area.from.y + unit_type->placement_size.y / 32u;
+		bool rounded_corners = false;
+		if (ut_flag(unit_type, unit_type_t::flag_80000000)) {
+			creep_area.from.x -= 2;
+			creep_area.from.y -= 1;
+			creep_area.to.x += 2;
+			creep_area.to.y += 1;
+			rounded_corners = true;
+		}
+		st.tiles.at(creep_area.from.y * game_st.map_tile_width + creep_area.from.x);
+		if (creep_area.from != creep_area.to) st.tiles.at((creep_area.to.y - 1) * game_st.map_tile_width + creep_area.to.x - 1);
+		for (size_t y = creep_area.from.y; y != creep_area.to.y; ++y) {
+			if (y >= game_st.map_tile_height) continue;
+			for (size_t x = creep_area.from.x; x != creep_area.to.x; ++x) {
+				if (x >= game_st.map_tile_width) continue;
+				if (rounded_corners) {
+					if ((x == creep_area.from.x || x == creep_area.to.x - 1) && (y == creep_area.from.y || y == creep_area.to.y - 1)) continue;
+				}
+				if (!tile_can_have_creep({x, y})) continue;
+				if (st.tiles[y * game_st.map_tile_width + x].flags & tile_t::flag_occupied) continue;
+				set_tile_creep({x, y});
+			}
+		}
+
+		set_unit_tiles_occupied(unit_type, pos);
 	}
 
 	void order_Stop(unit_t* u) {
@@ -3838,7 +4050,7 @@ struct state_functions {
 			u->order_state = 0;
 		}
 		if (u->order_state == 0) {
-			target = find_nearest_active_resource_depot(u);
+			if (!target) target = find_nearest_active_resource_depot(u);
 			if (target) {
 				u->order_target.unit = target;
 				move_to_target_reset(u, target);
@@ -3880,12 +4092,12 @@ struct state_functions {
 						int* val;
 						if (u->sprite->position.y < bb.from.y) {
 							val = &target->building.hatchery.larva_spawn_side_values[1];
-						} else if (u->sprite->position.y < bb.to.y) {
+						} else if (u->sprite->position.y > bb.to.y) {
 							val = &target->building.hatchery.larva_spawn_side_values[3];
 						} else if (u->sprite->position.x < bb.from.x) {
-							val = &target->building.hatchery.larva_spawn_side_values[2];
-						} else {
 							val = &target->building.hatchery.larva_spawn_side_values[0];
+						} else {
+							val = &target->building.hatchery.larva_spawn_side_values[2];
 						}
 						if (*val < 100) *val += 25;
 					}
@@ -5337,7 +5549,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_PickupBunker(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		if (target && unit_can_load_target(u, target)) {
@@ -5345,7 +5557,7 @@ struct state_functions {
 		}
 		order_done(u);
 	}
-	
+
 	void order_HealMove(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		if (target) {
@@ -5375,7 +5587,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_MedicHeal(unit_t* u) {
 		int r = medic_try_heal(u);
 		if (r == 0) {
@@ -5407,7 +5619,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_MedicHealToIdle(unit_t* u) {
 		if (~u->movement_flags & 2) {
 			sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
@@ -5415,7 +5627,7 @@ struct state_functions {
 		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
 		order_done(u);
 	}
-	
+
 	void order_MedicIdle(unit_t* u) {
 		unit_t* target = find_medic_target(u);
 		if (target) {
@@ -5423,7 +5635,7 @@ struct state_functions {
 			move_to_target(u, target);
 		}
 	}
-	
+
 	void order_MedicHoldPosition(unit_t* u) {
 		if (u->order_state == 0) {
 			stop_unit(u);
@@ -5453,7 +5665,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_NukeTrain(unit_t* u) {
 		if (!unit_is(u, UnitTypes::Terran_Nuclear_Silo)) xcept("order_NukeTrain: unit is not a nuclear silo");
 		if (u->order_state == 0) {
@@ -5471,12 +5683,12 @@ struct state_functions {
 			} else u->order_state = 0;
 		}
 	}
-	
+
 	void order_NukePaint(unit_t* u) {
 		if (u->order_target.unit) set_unit_order(u, get_order_type(Orders::NukeUnit), u);
 		else set_unit_order(u, get_order_type(Orders::CastNuclearStrike), u->order_target.pos);
 	}
-	
+
 	void order_NukeUnit(unit_t* u) {
 		if (!u->order_target.unit) {
 			stop_unit(u);
@@ -5486,7 +5698,7 @@ struct state_functions {
 		u->order_target.pos = u->order_target.unit->sprite->position;
 		order_CastNuclearStrike(u);
 	}
-	
+
 	void order_CastNuclearStrike(unit_t* u) {
 		set_next_target_waypoint(u, u->order_target.pos);
 		if (xy_length(u->exact_position - to_xy_fp8(u->order_target.pos)).integer_part() > unit_sight_range(u)) {
@@ -5517,7 +5729,7 @@ struct state_functions {
 		u->connected_unit = nuke;
 		set_unit_order(u, get_order_type(Orders::NukeTrack), u->sprite->position);
 	}
-	
+
 	void order_NukeLaunch(unit_t* u) {
 		if (!u->connected_unit && u->order_state < 5) {
 			kill_unit(u);
@@ -5574,7 +5786,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_NukeTrack(unit_t* u) {
 		if (!unit_is_ghost(u)) xcept("order_NukeTrack: unit is not a ghost");
 		if (u->order_state == 0) {
@@ -5598,6 +5810,327 @@ struct state_functions {
 				}
 			}
 		}
+	}
+
+	void order_Larva(unit_t* u) {
+		unit_t* hatchery = u->connected_unit;
+		if (hatchery && !unit_target_in_range(u, hatchery, 10)) {
+			move_to_target(u, hatchery);
+			set_next_target_waypoint(u, hatchery->sprite->position);
+		}
+		if (unit_is_at_move_target(u) || (u->move_target.unit && u->move_target.pos != u->move_target.unit->sprite->position && !tile_has_creep(u->move_target.pos))) {
+			if ((!hatchery || u->move_target.unit != hatchery) && !tile_has_creep(u->sprite->position)) {
+				kill_unit(u);
+				return;
+			}
+			int rv = lcg_rand(20);
+			xy target_pos = u->sprite->position;
+			if (rv & 8) target_pos.x += 10;
+			else target_pos.x -= 10;
+			if (rv & 0x80) target_pos.y += 10;
+			else target_pos.y -= 10;
+			if (is_in_map_bounds(target_pos) && tile_has_creep(target_pos)) {
+				if (hatchery) {
+					auto bb = unit_sprite_inner_bounding_box(hatchery);
+					auto is_on_correct_side = [&](xy pos) {
+						if (u->order_state == 0) return pos.x <= bb.from.x;
+						else if (u->order_state == 1) return pos.y <= bb.from.y;
+						else if (u->order_state == 2) return pos.x >= bb.to.x;
+						else return pos.y >= bb.to.y;
+					};
+					if (!is_on_correct_side(target_pos)) {
+						if (is_on_correct_side(u->sprite->position)) return;
+						if (u->order_state == 0) target_pos = {bb.from.x - 10, hatchery->sprite->position.y};
+						else if (u->order_state == 1) target_pos = {hatchery->sprite->position.x, bb.from.y - 10};
+						else if (u->order_state == 2) target_pos = {bb.to.x + 10, hatchery->sprite->position.y};
+						else target_pos = {hatchery->sprite->position.y, bb.to.y + 10};
+					}
+				}
+				set_unit_move_target(u, target_pos);
+				set_next_target_waypoint(u, target_pos);
+			}
+		}
+	}
+
+	void order_InitCreepGrowth(unit_t* u) {
+		set_secondary_order(u, get_order_type(Orders::SpreadCreep));
+		set_unit_order(u, u->unit_type->return_to_idle);
+	}
+
+	void order_ZergUnitMorph(unit_t* u) {
+		if (u->build_queue.empty()) xcept("order_ZergUnitMorph: empty build queue");
+		const unit_type_t* unit_type = u->build_queue.front();
+		if (u->order_state == 0) {
+			const unit_type_t* egg_type = nullptr;
+			if (unit_is(u, UnitTypes::Zerg_Larva)) egg_type = get_unit_type(UnitTypes::Zerg_Egg);
+			else if (unit_is(u, UnitTypes::Zerg_Hydralisk)) egg_type = get_unit_type(UnitTypes::Zerg_Lurker_Egg);
+			else if (unit_is(u, UnitTypes::Zerg_Mutalisk)) egg_type = get_unit_type(UnitTypes::Zerg_Cocoon);
+			if (!egg_type) xcept("order_ZergUnitMorph: no egg type");
+			if (!has_available_supply_for(u->owner, unit_type, true)) {
+				cancel_build_queue(u);
+				set_unit_order(u, u->unit_type->return_to_idle);
+				return;
+			}
+			add_completed_unit(u, -1, false);
+			u_unset_status_flag(u, unit_t::status_flag_completed);
+			morph_unit(u, egg_type);
+			u->remaining_build_time = unit_type->build_time;
+			u->order_state = 1;
+		} else if (u->order_state == 1) {
+			if (u->remaining_build_time) --u->remaining_build_time;
+			else {
+				sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
+				u->order_state = 2;
+			}
+		} else if (u->order_state == 2) {
+			if (u->order_signal & 4) {
+				u->order_signal &= ~4;
+				morph_unit(u, unit_type);
+				// todo: callback for sound
+				u->build_queue.erase(u->build_queue.begin());
+				if ((int)(ImageTypes)u->unit_type->construction_animation) {
+					set_construction_graphic(u, true);
+					sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
+					set_unit_order(u, get_order_type(Orders::ZergBirth));
+				} else {
+					finish_building_unit(u);
+					complete_unit(u);
+					if (unit_is(u, UnitTypes::Zerg_Egg) && u->connected_unit) rally_unit(u, u->connected_unit);
+				}
+			}
+		}
+	}
+
+	void order_ZergBirth(unit_t* u) {
+		if (~u->order_signal & 4) return;
+		u->order_signal &= ~4;
+		unit_t* u2 = nullptr;
+		if (ut_two_units_in_one_egg(u)) {
+			xy a = u->sprite->position + get_image_lo_offset(u->sprite->main_image, 3, 0);
+			xy b = u->sprite->position + get_image_lo_offset(u->sprite->main_image, 3, 1);
+			a = restrict_move_target_to_valid_bounds(u, a);
+			b = restrict_move_target_to_valid_bounds(u, b);
+			move_unit(u, a);
+			u2 = create_unit(u->unit_type, b, u->owner);
+			if (u2) {
+				if (unit_is(u2, UnitTypes::Zerg_Zergling)) set_unit_heading(u2, 144_dir);
+				else if (unit_is(u2, UnitTypes::Zerg_Scourge)) set_unit_heading(u2, 16_dir);
+				else set_unit_heading(u, 0_dir);
+				finish_building_unit(u2);
+				complete_unit(u2);
+				copy_status_effects(u2, u);
+			} else display_last_error_for_player(u->owner);
+		}
+		set_construction_graphic(u, false);
+		finish_building_unit(u);
+		complete_unit(u);
+		xy pos = u->sprite->position;
+		if (!ut_two_units_in_one_egg(u) && u->previous_unit_type != get_unit_type(UnitTypes::Zerg_Cocoon)) {
+			if (u->unit_type->unknown1 == 0xc1) pos.y -= 7;
+			else if (u_flying(u)) pos.y -= 42;
+		}
+		pos = restrict_move_target_to_valid_bounds(u, pos);
+		if (pos != u->sprite->position) move_unit(u, pos);
+		if (u->previous_unit_type != get_unit_type(UnitTypes::Zerg_Cocoon) && u->previous_unit_type != get_unit_type(UnitTypes::Zerg_Lurker_Egg)) {
+			if (u->connected_unit) {
+				rally_unit(u, u->connected_unit);
+				if (u2) rally_unit(u2, u->connected_unit);
+			}
+		}
+		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+		order_done(u);
+	}
+
+	void order_DroneStartBuild(unit_t* u) {
+		set_unit_order(u, get_order_type(Orders::DroneLand), u->order_target.pos);
+		queue_order_back(u, get_order_type(Orders::DroneBuild), u->order_target.pos);
+	}
+
+	void order_DroneLand(unit_t* u) {
+		if (u->build_queue.empty()) xcept("order_DroneLand: empty build queue");
+		const unit_type_t* build_type = u->build_queue.front();
+		if (u->order_state == 0) {
+			xy pos = u->order_target.pos - xy(0, 7);
+			set_unit_move_target(u, pos);
+			set_next_target_waypoint(u, pos);
+			u->order_state = 1;
+		} else if (u->order_state == 1) {
+			if (unit_is_at_move_target(u)) {
+				bool success = false;
+				if (!u_immovable(u)) {
+					success = can_place_building(u, u->owner, build_type, u->order_target.pos, true, true);
+					if (success && unit_is(build_type, UnitTypes::Zerg_Extractor)) {
+						const unit_t* gas = get_building_at_center_position(u->order_target.pos, get_unit_type(UnitTypes::Resource_Vespene_Geyser));
+						if (gas && unit_target_in_range(u, gas, 32)) {
+							u_unset_status_flag(u, unit_t::status_flag_ground_unit);
+							u->sprite->elevation_level = u->unit_type->elevation_level + 1;
+							set_queued_order(u, false, get_order_type(Orders::ResetCollision), {});
+							set_queued_order(u, false, u->unit_type->return_to_idle, {});
+							set_unit_move_target(u, u->order_target.pos);
+							set_next_target_waypoint(u, u->order_target.pos);
+							u_set_status_flag(u, unit_t::status_flag_order_not_interruptible);
+							u->order_state = 2;
+							return;
+						}
+					}
+				}
+				if (success) {
+					if (xy_length(to_xy_fp8(u->order_target.pos) - u->exact_position).integer_part() <= 128) {
+						if (u->sprite->images.back().modifier == 10) u->sprite->images.back().flags |= 4;
+						set_unit_move_target(u, u->order_target.pos);
+						set_next_target_waypoint(u, u->order_target.pos);
+						u_set_status_flag(u, unit_t::status_flag_order_not_interruptible);
+						u->order_state = 2;
+					}
+				}
+				if (!success) {
+					// todo: callback for sound
+					remove_one_order(u, get_order_type(Orders::DroneBuild));
+					set_unit_order(u, u->unit_type->return_to_idle);
+				}
+			}
+		} else if (u->order_state == 2) {
+			if (unit_is_at_move_target(u)) {
+				if (u->sprite->images.back().modifier == 10) {
+					u->sprite->images.back().offset.y = 0;
+					u->sprite->images.back().flags &= ~4;
+				}
+				if (!u_immovable(u)) {
+					if (!u->order_queue.empty() && u->order_queue.front().order_type->id == Orders::DroneBuild) {
+						move_unit(u, u->order_target.pos);
+					} else {
+						if (u->sprite->images.back().modifier == 10) u->sprite->images.back().offset.y = 7;
+						queue_order_front(u, get_order_type(Orders::ResetCollision), {});
+					}
+				} else {
+					// todo: callback for sound
+					remove_one_order(u, get_order_type(Orders::DroneBuild));
+					if (u->sprite->images.back().modifier == 10) u->sprite->images.back().offset.y = 7;
+					queue_order_front(u, get_order_type(Orders::ResetCollision), {});
+				}
+				u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+				order_done(u);
+			}
+		}
+	}
+
+	void order_DroneBuild(unit_t* u) {
+		if (u->build_queue.empty()) xcept("order_DroneBuild: empty build queue");
+		const unit_type_t* build_type = u->build_queue.front();
+		auto done = [&]() {
+			if (u->sprite->images.back().modifier == 10) u->sprite->images.back().offset.y = 7;
+			queue_order_front(u, get_order_type(Orders::ResetCollision), {});
+			u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+			order_done(u);
+		};
+		if (u->sprite->position != u->order_target.pos) {
+			done();
+			return;
+		}
+		if (!can_place_building(u, u->owner, build_type, u->sprite->position, true, true)) {
+			// todo: callback for sound
+			done();
+			return;
+		}
+		if (!has_available_supply_for(u->owner, build_type, true) || !has_available_resources_for(u->owner, build_type, true)) {
+			done();
+			return;
+		}
+		st.current_minerals[u->owner] -= build_type->mineral_cost;
+		st.current_gas[u->owner] -= build_type->gas_cost;
+
+		unit_t* powerup = ut_worker(u) ? u->worker.powerup : nullptr;
+		if (powerup) drop_carried_items(u);
+		if (unit_is(build_type, UnitTypes::Zerg_Extractor)) {
+			unit_t* build_unit = build_refinery(u, build_type);
+			if (build_unit) {
+				u->user_action_flags |= 4;
+				kill_unit(u);
+				zerg_building_start_construction(build_unit);
+				create_image(get_image_type(ImageTypes::IMAGEID_Vespene_Geyser2), build_unit->sprite, {}, image_order_below);
+			} else {
+				done();
+			}
+		} else {
+			add_completed_unit(u, -1, false);
+			u_unset_status_flag(u, unit_t::status_flag_completed);
+			morph_unit(u, build_type);
+			zerg_building_start_construction(u);
+		}
+		if (powerup && ut_powerup(powerup)) move_unit(powerup, powerup->building.powerup.origin);
+	}
+
+	void order_IncompleteMorphing(unit_t* u) {
+		const unit_type_t* build_type = u->unit_type;
+		bool is_morphing_building = false;
+		if (!u->build_queue.empty()) {
+			const unit_type_t* queued_type = u->build_queue.front();
+			if (unit_type_is_morphing_building(queued_type)) build_type = queued_type;
+		}
+		if (u->order_state == 0) {
+			if (u->remaining_build_time < build_type->build_time * 3 / 4) ++u->order_state;
+		} else if (u->order_state == 1) {
+			if (unit_is(u, UnitTypes::Zerg_Extractor)) {
+				destroy_image_from_to(u, ImageTypes::IMAGEID_Vespene_Geyser2, ImageTypes::IMAGEID_Vespene_Geyser2);
+			}
+			sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
+			++u->order_state;
+		} else if (u->order_state == 2) {
+			if (u->remaining_build_time < build_type->build_time / 2) ++u->order_state;
+		} else if (u->order_state == 3) {
+			sprite_run_anim(u->sprite, iscript_anims::SpecialState2);
+			++u->order_state;
+		} else if (u->order_state == 4) {
+			if (u->remaining_build_time == 0) ++u->order_state;
+		} else if (u->order_state == 5) {
+			// todo: callback for sound
+			sprite_run_anim(u->sprite, iscript_anims::AlmostBuilt);
+			++u->order_state;
+		} else if (u->order_state == 6) {
+			if (u->order_signal & 4) {
+				u->order_signal &= ~4;
+				if (unit_type_is_morphing_building(build_type)) {
+					u_set_status_flag(u, unit_t::status_flag_completed);
+					add_completed_unit(u, -1, false);
+					u_unset_status_flag(u, unit_t::status_flag_completed);
+					auto hp = u->hp;
+					morph_unit(u, build_type);
+					hp += build_type->hitpoints;
+					if (u->previous_unit_type) hp -= u->previous_unit_type->hitpoints;
+					if (hp < fp8::integer(1)) hp = fp8::integer(1);
+					set_unit_hp(u, hp);
+					u->remaining_build_time = 0;
+				}
+				finish_building_unit(u);
+				complete_unit(u);
+				add_creep_provider(u);
+				sprite_run_anim(u->sprite, iscript_anims::AlmostBuilt);
+
+				set_creep_building_tiles(build_type, u->sprite->position);
+			}
+			return;
+		}
+		if (u->remaining_build_time) --u->remaining_build_time;
+		if (!unit_type_is_morphing_building(build_type)) {
+			set_unit_hp(u, u->hp + u->hp_construction_rate);
+		}
+	}
+
+	void order_ZergBuildingMorph(unit_t* u) {
+		if (u->build_queue.empty()) xcept("order_ZergBuildingMorph: empty build queue");
+		const unit_type_t* build_type = u->build_queue.front();
+		if (!has_available_supply_for(u->owner, build_type, true) || !has_available_resources_for(u->owner, build_type, true)) {
+			set_queued_order(u, false, u->unit_type->return_to_idle, {});
+			// shouldn't there be an order_done(u) here?
+			return;
+		}
+		st.current_minerals[u->owner] -= build_type->mineral_cost;
+		st.current_gas[u->owner] -= build_type->gas_cost;
+		u_unset_status_flag(u, unit_t::status_flag_completed);
+		set_construction_graphic(u, true);
+		u->remaining_build_time = build_type->build_time;
+		sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
+		set_unit_order(u, get_order_type(Orders::IncompleteMorphing));
 	}
 
 	void execute_main_order(unit_t* u) {
@@ -5631,7 +6164,7 @@ struct state_functions {
 			order_TurretAttack(u);
 			break;
 		case Orders::DroneBuild:
-			xcept("DroneBuild");
+			order_DroneBuild(u);
 			break;
 		case Orders::PlaceBuilding:
 			order_PlaceBuilding(u);
@@ -5646,16 +6179,16 @@ struct state_functions {
 			order_Repair(u);
 			break;
 		case Orders::ZergBirth:
-			xcept("ZergBirth");
+			order_ZergBirth(u);
 			break;
 		case Orders::ZergUnitMorph:
-			xcept("ZergUnitMorph");
+			order_ZergUnitMorph(u);
 			break;
 		case Orders::IncompleteBuilding:
 			order_IncompleteBuilding(u);
 			break;
 		case Orders::IncompleteMorphing:
-			xcept("IncompleteMorphing");
+			order_IncompleteMorphing(u);
 			break;
 		case Orders::ScarabAttack:
 			xcept("ScarabAttack");
@@ -5789,8 +6322,8 @@ struct state_functions {
 		case Orders::Nothing:
 			order_Nothing(u);
 			break;
-		case Orders::DroneBuild:
-			xcept("DroneBuild");
+		case Orders::DroneStartBuild:
+			order_DroneStartBuild(u);
 			break;
 		case Orders::CastInfestation:
 			xcept("CastInfestation");
@@ -5802,16 +6335,13 @@ struct state_functions {
 			xcept("PlaceProtossBuilding");
 			break;
 		case Orders::MoveToRepair:
-			xcept("MoveToRepair");
+			order_MoveToTargetOrder(u);
 			break;
 		case Orders::PlaceAddon:
 			order_PlaceAddon(u);
 			break;
-		case Orders::ZergUnitMorph:
-			xcept("ZergUnitMorph");
-			break;
-		case Orders::IncompleteMorphing:
-			xcept("IncompleteMorphing");
+		case Orders::ZergBuildingMorph:
+			order_ZergBuildingMorph(u);
 			break;
 		case Orders::BuildNydusExit:
 			xcept("BuildNydusExit");
@@ -5870,6 +6400,9 @@ struct state_functions {
 		case Orders::InterceptorReturn:
 			xcept("InterceptorReturn");
 			break;
+		case Orders::DroneLand:
+			order_DroneLand(u);
+			break;
 		case Orders::DroneLiftOff:
 			xcept("DroneLiftOff");
 			break;
@@ -5877,7 +6410,7 @@ struct state_functions {
 			order_LiftingOff(u);
 			break;
 		case Orders::Larva:
-			xcept("Larva");
+			order_Larva(u);
 			break;
 		case Orders::SpawningLarva:
 			xcept("SpawningLarva");
@@ -5933,8 +6466,8 @@ struct state_functions {
 		case Orders::WatchTarget:
 			order_WatchTarget(u);
 			break;
-		case Orders::SpreadCreep:
-			xcept("SpreadCreep");
+		case Orders::InitCreepGrowth:
+			order_InitCreepGrowth(u);
 			break;
 		case Orders::CompletingArchonSummon:
 			xcept("CompletingArchonSummon");
@@ -6144,7 +6677,7 @@ struct state_functions {
 		if (!unit_is_factory(factory_unit)) return;
 		auto target = factory_unit->building.rally;
 		if (target.unit == factory_unit) return;
-		if (target.pos != xy()) {
+		if (target.pos.x) {
 			if (target.unit && target.unit->owner == u->owner) {
 				set_unit_order(u, get_order_type(Orders::Follow), target.unit);
 			} else {
@@ -6233,6 +6766,39 @@ struct state_functions {
 		set_secondary_order(u, get_order_type(Orders::Nothing));
 	}
 
+	void secondary_order_SpawningLarva(unit_t* u) {
+		if (u->order_process_timer) return;
+		if (u->owner == 11) return;
+		int larva_count = 0;
+		for (unit_t* n : find_units_noexpand(square_at(u->sprite->position, 32 * 8))) {
+			if (!unit_is(n, UnitTypes::Zerg_Larva)) continue;
+			if (n->connected_unit != u) continue;
+			if (us_hidden(n)) continue;
+			++larva_count;
+			if (larva_count >= 3) return;
+		}
+		if (u->building.larva_timer) {
+			--u->building.larva_timer;
+			return;
+		}
+		if (spawn_larva(u)) u->building.larva_timer = 37;
+		else u->building.larva_timer = 3;
+	}
+
+	void secondary_order_SpreadCreep(unit_t* u) {
+		if (unit_is_hatchery(u)) secondary_order_SpawningLarva(u);
+		if (u->building.creep_timer) {
+			--u->building.creep_timer;
+			return;
+		}
+		u->building.creep_timer = 15;
+		bool any_tiles_occupied = false;
+		if (!spread_creep(get_unit_type(UnitTypes::Zerg_Hive), u->sprite->position, &any_tiles_occupied) && !any_tiles_occupied) {
+			if (unit_is_hatchery(u)) set_secondary_order(u, get_order_type(Orders::SpawningLarva));
+			else set_secondary_order(u, get_order_type(Orders::Nothing));
+		}
+	}
+
 	void execute_secondary_order(unit_t* u) {
 		if (u->secondary_order_type->id == Orders::Hallucination2) {
 			if (u->defensive_matrix_hp != 0_fp8 || u->stim_timer || u->ensnare_timer || u->lockdown_timer || u->irradiate_timer || u->stasis_timer || u->parasite_flags || u->storm_timer || u->plague_timer || u->blinded_by || u->maelstrom_timer) {
@@ -6255,10 +6821,10 @@ struct state_functions {
 			xcept("ShieldBattery");
 			break;
 		case Orders::SpawningLarva:
-			xcept("SpawningLarva");
+			secondary_order_SpawningLarva(u);
 			break;
 		case Orders::SpreadCreep:
-			xcept("SpreadCreep");
+			secondary_order_SpreadCreep(u);
 			break;
 		case Orders::Cloak:
 			secondary_order_Cloak(u);
@@ -10022,14 +10588,20 @@ struct state_functions {
 		return ems.refresh_vision;
 	}
 
+	bool unit_type_is_morphing_building(unit_type_autocast ut) const {
+		if (unit_is(ut, UnitTypes::Zerg_Hive)) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Lair)) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Greater_Spire)) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Spore_Colony)) return true;
+		if (unit_is(ut, UnitTypes::Zerg_Sunken_Colony)) return true;
+		return false;
+	}
+
 	bool unit_is_morphing_building(const unit_t* u) const {
 		if (u_completed(u)) return false;
 		if (u->build_queue.empty()) return false;
-		const unit_type_t* t = u->build_queue.front();
-		auto tt = t->id;
-		return tt == UnitTypes::Zerg_Hive || tt == UnitTypes::Zerg_Lair || tt == UnitTypes::Zerg_Greater_Spire || tt == UnitTypes::Zerg_Spore_Colony || tt == UnitTypes::Zerg_Sunken_Colony;
+		return unit_type_is_morphing_building(u->build_queue.front());
 	}
-
 
 	int unit_sight_range(const unit_t* u, bool ignore_blindness = false) const {
 		if (u_grounded_building(u) && !u_completed(u) && !unit_is_morphing_building(u)) return 32 * 4;
@@ -10598,7 +11170,7 @@ struct state_functions {
 			xcept("update_dead_unit: fixme some creep stuff?");
 		}
 		if (u->sprite) {
-			if (update_tiles && st.players[u->owner].controller == state::player_t::controller_occupied) {
+			if (update_tiles && st.players[u->owner].controller == player_t::controller_occupied) {
 				reveal_sight_at(u->sprite->position, 1, st.shared_vision[u->owner], u_flying(u));
 			}
 			update_unit_sprite(u);
@@ -10769,9 +11341,40 @@ struct state_functions {
 		}
 	}
 
+	void recede_creep() {
+		if (st.creep_life.recede_timer) {
+			--st.creep_life.recede_timer;
+			return;
+		}
+		std::array<int, 9> lut{1, 3, 5, 6, 7, 8, 9, 9, 9};
+		st.creep_life.recede_timer = lut.at(st.creep_life.free_list_size >> 7);
+
+		for (size_t i = 0; i != st.creep_life.lists.size(); ++i) {
+			auto& list = st.creep_life.lists[i];
+			auto& size = st.creep_life.lists_size[i];
+			if (list.empty()) continue;
+			auto it = list.begin();
+			std::advance(it, lcg_rand(27, 0, (int)size - 1));
+			auto* v = &*it;
+			list.remove(*v);
+			--size;
+			st.creep_life.table.remove(v);
+			v->n_neighboring_creep_tiles = 9;
+			st.creep_life.free_list.push_front(*v);
+			++st.creep_life.free_list_size;
+
+			size_t index = v->tile_pos.y * game_st.map_tile_width + v->tile_pos.x;
+			st.tiles[index].flags &= ~tile_t::flag_creep_receding;
+			set_tile_creep(v->tile_pos, false);
+			break;
+		}
+	}
+
 	void process_frame() {
 
 		allow_random = true;
+
+		recede_creep();
 
 		if (st.update_tiles_countdown == 0) st.update_tiles_countdown = 100;
 		--st.update_tiles_countdown;
@@ -10929,7 +11532,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void set_sprite_images_heading_by_index(sprite_t* sprite, size_t frame_index_offset) {
 		for (image_t* i : ptr(sprite->images)) {
 			set_image_heading_by_index(i, frame_index_offset);
@@ -11073,22 +11676,26 @@ struct state_functions {
 		return false;
 	}
 
+	fp8 weapon_damage_amount(const weapon_type_t* w, int owner) const {
+		return fp8::integer(w->damage_amount + w->damage_bonus * player_upgrade_level(owner, w->damage_upgrade));
+	}
+
 	fp8 bullet_damage_amount(const bullet_t* b, const unit_t* target) const {
 		if (b->weapon_type->hit_type == weapon_type_t::hit_type_nuclear_missile) {
 			int damage = max_visible_hp_plus_shields(target) * 2 / 3;
 			if (damage < 500) damage = 500;
 			return fp8::integer(damage);
 		} else {
-			return fp8::integer(b->weapon_type->damage_amount + b->weapon_type->damage_bonus * player_upgrade_level(b->owner, b->weapon_type->damage_upgrade));
+			return weapon_damage_amount(b->weapon_type, b->owner);
 		}
 	}
-	
+
 	int unit_sprite_size(unit_type_autocast ut) const {
 		if (ut_flag(ut, (unit_type_t::flags_t)0x2000000)) return 1;
 		if (ut_flag(ut, (unit_type_t::flags_t)0x4000000)) return 2;
 		return 0;
 	}
-	
+
 	image_t* create_sized_image(unit_t* u, ImageTypes small_image) {
 		ImageTypes image = (ImageTypes)((int)small_image + unit_sprite_size(u));
 		return create_image(get_image_type(image), (u->subunit ? u->subunit : u)->sprite, {}, image_order_top);
@@ -11315,15 +11922,26 @@ struct state_functions {
 		target->ground_strength = get_unit_strength(target, true);
 	}
 
-	void bullet_deal_damage(bullet_t* b, unit_t* target, int damage_divisor) {
+	void bullet_deal_damage(const bullet_t* b, unit_t* target, int damage_divisor) {
 		if (b->hit_flags & 2) {
 			xcept("bullet_deal_damage: some hallucination fixme");
 		} else {
 			weapon_deal_damage(b->weapon_type, bullet_damage_amount(b, target), damage_divisor, target, b->heading, b->bullet_owner_unit, b->owner);
 		}
 	}
-	void bullet_deal_damage(bullet_t* b, unit_t* target) {
+	void bullet_deal_damage(const bullet_t* b, unit_t* target) {
 		bullet_deal_damage(b, target, 1);
+	}
+
+	void melee_deal_damage(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		if (!target) return;
+		auto* w = unit_ground_weapon(u);
+		if (u_hallucination(target)) {
+			xcept("melee_deal_damage: some hallucination fixme");
+		} else {
+			weapon_deal_damage(w, weapon_damage_amount(w, u->owner), 1, target, u->heading, u, u->owner);
+		}
 	}
 
 	bool weapon_can_target_unit(const weapon_type_t* weapon, const unit_t* target) const {
@@ -11392,7 +12010,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void irradiate_unit(unit_t* u, unit_t* source_unit, int source_owner) {
 		if (u->irradiate_timer == 0 && !u_burrowed(u)) {
 			create_sized_image(u, ImageTypes::IMAGEID_Irradiate_Small);
@@ -11401,14 +12019,14 @@ struct state_functions {
 		u->irradiated_by = source_unit;
 		u->irradiate_owner = source_owner;
 	}
-	
+
 	void return_interceptors(unit_t* u) {
 		if (!unit_is_carrier(u)) return;
 		for (unit_t* n : ptr(u->carrier.outside_units)) {
 			set_unit_order(n, get_order_type(Orders::InterceptorReturn));
 		}
 	}
-	
+
 	void set_unit_disabled(unit_t* u) {
 		if (u->subunit) u_set_status_flag(u->subunit, unit_t::status_flag_disabled);
 		stop_unit(u);
@@ -11421,7 +12039,7 @@ struct state_functions {
 		if (!u->order_type->unk9) u->order_target.unit = nullptr;
 		iscript_run_to_idle(u);
 	}
-	
+
 	void lockdown_unit(unit_t* u) {
 		if (u->lockdown_timer == 0) {
 			create_sized_image(u, ImageTypes::IMAGEID_Lockdown_Field_Small);
@@ -11429,7 +12047,7 @@ struct state_functions {
 		if (u->lockdown_timer < 131) u->lockdown_timer = 131;
 		set_unit_disabled(u);
 	}
-	
+
 	void blind_unit(unit_t* u, int source_owner) {
 		if (u_hallucination(u)) {
 			kill_unit(u);
@@ -11440,7 +12058,7 @@ struct state_functions {
 		create_sized_image(u, ImageTypes::IMAGEID_Optical_Flare_Hit_Small);
 		st.update_tiles_countdown = 1;
 	}
-	
+
 	void restore_unit(unit_t* u) {
 		if (u_hallucination(u)) {
 			kill_unit(u);
@@ -11456,7 +12074,7 @@ struct state_functions {
 		if (u->maelstrom_timer) remove_maelstrom(u);
 		if (u->acid_spore_count) remove_acid_spores(u);
 	}
-	
+
 	void emp_shockwave(xy position, const unit_t* source_unit) {
 		int range = get_weapon_type(WeaponTypes::EMP_Shockwave)->inner_splash_radius;
 		for (unit_t* target : find_units_noexpand(square_at(position, range))) {
@@ -11471,7 +12089,7 @@ struct state_functions {
 			target->shield_points = 0_fp8;
 		}
 	}
-	
+
 	void bullet_hit(bullet_t* b) {
 		switch (b->weapon_type->hit_type) {
 		case weapon_type_t::hit_type_none:
@@ -11986,6 +12604,17 @@ struct state_functions {
 
 		const int* program_data = global_st.iscript.program_data.data();
 		const int* p = program_data + state.program_counter;
+
+		auto playsndrand = [&]() {
+			int n = *p++;
+			if (!noop) {
+				int index = lcg_rand(4) % n;
+				(void)index;
+				// todo: callback for sound
+			}
+			p += n;
+		};
+
 		while (true) {
 			using namespace iscript_opcodes;
 			size_t pc = p - program_data;
@@ -12110,7 +12739,15 @@ struct state_functions {
 					if (t) set_sprite_images_heading_by_image_index(t->sprite, image);
 				}
 				break;
-
+			case opc_sproluselo:
+				a = *p++;
+				b = *p++;
+				if (noop) break;
+				if (auto* sprite = get_sprite_type((SpriteTypes)a)) {
+					auto* t = create_thingy_at_image(image, sprite, get_image_lo_offset(image, (size_t)b, 0), image->sprite->elevation_level + 1);
+					if (t) set_sprite_images_heading_by_image_index(t->sprite, image);
+				}
+				break;
 			case opc_end:
 				if (noop) break;
 				if (image == image->sprite->main_image && !allow_main_image_destruction) xcept("iscript_execute: main image not allowed to be destroyed here");
@@ -12131,7 +12768,9 @@ struct state_functions {
 				if (noop) break;
 				// todo: callback for sound?
 				break;
-
+			case opc_playsndrand:
+				playsndrand();
+				break;
 			case opc_playsndbtwn:
 				a = *p++;
 				b = *p++;
@@ -12143,6 +12782,10 @@ struct state_functions {
 			case opc_dogrddamage:
 				if (noop) break;
 				if (iscript_bullet) bullet_hit(iscript_bullet);
+				break;
+			case opc_attackmelee:
+				if (!noop && iscript_unit) melee_deal_damage(iscript_unit);
+				playsndrand();
 				break;
 
 			case opc_followmaingraphic:
@@ -12332,7 +12975,17 @@ struct state_functions {
 					}
 				}
 				break;
-
+			case opc_trgtarccondjmp:
+				a = *p++;
+				b = *p++;
+				c = *p++;
+				if (noop) break;
+				if (iscript_unit && iscript_unit->order_target.unit) {
+					if (fp8::extend(xy_direction(iscript_unit->order_target.unit->sprite->position) - direction_t::from_raw(a)).abs() < fp8::from_raw(b)) {
+						p = program_data + c;
+					}
+				}
+				break;
 			case opc_curdirectcondjmp:
 				a = *p++;
 				b = *p++;
@@ -13015,7 +13668,7 @@ struct state_functions {
 
 		return find_nearest_unit(pos, search_area, x_i, y_i, x_i, y_i, predicate);
 	}
-	
+
 	template<typename F>
 	unit_t* find_nearest_unit(const unit_t* u, rect search_area, F&& predicate) const {
 		if (us_hidden(u)) {
@@ -13053,14 +13706,14 @@ struct state_functions {
 		return false;
 	}
 
-	void set_unit_tiles_occupied(const unit_t* u, xy position) {
-		xy size(u->unit_type->placement_size.x / 32u, u->unit_type->placement_size.y / 32u);
+	void set_unit_tiles_occupied(unit_type_autocast ut, xy position) {
+		xy size(ut->placement_size.x / 32u, ut->placement_size.y / 32u);
 		xy pos(position.x / 32u, position.y / 32u);
 		tiles_flags_or(pos.x - size.x / 2, pos.y - size.y / 2, size.x, size.y, tile_t::flag_occupied);
 	}
 
-	void set_unit_tiles_unoccupied(const unit_t* u, xy position) {
-		xy size(u->unit_type->placement_size.x / 32u, u->unit_type->placement_size.y / 32u);
+	void set_unit_tiles_unoccupied(unit_type_autocast ut, xy position) {
+		xy size(ut->placement_size.x / 32u, ut->placement_size.y / 32u);
 		xy pos(position.x / 32u, position.y / 32u);
 		tiles_flags_and(pos.x - size.x / 2, pos.y - size.y / 2, size.x, size.y, ~tile_t::flag_occupied);
 	}
@@ -13298,7 +13951,8 @@ struct state_functions {
 					if (u->building.upgrading_type) cancel_upgrade(u, true);
 					if (!u->build_queue.empty()) cancel_build_queue(u);
 					if (unit_race(u) == race::zerg) {
-						xcept("fixme cancel zerg stuff");
+						if (unit_is_morphing_building(u)) u_set_status_flag(u, unit_t::status_flag_completed);
+						if (!remove_creep_provider(u, u->position, u_completed(u))) u_set_status_flag(u, unit_t::status_flag_4000);
 					}
 				}
 				if (ut_flying_building(u) && u->building.is_landing) {
@@ -13380,7 +14034,7 @@ struct state_functions {
 		u->user_action_flags = 0;
 		u->pathing_flags = 0;
 		u->previous_hp = 1;
-		
+
 		u->building.rally = {};
 
 		if (!initialize_unit_type(u, unit_type, pos, owner)) return false;
@@ -13464,7 +14118,6 @@ struct state_functions {
 		} else {
 			u->subunit = nullptr;
 		}
-
 		return u;
 	}
 
@@ -13857,20 +14510,13 @@ struct state_functions {
 					if (!morphed) st.total_non_buildings_ever_completed[u->owner] += count;
 					st.unit_score[u->owner] += u->unit_type->build_score * count;
 				} else if (u->unit_type->group_flags & GroupFlags::Building) {
-					bool morphed = false;
-					if (unit_is(u, UnitTypes::Zerg_Lair)) morphed = true;
-					if (unit_is(u, UnitTypes::Zerg_Hive)) morphed = true;
-					if (unit_is(u, UnitTypes::Zerg_Greater_Spire)) morphed = true;
-					if (unit_is(u, UnitTypes::Zerg_Spore_Colony)) morphed = true;
-					if (unit_is(u, UnitTypes::Zerg_Sunken_Colony)) morphed = true;
-					if (!morphed) st.total_buildings_ever_completed[u->owner] += count;
+					if (!unit_type_is_morphing_building(u)) st.total_buildings_ever_completed[u->owner] += count;
 					st.building_score[u->owner] += u->unit_type->build_score * count;
 				}
 			}
 		}
 
 		if (st.completed_unit_counts[u->owner][u->unit_type->id] < 0) st.completed_unit_counts[u->owner][u->unit_type->id] = 0;
-
 	}
 
 	void remove_queued_order(unit_t* u, order_t* o) {
@@ -14293,11 +14939,11 @@ struct state_functions {
 			u->detected_flags = 0x80000000;
 			u->secondary_order_timer = 0;
 		}
-		if (st.players[u->owner].controller == state::player_t::controller_rescue_passive) {
+		if (st.players[u->owner].controller == player_t::controller_rescue_passive) {
 			xcept("fixme rescue passive");
 		} else {
-			if (st.players[u->owner].controller == state::player_t::controller_neutral) set_unit_order(u, get_order_type(Orders::Neutral));
-			else if (st.players[u->owner].controller == state::player_t::controller_computer_game) set_unit_order(u, u->unit_type->computer_ai_idle);
+			if (st.players[u->owner].controller == player_t::controller_neutral) set_unit_order(u, get_order_type(Orders::Neutral));
+			else if (st.players[u->owner].controller == player_t::controller_computer_game) set_unit_order(u, u->unit_type->computer_ai_idle);
 			else set_unit_order(u, u->unit_type->human_ai_idle);
 		}
 		if (ut_flag(u, (unit_type_t::flags_t)0x800)) {
@@ -15893,7 +16539,7 @@ struct state_functions {
 
 	void pre_process_triggers() {
 		for (size_t i = 0; i != 8; ++i) {
-			if (st.players[i].controller != state::player_t::controller_occupied) continue;
+			if (st.players[i].controller != player_t::controller_occupied) continue;
 			for (auto& t : game_st.triggers) {
 				if (!t.enabled[i] && !t.enabled.at(17 + st.players[i].force) && !t.enabled[17]) continue;
 				bool execute_now = true;
@@ -15986,7 +16632,7 @@ struct state_functions {
 			execute_trigger_action(owner, a);
 		}
 	}
-	
+
 	bool tile_can_have_creep(xy_t<size_t> tile_pos) {
 		size_t index = tile_pos.y * game_st.map_tile_width + tile_pos.x;
 		if (st.tiles[index].flags & (tile_t::flag_unbuildable | tile_t::flag_partially_walkable)) return false;
@@ -15994,7 +16640,7 @@ struct state_functions {
 		if (st.tiles[index + game_st.map_tile_width].flags & tile_t::flag_unbuildable) return false;
 		return true;
 	}
-	
+
 	rect_t<xy_t<size_t>> get_max_creep_bb(unit_type_autocast unit_type, xy pos, bool unit_is_completed) {
 		rect r;
 		if (unit_type_spreads_creep(unit_type, unit_is_completed)) {
@@ -16002,7 +16648,7 @@ struct state_functions {
 			r.to = pos + xy(320, 200);
 		} else {
 			r.from = (pos / 32 - unit_type->placement_size / 32 / 2) * 32;
-			r.to = (pos / 32 + unit_type->placement_size / 32 - xy(1, 1)) * 32;
+			r.to = (r.from / 32 + unit_type->placement_size / 32 - xy(1, 1)) * 32;
 		}
 		rect_t<xy_t<size_t>> rt;
 		if (r.from.x <= 0) rt.from.x = 0;
@@ -16015,7 +16661,7 @@ struct state_functions {
 		else rt.to.y = r.to.y / 32u;
 		return rt;
 	}
-	
+
 	size_t count_neighboring_creep_tiles(xy_t<size_t> tile_pos) {
 		size_t r = 0;
 		size_t width = game_st.map_tile_width;
@@ -16048,17 +16694,80 @@ struct state_functions {
 		}
 		return r;
 	}
-	
-	bool spread_creep(unit_type_autocast unit_type, xy pos) {
+
+	void set_tile_creep(xy_t<size_t> tile_pos, bool has_creep = true) {
+		size_t index = tile_pos.y * game_st.map_tile_width + tile_pos.x;
+		if (has_creep) st.tiles[index].flags |= tile_t::flag_has_creep;
+		else st.tiles[index].flags &= ~tile_t::flag_has_creep;
+
+		size_t width = game_st.map_tile_width;
+		size_t height = game_st.map_tile_height;
+		index -= width;
+		--tile_pos.x;
+		index -= 1;
+		--tile_pos.y;
+		auto test = [&]() {
+			if (~st.tiles[index].flags & tile_t::flag_has_creep) return;
+			if (~st.tiles[index].flags & tile_t::flag_creep_receding) return;
+			auto* v = st.creep_life.table.find(tile_pos);
+			if (!v) xcept("set_tile_creep: receding creep not found");
+			size_t n_neighbors = count_neighboring_creep_tiles(tile_pos);
+			if (v->n_neighboring_creep_tiles == n_neighbors) return;
+
+			st.creep_life.lists[v->n_neighboring_creep_tiles].remove(*v);
+			--st.creep_life.lists_size[v->n_neighboring_creep_tiles];
+			v->n_neighboring_creep_tiles = n_neighbors;
+			st.creep_life.lists[n_neighbors].push_front(*v);
+			++st.creep_life.lists_size[n_neighbors];
+		};
+		if (tile_pos.y < height) {
+			if (tile_pos.x < width) test();
+			++index;
+			++tile_pos.x;
+			test();
+			++index;
+			++tile_pos.x;
+			if (tile_pos.x < width) test();
+			index -= 2;
+			tile_pos.x -= 2;
+		}
+		index += width;
+		++tile_pos.y;
+		if (tile_pos.x < width) test();
+		index += 2;
+		tile_pos.x += 2;
+		if (tile_pos.x < width) test();
+		index -= 2;
+		tile_pos.x -= 2;
+		index += width;
+		++tile_pos.y;
+		if (tile_pos.y < height) {
+			if (tile_pos.x < width) test();
+			++index;
+			++tile_pos.x;
+			test();
+			++index;
+			++tile_pos.x;
+			if (tile_pos.x < width) test();
+		}
+	}
+
+	bool spread_creep(unit_type_autocast unit_type, xy pos, bool* out_any_tiles_occupied = nullptr) {
 		std::array<static_vector<size_t, 240>, 8> target_tiles;
 		bool spreads_creep = unit_type_spreads_creep(unit_type, true);
 		auto area = get_max_creep_bb(unit_type, pos, true);
 		int dy = (int)area.from.y * 32 - pos.y + 16;
+		bool any_tiles_occupied = false;
 		for (size_t tile_y = area.from.y; tile_y != area.to.y + 1; ++tile_y, dy += 32) {
 			int dx = (int)area.from.x * 32 - pos.x + 16;
 			for (size_t tile_x = area.from.x; tile_x != area.to.x + 1; ++tile_x, dx += 32) {
 				size_t index = tile_y * game_st.map_tile_width + tile_x;
-				if (st.tiles[index].flags & (tile_t::flag_has_creep | tile_t::flag_occupied)) continue;
+				auto flags = st.tiles[index].flags;
+				if (flags & tile_t::flag_has_creep) continue;
+				if (flags & tile_t::flag_occupied) {
+					if (!any_tiles_occupied) any_tiles_occupied = true;
+					continue;
+				}
 				if (!tile_can_have_creep({tile_x, tile_y})) continue;
 				if (spreads_creep) {
 					int d = dx*dx * 25 + dy*dy * 64;
@@ -16069,15 +16778,16 @@ struct state_functions {
 				target_tiles[n - 1].push_back(index);
 			}
 		}
+		if (out_any_tiles_occupied) *out_any_tiles_occupied = any_tiles_occupied;
 		for (auto& v : reverse(target_tiles)) {
 			if (v.empty()) continue;
 			size_t index = v[(lcg_rand(26) >> 4) % v.size()];
-			st.tiles[index].flags |= tile_t::flag_has_creep;
+			set_tile_creep({index % game_st.map_tile_width, index / game_st.map_tile_width});
 			return true;
 		}
 		return false;
 	}
-	
+
 	void spread_creep_completely(unit_type_autocast unit_type, xy pos) {
 		rect_t<xy_t<size_t>> unit_area;
 		unit_area.from.x = pos.x / 32u - unit_type->placement_size.x / 32u / 2;
@@ -16085,15 +16795,71 @@ struct state_functions {
 		unit_area.to.x = unit_area.from.x + unit_type->placement_size.x / 32u;
 		unit_area.to.y = unit_area.from.y + unit_type->placement_size.y / 32u;
 		st.tiles.at(unit_area.from.y * game_st.map_tile_width + unit_area.from.x);
-		st.tiles.at(unit_area.to.y * game_st.map_tile_width + unit_area.to.x);
+		if (unit_area.from != unit_area.to) st.tiles.at((unit_area.to.y - 1) * game_st.map_tile_width + unit_area.to.x - 1);
 		for (size_t y = unit_area.from.y; y != unit_area.to.y; ++y) {
 			for (size_t x = unit_area.from.x; x != unit_area.to.x; ++x) {
 				if (!tile_can_have_creep({x, y})) continue;
-				size_t index = y * game_st.map_tile_width + x;
-				st.tiles[index].flags |= tile_t::flag_has_creep;
+				set_tile_creep({x, y});
 			}
 		}
 		while (spread_creep(unit_type, pos));
+	}
+
+	xy get_spawn_larva_position(unit_t* u) {
+		if (!unit_is_hatchery(u)) xcept("get_spawn_larva_position: unit is not a hatchery");
+		int best_score = 101;
+		xy best_pos(-1, -1);
+		auto test = [&](size_t index, xy pos, xy neighbor_offset) {
+			int val = u->building.hatchery.larva_spawn_side_values[index];
+			if (val >= best_score) return false;
+			if (restrict_move_target_to_valid_bounds(get_unit_type(UnitTypes::Zerg_Larva), pos) != pos) return false;
+			if (~st.tiles[tile_index(pos)].flags & tile_t::flag_has_creep) return false;
+			auto op = pos + neighbor_offset;
+			if (restrict_move_target_to_valid_bounds(get_unit_type(UnitTypes::Zerg_Larva), op) != op) return false;
+			auto flags = st.tiles[tile_index(op)].flags;
+			if (flags & tile_t::flag_occupied) return false;
+			if ((flags & (tile_t::flag_walkable | tile_t::flag_has_creep)) == 0) return false;
+			best_score = val;
+			best_pos = pos;
+			return true;
+		};
+		auto bb = unit_sprite_inner_bounding_box(u);
+		test(3, {u->sprite->position.x, bb.to.y + 10}, {0, 22});
+		test(0, {bb.from.x - 10, u->sprite->position.y}, {-22, 0});
+		test(2, {bb.to.x + 10, u->sprite->position.y}, {22, 0});
+		test(1, {u->sprite->position.x, bb.from.y - 10}, {0, -22});
+		if (best_pos != xy(-1, -1)) return best_pos;
+		int w = (u->unit_type->dimensions.from.x + u->unit_type->dimensions.to.x + 1) / 2;
+		int h = (u->unit_type->dimensions.from.y + u->unit_type->dimensions.to.y + 1) / 2;
+		best_score = 0x10000;
+		if (!test(3, {u->sprite->position.x - w, bb.to.y + 10}, {0, 22}) && !test(3, {u->sprite->position.x + w, bb.to.y + 10}, {0, 22})) {
+			best_score = 101;
+		}
+		test(0, {bb.from.x - 10, u->sprite->position.y - h}, {-22, 0}) || test(0, {bb.from.x - 10, u->sprite->position.y + h}, {-22, 0});
+		test(2, {bb.to.x + 10, u->sprite->position.y - h}, {22, 0}) || test(2, {bb.to.x + 10, u->sprite->position.y + h}, {22, 0});
+		test(1, {u->sprite->position.x - w, bb.from.y - 10}, {0, -22}) || test(1, {u->sprite->position.x + w, bb.from.y - 10}, {0, -22});
+		return best_pos;
+	}
+
+	unit_t* spawn_larva(unit_t* u) {
+		xy pos = get_spawn_larva_position(u);
+		if (pos == xy(-1, -1)) return nullptr;
+		unit_t* larva = create_unit(get_unit_type(UnitTypes::Zerg_Larva), pos, u->owner);
+		if (larva) {
+			finish_building_unit(larva);
+			complete_unit(larva);
+			larva->connected_unit = u;
+			if (larva->sprite->position.x < u->sprite->position.x - u->unit_type->dimensions.from.x) {
+				larva->order_state = 0;
+			} else if (larva->sprite->position.y < u->sprite->position.y - u->unit_type->dimensions.from.y) {
+				larva->order_state = 1;
+			} else if (larva->sprite->position.x > u->sprite->position.x + u->unit_type->dimensions.to.x) {
+				larva->order_state = 2;
+			} else {
+				larva->order_state = 3;
+			}
+		}
+		return larva;
 	}
 
 };
@@ -16370,7 +17136,7 @@ struct game_load_functions : state_functions {
 			if (index == ImageTypes::None) ptr = nullptr;
 			else ptr = get_image_type(index);
 		};
-		
+
 		auto pos_coord = [&](int& v) {
 			if (v < 0) v = 0;
 			if (v >= 256 * 32) v = 256 * 32 - 1;
@@ -16389,7 +17155,7 @@ struct game_load_functions : state_functions {
 			fixup_order_type(v.return_to_idle);
 			fixup_order_type(v.attack_unit);
 			fixup_order_type(v.attack_move);
-			
+
 			pos_coord(v.placement_size.x);
 			pos_coord(v.placement_size.y);
 			pos_coord(v.dimensions.from.x);
@@ -16404,8 +17170,6 @@ struct game_load_functions : state_functions {
 
 		for (auto& v : game_st.unit_type_allowed) v.fill(true);
 		for (auto& v : game_st.tech_available) v.fill(true);
-		st.tech_researched = {};
-		st.tech_researching = {};
 		for (auto& v : game_st.max_upgrade_levels) {
 			for (size_t i = 0; i != 61; ++i) {
 				v[(UpgradeTypes)i] = get_upgrade_type((UpgradeTypes)i)->max_level;
@@ -16423,8 +17187,9 @@ struct game_load_functions : state_functions {
 		}
 
 		st.upgrade_levels = {};
-		// upgrade progress?
-		// UPRP stuff?
+		st.upgrade_upgrading = {};
+		st.tech_researched = {};
+		st.tech_researching = {};
 
 		st.unit_counts = {};
 		st.completed_unit_counts = {};
@@ -16523,6 +17288,8 @@ struct game_load_functions : state_functions {
 		create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Cursor_Marker), {}, 0);
 
 		st.last_error = 0;
+		st.recent_lurker_hit_current_index = 0;
+		st.triggers_state = 0;
 
 		int max_unit_width = 0;
 		int max_unit_height = 0;
@@ -16550,6 +17317,7 @@ struct game_load_functions : state_functions {
 		st.total_minerals_gathered = {};
 		st.total_gas_gathered = {};
 
+		st.creep_life = {};
 	}
 
 	regions_t::region* get_new_region() {
@@ -17662,62 +18430,6 @@ struct game_load_functions : state_functions {
 
 		set_mega_tile_flags();
 	}
-	
-	xy get_spawn_larva_position(unit_t* u) {
-		if (!unit_is_hatchery(u)) xcept("spawn_larva: unit is not a hatchery");
-		int best_score = 101;
-		xy best_pos(-1, -1);
-		auto test = [&](size_t index, xy pos, xy neighbor_offset) {
-			int val = u->building.hatchery.larva_spawn_side_values[index];
-			if (val >= best_score) return false;
-			if (restrict_move_target_to_valid_bounds(get_unit_type(UnitTypes::Zerg_Larva), pos) != pos) return false;
-			if (~st.tiles[tile_index(pos)].flags & tile_t::flag_has_creep) return false;
-			auto op = pos + neighbor_offset;
-			if (restrict_move_target_to_valid_bounds(get_unit_type(UnitTypes::Zerg_Larva), op) != op) return false;
-			auto flags = st.tiles[tile_index(op)].flags;
-			if (flags & tile_t::flag_occupied) return false;
-			if ((flags & (tile_t::flag_walkable | tile_t::flag_has_creep)) == 0) return false;
-			best_score = val;
-			best_pos = pos;
-			return true;
-		};
-		auto bb = unit_sprite_inner_bounding_box(u);
-		test(3, {u->sprite->position.x, bb.to.y + 10}, {0, 22});
-		test(0, {bb.from.x - 10, u->sprite->position.y}, {-22, 0});
-		test(2, {bb.to.x + 10, u->sprite->position.y}, {22, 0});
-		test(1, {u->sprite->position.x, bb.from.y - 10}, {0, -22});
-		if (best_pos != xy(-1, -1)) return best_pos;
-		int w = (u->unit_type->dimensions.from.x + u->unit_type->dimensions.to.x + 1) / 2;
-		int h = (u->unit_type->dimensions.from.y + u->unit_type->dimensions.to.y + 1) / 2;
-		best_score = 0x10000;
-		if (!test(3, {u->sprite->position.x - w, bb.to.y + 10}, {0, 22}) && !test(3, {u->sprite->position.x + w, bb.to.y + 10}, {0, 22})) {
-			best_score = 101;
-		}
-		test(0, {bb.from.x - 10, u->sprite->position.y - h}, {-22, 0}) || test(0, {bb.from.x - 10, u->sprite->position.y + h}, {-22, 0});
-		test(2, {bb.to.x + 10, u->sprite->position.y - h}, {22, 0}) || test(2, {bb.to.x + 10, u->sprite->position.y + h}, {22, 0});
-		test(1, {u->sprite->position.x - w, bb.from.y - 10}, {0, -22}) || test(1, {u->sprite->position.x + w, bb.from.y - 10}, {0, -22});
-		return best_pos;
-	}
-	
-	void spawn_larva(unit_t* u) {
-		xy pos = get_spawn_larva_position(u);
-		if (pos == xy(-1, -1)) return;
-		unit_t* larva = create_unit(get_unit_type(UnitTypes::Zerg_Larva), pos, u->owner);
-		if (larva) {
-			finish_building_unit(larva);
-			complete_unit(larva);
-			larva->connected_unit = u;
-			if (larva->sprite->position.x < u->sprite->position.x - u->unit_type->dimensions.from.x) {
-				larva->order_state = 0;
-			} else if (larva->sprite->position.y < u->sprite->position.y - u->unit_type->dimensions.from.y) {
-				larva->order_state = 1;
-			} else if (larva->sprite->position.x > u->sprite->position.x + u->unit_type->dimensions.to.x) {
-				larva->order_state = 2;
-			} else {
-				larva->order_state = 3;
-			}
-		}
-	}
 
 	void create_starting_units(int owner, xy position, race race) {
 
@@ -17920,13 +18632,13 @@ struct game_load_functions : state_functions {
 				}
 			}
 
-			tiles_flags_and(0, (int)game_st.map_tile_height - 2, 5, 1, ~(tile_t::flag_walkable | tile_t::flag_has_creep | tile_t::flag_partially_walkable));
-			tiles_flags_or(0, (int)game_st.map_tile_height - 2, 5, 1, tile_t::flag_unbuildable);
-			tiles_flags_and((int)game_st.map_tile_width - 5, (int)game_st.map_tile_height - 2, 5, 1, ~(tile_t::flag_walkable | tile_t::flag_has_creep | tile_t::flag_partially_walkable));
-			tiles_flags_or((int)game_st.map_tile_width - 5, (int)game_st.map_tile_height - 2, 5, 1, tile_t::flag_unbuildable);
+			tiles_flags_and(0, game_st.map_tile_height - 2, 5, 1, ~(tile_t::flag_walkable | tile_t::flag_has_creep | tile_t::flag_partially_walkable));
+			tiles_flags_or(0, game_st.map_tile_height - 2, 5, 1, tile_t::flag_unbuildable);
+			tiles_flags_and(game_st.map_tile_width - 5, game_st.map_tile_height - 2, 5, 1, ~(tile_t::flag_walkable | tile_t::flag_has_creep | tile_t::flag_partially_walkable));
+			tiles_flags_or(game_st.map_tile_width - 5, game_st.map_tile_height - 2, 5, 1, tile_t::flag_unbuildable);
 
-			tiles_flags_and(0, (int)game_st.map_tile_height - 1, (int)game_st.map_tile_width, 1, ~(tile_t::flag_walkable | tile_t::flag_has_creep | tile_t::flag_partially_walkable));
-			tiles_flags_or(0, (int)game_st.map_tile_height - 1, (int)game_st.map_tile_width, 1, tile_t::flag_unbuildable);
+			tiles_flags_and(0, game_st.map_tile_height - 1, game_st.map_tile_width, 1, ~(tile_t::flag_walkable | tile_t::flag_has_creep | tile_t::flag_partially_walkable));
+			tiles_flags_or(0, game_st.map_tile_height - 1, game_st.map_tile_width, 1, tile_t::flag_unbuildable);
 
 			regions_create();
 		};
@@ -18156,10 +18868,10 @@ struct game_load_functions : state_functions {
 				auto should_create_units_for_this_player = [&]() {
 					if (owner >= 8) return true;
 					int controller = st.players[owner].controller;
-					if (controller == state::player_t::controller_computer_game) return true;
-					if (controller == state::player_t::controller_occupied) return true;
-					if (controller == state::player_t::controller_rescue_passive) return true;
-					if (controller == state::player_t::controller_unused_rescue_active) return true;
+					if (controller == player_t::controller_computer_game) return true;
+					if (controller == player_t::controller_occupied) return true;
+					if (controller == player_t::controller_rescue_passive) return true;
+					if (controller == player_t::controller_unused_rescue_active) return true;
 					return false;
 				};
 				auto is_neutral_unit = [&]() {
@@ -18313,7 +19025,7 @@ struct game_load_functions : state_functions {
 		for (size_t i = 0; i != 12; ++i) {
 			st.shared_vision[i] = 1 << i;
 			st.players[i].color = (int)i;
-			if (st.players[i].controller == state::player_t::controller_rescue_passive || st.players[i].controller == state::player_t::controller_neutral) {
+			if (st.players[i].controller == player_t::controller_rescue_passive || st.players[i].controller == player_t::controller_neutral) {
 				for (int i2 = 0; i2 < 12; ++i2) {
 					st.alliances[i][i2] = 1;
 					st.alliances[i2][i] = 1;
@@ -18325,8 +19037,8 @@ struct game_load_functions : state_functions {
 			setup_f();
 		} else {
 			for (size_t i = 0; i != 12; ++i) {
-				if (st.players[i].controller == state::player_t::controller_open) st.players[i].controller = state::player_t::controller_occupied;
-				if (st.players[i].controller == state::player_t::controller_computer) st.players[i].controller = state::player_t::controller_computer_game;
+				if (st.players[i].controller == player_t::controller_open) st.players[i].controller = player_t::controller_occupied;
+				if (st.players[i].controller == player_t::controller_computer) st.players[i].controller = player_t::controller_computer_game;
 			}
 		}
 
@@ -18397,7 +19109,7 @@ struct game_load_functions : state_functions {
 			--i;
 			int controller = st.players[i].controller;
 			auto race = st.players[i].race;
-			if (controller != state::player_t::controller_occupied && controller != state::player_t::controller_computer_game) continue;
+			if (controller != player_t::controller_occupied && controller != player_t::controller_computer_game) continue;
 			if (!use_map_settings || setup_info.create_melee_units_for_player[i]) {
 				create_starting_units((int)i, game_st.start_locations[i], race);
 			}
@@ -18409,11 +19121,11 @@ struct game_load_functions : state_functions {
 			}
 		}
 		for (size_t i = 0; i != 12; ++i) {
-			if (st.players[i].controller != state::player_t::controller_occupied) continue;
+			if (st.players[i].controller != player_t::controller_occupied) continue;
 			if (st.players[i].force >= 1 && st.players[i].force <= 4) {
 				if (game_st.forces[st.players[i].force - 1].flags & 8) {
 					for (size_t i2 = 0; i2 != 12; ++i2) {
-						if (st.players[i2].controller != state::player_t::controller_occupied) continue;
+						if (st.players[i2].controller != player_t::controller_occupied) continue;
 						if (st.players[i2].force == st.players[i].force) st.shared_vision[i] |= 1 << i2;
 					}
 				}
