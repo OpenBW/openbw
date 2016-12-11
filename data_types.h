@@ -113,7 +113,7 @@ struct unit_type_t {
 	type_id<const flingy_type_t> flingy;
 	type_id<unit_type_t> turret_unit_type;
 	type_id<unit_type_t> subunit2;
-	int infestation;
+	type_id<unit_type_t> infestation_unit;
 	type_id<const image_type_t> construction_animation;
 	int unit_direction;
 	int has_shield;

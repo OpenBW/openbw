@@ -250,18 +250,18 @@ struct creep_life_t {
 	struct entry_hash_table {
 		std::array<intrusive_list<entry, void, &entry::hash_link>, 0x200> buckets;
 		entry* find(xy_t<size_t> tile_pos) {
-			size_t index = tile_pos.y * 7 + tile_pos.x;
+			size_t index = (tile_pos.y * 7 + tile_pos.x) % buckets.size();
 			for (auto& v : buckets[index]) {
 				if (v.tile_pos == tile_pos) return &v;
 			}
 			return nullptr;
 		}
 		void remove(entry* v) {
-			size_t index = v->tile_pos.y * 7 + v->tile_pos.x;
+			size_t index = (v->tile_pos.y * 7 + v->tile_pos.x) % buckets.size();
 			buckets[index].remove(*v);
 		}
 		void insert(entry* v) {
-			size_t index = v->tile_pos.y * 7 + v->tile_pos.x;
+			size_t index = (v->tile_pos.y * 7 + v->tile_pos.x) % buckets.size();
 			buckets[index].push_front(*v);
 		}
 	};
@@ -432,6 +432,7 @@ struct bullet_t: flingy_t {
 	};
 	int bullet_state;
 	unit_t* bullet_target;
+	xy bullet_target_pos;
 	const weapon_type_t* weapon_type;
 	int remaining_time;
 	int hit_flags;

@@ -844,6 +844,7 @@ struct action_functions: state_functions {
 			if (u->order_type->id == Orders::ZergUnitMorph) continue;
 			if (!build_queue_push(u, unit_type)) continue;
 			set_unit_order(u, get_order_type(Orders::ZergUnitMorph));
+			retval = true;
 		}
 		return retval;
 	}
@@ -857,6 +858,30 @@ struct action_functions: state_functions {
 			if (!unit_can_build(u, unit_type)) continue;
 			build_queue_push(u, unit_type);
 			if (u->order_type->id != Orders::ZergBuildingMorph) set_unit_order(u, get_order_type(Orders::ZergBuildingMorph));
+			retval = true;
+		}
+		return retval;
+	}
+	
+	bool action_burrow(int owner, bool queue) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (!unit_can_use_tech(u, get_tech_type(TechTypes::Burrowing), owner)) continue;
+			if (u_burrowed(u)) continue;
+			if (u->order_type->id == Orders::Burrowing) continue;
+			issue_order(u, queue, get_order_type(Orders::Burrowing), {});
+			retval = true;
+		}
+		return retval;
+	}
+	
+	bool action_unburrow(int owner) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (!unit_can_use_tech(u, get_tech_type(TechTypes::Burrowing), owner)) continue;
+			if (!ut_can_burrow(u)) continue;
+			unburrow_unit(u);
+			retval = true;
 		}
 		return retval;
 	}
@@ -1107,6 +1132,18 @@ struct action_functions: state_functions {
 		auto* unit_type = get_unit_type((UnitTypes)r.template get<uint16_t>());
 		return action_morph_building(owner, unit_type);
 	}
+	
+	template<typename reader_T>
+	bool read_action_burrow(int owner, reader_T&& r) {
+		bool queue = r.template get<uint8_t>() != 0;
+		return action_burrow(owner, queue);
+	}
+	
+	template<typename reader_T>
+	bool read_action_unburrow(int owner, reader_T&& r) {
+		r.template get<uint8_t>();
+		return action_unburrow(owner);
+	}
 
 	virtual void on_action(int owner, int action) {
 	}
@@ -1165,6 +1202,10 @@ struct action_functions: state_functions {
 			return read_action_unload(owner, r);
 		case 43:
 			return read_action_hold_position(owner, r);
+		case 44:
+			return read_action_burrow(owner, r);
+		case 45:
+			return read_action_unburrow(owner, r);
 		case 46:
 			return read_action_cancel_nuke(owner, r);
 		case 47:

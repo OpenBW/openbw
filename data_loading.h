@@ -1078,7 +1078,7 @@ unit_types_t load_units_dat(const data_T& data) {
 	rawr(uint8_t, flingy, total_count);
 	rawr(uint16_t, turret_unit_type, total_count);
 	rawr(uint16_t, subunit2, total_count);
-	rawro(uint16_t, infestation, buildings_count, units_count);
+	rawro(uint16_t, infestation_unit, buildings_count, units_count);
 	rawr(uint32_t, construction_animation, total_count);
 	rawr(uint8_t, unit_direction, total_count);
 	rawr(uint8_t, has_shield, total_count);
