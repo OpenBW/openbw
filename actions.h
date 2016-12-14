@@ -885,6 +885,13 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
+	
+	bool action_cancel_morph(int owner) {
+		unit_t* u = get_single_selected_unit(owner);
+		if (!u || u->owner != owner) return false;
+		cancel_building_unit(u);
+		return true;
+	}
 
 	template<typename reader_T>
 	bool read_action_select(int owner, reader_T&& r) {
@@ -1144,6 +1151,11 @@ struct action_functions: state_functions {
 		r.template get<uint8_t>();
 		return action_unburrow(owner);
 	}
+	
+	template<typename reader_T>
+	bool read_action_cancel_morph(int owner, reader_T&& r) {
+		return action_cancel_morph(owner);
+	}
 
 	virtual void on_action(int owner, int action) {
 	}
@@ -1178,6 +1190,8 @@ struct action_functions: state_functions {
 			return read_action_order(owner, r);
 		case 24:
 			return read_action_cancel_building_unit(owner, r);
+		case 25:
+			return read_action_cancel_morph(owner, r);
 		case 26:
 			return read_action_stop(owner, r);
 		case 30:

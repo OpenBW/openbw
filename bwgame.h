@@ -1006,12 +1006,12 @@ struct state_functions {
 		u->irradiate_timer = 0;
 		u->irradiated_by = 0;
 		u->irradiate_owner = 8;
-		destroy_image_from_to(u->sprite, ImageTypes::IMAGEID_Irradiate_Small, ImageTypes::IMAGEID_Irradiate_Large);
+		destroy_image_from_to(u, ImageTypes::IMAGEID_Irradiate_Small, ImageTypes::IMAGEID_Irradiate_Large);
 	}
 
 	void remove_ensnare(unit_t* u) {
 		u->ensnare_timer = 0;
-		destroy_image_from_to(u->sprite, ImageTypes::IMAGEID_Ensnare_Overlay_Small, ImageTypes::IMAGEID_Ensnare_Overlay_Large);
+		destroy_image_from_to(u, ImageTypes::IMAGEID_Ensnare_Overlay_Small, ImageTypes::IMAGEID_Ensnare_Overlay_Large);
 		update_unit_speed(u);
 	}
 
@@ -1022,7 +1022,7 @@ struct state_functions {
 
 	void remove_plague(unit_t* u) {
 		u->plague_timer = 0;
-		destroy_image_from_to(u->sprite, ImageTypes::IMAGEID_Plague_Overlay_Small, ImageTypes::IMAGEID_Plague_Overlay_Large);
+		destroy_image_from_to(u, ImageTypes::IMAGEID_Plague_Overlay_Small, ImageTypes::IMAGEID_Plague_Overlay_Large);
 	}
 
 	void remove_maelstrom(unit_t* u) {
@@ -1081,7 +1081,14 @@ struct state_functions {
 			}
 		}
 		if (u->plague_timer) {
-			remove_plague(u);
+			--u->plague_timer;
+			if (!u_invincible(u)) {
+				auto damage = fp8::integer(get_weapon_type(WeaponTypes::Plague)->damage_amount) / 76;
+				if (u->hp > damage) unit_deal_damage(u, damage, nullptr, ~0, true);
+			}
+			if (!u->plague_timer) {
+				remove_plague(u);
+			}
 		}
 		if (u->storm_timer) --u->storm_timer;
 		int prev_acid_spore_count = u->acid_spore_count;
@@ -2839,9 +2846,9 @@ struct state_functions {
 		free_path(u);
 		if (!initialize_unit_type(u, unit_type, position, u->owner)) xcept("reinitialize_unit_type: initialize_unit_type failed");
 		int prev_max_hp = prev_unit_type->hitpoints.integer_part();
-		int hp = prev_max_hp ? prev_hp.integer_part() * u->unit_type->hitpoints.integer_part() / prev_max_hp : 0;
-		if (hp == 0) hp = 1;;
-		u->hp = fp8::integer(hp);
+		int hp = prev_max_hp ? prev_hp.integer_part() * u->unit_type->hitpoints.integer_part() / prev_max_hp : 1;
+		if (hp == 0) u->hp = 1_fp8;
+		else u->hp = fp8::integer(hp);
 		u->air_strength = get_unit_strength(u, false);
 		u->ground_strength = get_unit_strength(u, true);
 		u->sprite->owner = prev_sprite_owner;
@@ -2915,6 +2922,7 @@ struct state_functions {
 			set_image_offset(u->subunit->sprite->main_image, get_image_lo_offset(u->sprite->main_image, 2, 0));
 			set_sprite_visibility(u->subunit->sprite, u->sprite->visibility_flags);
 		}
+		apply_unit_effects(u);
 	}
 
 	unit_t* build_refinery(const unit_t* u, const unit_type_t* unit_type) {
@@ -3819,8 +3827,6 @@ struct state_functions {
 			creep_area.to.y += 1;
 			rounded_corners = true;
 		}
-		st.tiles.at(creep_area.from.y * game_st.map_tile_width + creep_area.from.x);
-		if (creep_area.from != creep_area.to) st.tiles.at((creep_area.to.y - 1) * game_st.map_tile_width + creep_area.to.x - 1);
 		for (size_t y = creep_area.from.y; y != creep_area.to.y; ++y) {
 			if (y >= game_st.map_tile_height) continue;
 			for (size_t x = creep_area.from.x; x != creep_area.to.x; ++x) {
@@ -5578,6 +5584,11 @@ struct state_functions {
 					set_unit_move_target(u, u->order_target.pos);
 				}
 			}
+			set_next_target_waypoint(u, u->order_target.pos);
+			if (unit_is_at_move_target(u) && u_immovable(u)) {
+				order_done(u);
+				return;
+			}
 		}
 		if (u->order_state == 0) u->order_state = 1;
 	}
@@ -6127,7 +6138,6 @@ struct state_functions {
 
 	void order_IncompleteMorphing(unit_t* u) {
 		const unit_type_t* build_type = u->unit_type;
-		bool is_morphing_building = false;
 		if (!u->build_queue.empty()) {
 			const unit_type_t* queued_type = u->build_queue.front();
 			if (unit_type_is_morphing_building(queued_type)) build_type = queued_type;
@@ -6243,9 +6253,9 @@ struct state_functions {
 					u->defensive_matrix_hp = hp;
 					u->defensive_matrix_timer = time;
 				}
-				if (u->irradiate_timer) destroy_image_from_to(u->sprite, ImageTypes::IMAGEID_Irradiate_Small, ImageTypes::IMAGEID_Irradiate_Large);
-				if (u->ensnare_timer) destroy_image_from_to(u->sprite, ImageTypes::IMAGEID_Ensnare_Overlay_Small, ImageTypes::IMAGEID_Ensnare_Overlay_Large);
-				if (u->plague_timer) destroy_image_from_to(u->sprite, ImageTypes::IMAGEID_Plague_Overlay_Small, ImageTypes::IMAGEID_Plague_Overlay_Large);
+				if (u->irradiate_timer) destroy_image_from_to(u, ImageTypes::IMAGEID_Irradiate_Small, ImageTypes::IMAGEID_Irradiate_Large);
+				if (u->ensnare_timer) destroy_image_from_to(u, ImageTypes::IMAGEID_Ensnare_Overlay_Small, ImageTypes::IMAGEID_Ensnare_Overlay_Large);
+				if (u->plague_timer) destroy_image_from_to(u, ImageTypes::IMAGEID_Plague_Overlay_Small, ImageTypes::IMAGEID_Plague_Overlay_Large);
 				set_unit_order(u, get_order_type(Orders::Burrowed));
 				u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
 				order_done(u);
@@ -6362,7 +6372,7 @@ struct state_functions {
 			xy pos;
 			std::tie(res, pos) = find_unit_placement(u, exit->sprite->position, false);
 			if (res) {
-				move_unit(u, prev_pos);
+				move_unit(u, pos);
 				refresh_unit_position(u);
 				order_done(u);
 				// todo: callback for sound
@@ -6533,6 +6543,15 @@ struct state_functions {
 				kill_unit(u);
 			}
 		}
+	}
+	
+	void order_SuicideHoldPosition(unit_t* u) {
+		if (u->order_state == 0) {
+			stop_unit(u);
+			set_next_target_waypoint(u, u->move_target.pos);
+			u->order_state = 1;
+		}
+		if (!u->order_queue.empty()) activate_next_order(u);
 	}
 
 	void execute_main_order(unit_t* u) {
@@ -6956,7 +6975,7 @@ struct state_functions {
 			order_SuicideLocation(u);
 			break;
 		case Orders::SuicideHoldPosition:
-			xcept("SuicideHoldPosition");
+			order_SuicideHoldPosition(u);
 			break;
 		case Orders::Teleport:
 			xcept("Teleport");
@@ -7465,10 +7484,10 @@ struct state_functions {
 	void update_unit_heading(flingy_t* u, direction_t velocity_direction) {
 		u->next_velocity_direction = velocity_direction;
 		if (!u_movement_flag(u, 2) || u_movement_flag(u, 1)) {
-			fp8 turn = fp8::extend(u->desired_velocity_direction - u->heading);
-			if (turn > u->flingy_turn_rate || u->flingy_turn_rate >= 128_fp8) turn = u->flingy_turn_rate;
-			else if (turn < -u->flingy_turn_rate) turn = -u->flingy_turn_rate;
-			u->heading += direction_t::truncate(turn);
+			direction_t turn = u->desired_velocity_direction - u->heading;
+			if (turn > direction_t::truncate(u->flingy_turn_rate)) turn = direction_t::truncate(u->flingy_turn_rate);
+			else if (turn < direction_t::truncate(-u->flingy_turn_rate)) turn = -direction_t::truncate(u->flingy_turn_rate);
+			u->heading += turn;
 			if (u->flingy_type->id >= (FlingyTypes)0x8d && u->flingy_type->id <= (FlingyTypes)0xab) {
 				u->flingy_turn_rate += 1_fp8;
 			} else if (u->flingy_type->id >= (FlingyTypes)0xc9 && u->flingy_type->id <= (FlingyTypes)0xce) {
@@ -12157,7 +12176,7 @@ struct state_functions {
 	}
 
 	void unburrow_unit(unit_t* u) {
-		if (u->order_type->id != Orders::Burrowing && u->order_type->id != Orders::Burrowing && !unit_is(u, UnitTypes::Zerg_Lurker)) return;
+		if (u->order_type->id != Orders::Burrowing && u->order_type->id != Orders::Burrowed && !unit_is(u, UnitTypes::Zerg_Lurker)) return;
 		if (unit_is(u, UnitTypes::Zerg_Lurker)) u_set_status_flag(u, unit_t::status_flag_order_not_interruptible);
 		set_unit_order(u, get_order_type(Orders::Unburrowing));
 		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
@@ -12193,7 +12212,7 @@ struct state_functions {
 				turret->auto_target_unit = target;
 			}
 		} else {
-			if (!u_burrowed(u) || unit_is(u, UnitTypes::Zerg_Lurker)) {
+			if (!u_burrowed(u) || !unit_is(u, UnitTypes::Zerg_Lurker)) {
 				u = unit_main_unit(u);
 				if (u->order_type->unk11 && u_can_move(u)) {
 					if (unit_dodge_chance(u) < 255_fp8) {
@@ -12578,6 +12597,27 @@ struct state_functions {
 			set_remove_timer(u, 900);
 		} else display_last_error_for_player(owner);
 	}
+	
+	void plague_unit(unit_t* u) {
+		if (!u->ensnare_timer && !u_burrowed(u)) {
+			create_sized_image(u, ImageTypes::IMAGEID_Plague_Overlay_Small);
+		}
+		u->plague_timer = 75;
+	}
+	
+	void plague(xy pos, unit_t* source_unit) {
+		for (unit_t* target : find_units_noexpand(square_at(pos, 64))) {
+			if (target == source_unit) continue;
+			if (u_invincible(target)) continue;
+			if (u_burrowed(target)) continue;
+			plague_unit(target);
+			if (source_unit) on_unit_damage(target, source_unit, true);
+		}
+	}
+	
+	void parasite_unit(unit_t* u, int owner) {
+		u->parasite_flags |= 1 << owner;
+	}
 
 	void bullet_hit(bullet_t* b) {
 		switch (b->weapon_type->hit_type) {
@@ -12627,6 +12667,12 @@ struct state_functions {
 		case weapon_type_t::hit_type_lockdown:
 			if (b->bullet_target && !unit_dying(b->bullet_target)) lockdown_unit(b->bullet_target);
 			break;
+		case weapon_type_t::hit_type_parasite:
+			if (b->bullet_target && !unit_dying(b->bullet_target)) {
+				// todo: callback for sound
+				parasite_unit(b->bullet_target, b->owner);
+			}
+			break;
 		case weapon_type_t::hit_type_broodlings:
 			if (b->bullet_target && b->bullet_owner_unit && !unit_dying(b->bullet_target)) spawn_broodlings(b->bullet_target, b->bullet_owner_unit);
 			break;
@@ -12641,6 +12687,9 @@ struct state_functions {
 			break;
 		case weapon_type_t::hit_type_ensnare:
 			ensnare(b->sprite->position, b->bullet_owner_unit);
+			break;
+		case weapon_type_t::hit_type_plague:
+			plague(b->bullet_target_pos, b->bullet_owner_unit);
 			break;
 		case weapon_type_t::hit_type_dark_swarm:
 			dark_swarm(b->bullet_target_pos, b->owner);
@@ -12699,13 +12748,17 @@ struct state_functions {
 			sprite_run_anim(b->sprite, iscript_anims::GndAttkInit);
 			break;
 		case weapon_type_t::bullet_type_appear_at_target_unit:
-		case weapon_type_t::bullet_type_persist_at_target_pos:
+		case weapon_type_t::bullet_type_appear_at_target_pos:
 		case weapon_type_t::bullet_type_appear_at_source_unit:
 		case weapon_type_t::bullet_type_self_destruct:
 			bullet_kill(b);
 			break;
 		case weapon_type_t::bullet_type_follow_target:
 			b->bullet_state = bullet_t::state_follow;
+			sprite_run_anim(b->sprite, iscript_anims::GndAttkInit);
+			break;
+		case weapon_type_t::bullet_type_bounce:
+			b->bullet_state = bullet_t::state_bounce;
 			sprite_run_anim(b->sprite, iscript_anims::GndAttkInit);
 			break;
 		case weapon_type_t::bullet_type_attack_target_pos:
@@ -12728,8 +12781,7 @@ struct state_functions {
 	bool bullet_state_move(bullet_t* b, execute_movement_struct& ems) {
 		bullet_move(b, ems);
 		if (b->remaining_time-- == 0 || b->position == b->move_target.pos) {
-			b->bullet_state = bullet_t::state_dying;
-			sprite_run_anim(b->sprite, iscript_anims::Death);
+			bullet_kill(b);
 		}
 		return false;
 	}
@@ -12738,9 +12790,9 @@ struct state_functions {
 		unit_t* target = b->bullet_target;
 		if (target) {
 			if (~b->hit_flags & 1) set_bullet_move_target(b, target->sprite->position);
-			else b->bullet_state = 1;
+			else b->bullet_state = bullet_t::state_move;
 		} else {
-			b->bullet_state = 1;
+			b->bullet_state = bullet_t::state_move;
 			b->bullet_target = nullptr;
 		}
 		return bullet_state_move(b, ems);
@@ -12752,12 +12804,43 @@ struct state_functions {
 			if (~b->hit_flags & 1) {
 				set_flingy_move_target(b, restrict_pos_to_map_bounds(target->sprite->position + hit_near_target_positions[b->hit_near_target_position_index]));
 				set_next_target_waypoint(b, b->move_target.pos);
-			} else b->bullet_state = 1;
+			} else b->bullet_state = bullet_t::state_move;
 		} else {
-			b->bullet_state = 1;
+			b->bullet_state = bullet_t::state_move;
 			b->bullet_target = nullptr;
 		}
 		return bullet_state_move(b, ems);
+	}
+	
+	bool bullet_state_bounce(bullet_t* b, execute_movement_struct& ems) {
+		unit_t* target = b->bullet_target;
+		if (target && ~b->hit_flags & 1) {
+			set_flingy_move_target(b, target->sprite->position);
+			set_next_target_waypoint(b, b->move_target.pos);
+		}
+		bullet_move(b, ems);
+		if (unit_is_at_move_target(b)) {
+			--b->remaining_bounces;
+			unit_t* new_target = nullptr;
+			if (b->remaining_bounces) {
+				if (b->bullet_owner_unit) {
+					new_target = find_unit_noexpand(square_at(b->sprite->position, 96), [&](unit_t* u) {
+						if (!unit_can_attack_target(b->bullet_owner_unit, u)) return false;
+						if (!unit_target_is_enemy(b->bullet_owner_unit, u)) return false;
+						if (u == target || u == b->prev_bounce_unit) return false;
+						return true;
+					});
+				}
+				b->prev_bounce_unit = target;
+			}
+			if (new_target) {
+				sprite_run_anim(b->sprite, iscript_anims::SpecialState1);
+				b->bullet_target = new_target;
+			} else {
+				bullet_kill(b);
+			}
+		}
+		return false;
 	}
 
 	void bullet_execute(bullet_t* b) {
@@ -12773,6 +12856,9 @@ struct state_functions {
 				break;
 			case bullet_t::state_follow:
 				cont = bullet_state_follow(b, ems);
+				break;
+			case bullet_t::state_bounce:
+				cont = bullet_state_bounce(b, ems);
 				break;
 			case bullet_t::state_dying:
 				cont = bullet_state_dying(b, ems);
@@ -12860,6 +12946,8 @@ struct state_functions {
 		switch (weapon_type->bullet_type) {
 		case weapon_type_t::bullet_type_fly:
 		case weapon_type_t::bullet_type_follow_target:
+		case weapon_type_t::bullet_type_bounce:
+			if (weapon_type->bullet_type == weapon_type_t::bullet_type_bounce) b->remaining_bounces = 3;
 			if (target_unit && bullet_owner_unit && fp8::from_raw(lcg_rand(1) & 0xff) <= unit_target_miss_chance(bullet_owner_unit, target_unit)) {
 				b->hit_flags |= 1;
 				target_pos -= to_xy(direction_xy(heading, 30));
@@ -12964,7 +13052,7 @@ struct state_functions {
 			st.free_thingies.pop_front();
 			return r;
 		}
-		if (st.thingies.size() >= 100) return nullptr;
+		if (st.thingies.size() >= 500) return nullptr;
 		return &*st.thingies.emplace(st.thingies.end());
 	}
 
@@ -14409,7 +14497,12 @@ struct state_functions {
 			case UnitTypes::Protoss_Pylon:
 				xcept("destroy_unit_impl fixme");
 			case UnitTypes::Zerg_Nydus_Canal:
-				xcept("destroy_unit_impl fixme");
+				if (u->building.nydus.exit) {
+					unit_t* exit = u->building.nydus.exit;
+					u->building.nydus.exit = nullptr;
+					exit->building.nydus.exit = nullptr;
+					kill_unit(exit);
+				}
 			default:
 				break;
 			}
@@ -14687,8 +14780,9 @@ struct state_functions {
 				create_defensive_matrix_image(u);
 			}
 		}
+
 		if (u->lockdown_timer) {
-			int timer = u->lockdown_timer;
+			auto timer = u->lockdown_timer;
 			u->lockdown_timer = 0;
 			lockdown_unit(u);
 			u->lockdown_timer = timer;
@@ -14718,7 +14812,10 @@ struct state_functions {
 			xcept("apply stasis");
 		}
 		if (u->plague_timer) {
-			xcept("apply plague");
+			auto timer = u->plague_timer;
+			u->plague_timer = 0;
+			plague_unit(u);
+			u->plague_timer = timer;
 		}
 		if (u->acid_spore_count) {
 			xcept("apply acid spores");
@@ -15597,6 +15694,7 @@ struct state_functions {
 		if (u_grounded_building(u)) return false;
 		if (u->unit_type->right_click_action == 0) return false;
 		if (u->unit_type->right_click_action == 3) return false;
+		if (unit_is(u, UnitTypes::Zerg_Lurker) && u_burrowed(u)) return false;
 		return true;
 	}
 	bool unit_can_hold_position(const unit_t* u) const {
@@ -19769,7 +19867,7 @@ void global_init(global_state& st, load_data_file_F&& load_data_file) {
 		ins_data[opc___0c] = "";
 		ins_data[opc_imgoluselo] = "211";
 		ins_data[opc_imguluselo] = "211";
-		ins_data[opc_sprol] = "211";
+		ins_data[opc_sprol] = "2s1s1";
 		ins_data[opc_highsprol] = "211";
 		ins_data[opc_lowsprul] = "211";
 		ins_data[opc_uflunstable] = "2";
