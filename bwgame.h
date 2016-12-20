@@ -14581,11 +14581,11 @@ struct state_functions {
 					if (u->building.addon) building_abandon_addon(u);
 					if (u->building.researching_type) cancel_research(u, true);
 					if (u->building.upgrading_type) cancel_upgrade(u, true);
-					if (!u->build_queue.empty()) cancel_build_queue(u);
 					if (unit_race(u) == race::zerg) {
 						if (unit_is_morphing_building(u)) u_set_status_flag(u, unit_t::status_flag_completed);
 						if (!remove_creep_provider(u)) u_set_status_flag(u, unit_t::status_flag_4000);
 					}
+					if (!u->build_queue.empty()) cancel_build_queue(u);
 				}
 				if (ut_flying_building(u) && u->building.is_landing) {
 					set_unit_tiles_unoccupied(u, u->order_target.pos);

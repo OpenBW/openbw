@@ -285,6 +285,8 @@ struct creep_life_t {
 	}
 	creep_life_t& operator=(creep_life_t&&) = default;
 	creep_life_t& operator=(const creep_life_t& n) {
+		recede_timer = n.recede_timer;
+		check_dead_unit_timer = n.check_dead_unit_timer;
 		for (size_t i = 0; i != entry_container.size(); ++i) {
 			entry_container[i].tile_pos = n.entry_container[i].tile_pos;
 			entry_container[i].n_neighboring_creep_tiles = n.entry_container[i].n_neighboring_creep_tiles;
@@ -304,7 +306,6 @@ struct creep_life_t {
 		for (size_t i = 0; i != table.buckets.size(); ++i) {
 			assemble(table.buckets[i], n.table.buckets[i]);
 		}
-		for (auto& v : free_list) log("copy free %p\n", &v);
 		return *this;
 	}
 };
