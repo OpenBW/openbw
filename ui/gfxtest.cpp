@@ -58,6 +58,8 @@ struct image_data {
 	std::array<pcx_image, 7> light_pcx;
 	std::array<std::array<uint8_t, 8>, 16> player_unit_colors;
 	std::array<uint8_t, 16> player_minimap_colors;
+	grp_t creep_grp;
+	std::array<int, 0x100> creep_edge_frame_index{};
 };
 
 template<typename data_T>
@@ -136,6 +138,40 @@ void load_image_data(image_data& img, size_t tileset_index, load_data_file_F&& l
 	load_data_file(vr4_data, format("Tileset/%s.vr4", tileset_name));
 	load_data_file(vx4_data, format("Tileset/%s.vx4", tileset_name));
 	load_data_file(img.wpe, format("Tileset/%s.wpe", tileset_name));
+	
+	a_vector<uint8_t> grp_data;
+	load_data_file(grp_data, format("Tileset/%s.grp", tileset_name));
+	img.creep_grp = read_grp(data_loading::data_reader_le(grp_data.data(), grp_data.data() + grp_data.size()));
+	
+	std::array<int, 0x100> creep_edge_neighbors_index{};
+	std::array<int, 128> creep_edge_neighbors_index_n{};
+	
+	for (size_t i = 0; i != 0x100; ++i) {
+		int v = 0;
+		if (i & 2) v |= 0x10;
+		if (i & 8) v |= 0x24;
+		if (i & 0x10) v |= 9;
+		if (i & 0x40) v |= 2;
+		if ((i & 0xc0) == 0xc0) v |= 1;
+		if ((i & 0x60) == 0x60) v |= 4;
+		if ((i & 3) == 3) v |= 0x20;
+		if ((i & 6) == 6) v |= 8;
+		if ((v & 0x21) == 0x21) v |= 0x40;
+		if ((v & 0xc) == 0xc) v |= 0x40;
+		creep_edge_neighbors_index[i] = v;
+	}
+	
+	int n = 0;
+	for (int i = 0; i != 128; ++i) {
+		auto it = std::find(creep_edge_neighbors_index.begin(), creep_edge_neighbors_index.end(), i);
+		if (it == creep_edge_neighbors_index.end()) continue;
+		creep_edge_neighbors_index_n[i] = n;
+		++n;
+	}
+	
+	for (size_t i = 0; i != 0x100; ++i) {
+		img.creep_edge_frame_index[i] = creep_edge_neighbors_index_n[creep_edge_neighbors_index[i]];
+	}
 
 	data_reader<true, false> vr4_r(vr4_data.data(), nullptr);
 	img.vr4.resize(vr4_data.size() / 64);
@@ -315,14 +351,14 @@ struct apm_t {
 		if (!history.empty() && frame / resolution == last_frame_div) {
 			++history.back();
 		} else {
-			if (history.size() >= 5 * 1000 / 42 / resolution) history.pop_front();
+			if (history.size() >= 10 * 1000 / 42 / resolution) history.pop_front();
 			history.push_back(1);
 			last_frame_div = frame / 12;
 		}
 	}
 	void update(int frame) {
 		if (history.empty() || frame / resolution != last_frame_div) {
-			if (history.size() >= 5 * 1000 / 42 / resolution) history.pop_front();
+			if (history.size() >= 10 * 1000 / 42 / resolution) history.pop_front();
 			history.push_back(0);
 			last_frame_div = frame / resolution;
 		}
@@ -351,7 +387,22 @@ struct ui_functions: replay_functions {
 	replay_state current_replay_state;
 	action_state current_action_state;
 	std::array<apm_t, 12> apm;
-	ui_functions(game_player player) : replay_functions(player.st(), current_action_state, current_replay_state), player(std::move(player)) {}
+	ui_functions(game_player player) : replay_functions(player.st(), current_action_state, current_replay_state), player(std::move(player)) {
+		init();
+	}
+	
+	a_vector<uint8_t> creep_random_tile_indices = a_vector<uint8_t>(256 * 256);
+	void init() {
+		uint32_t rand_state = (uint32_t)clock.now().time_since_epoch().count();
+		auto rand = [&]() {
+			rand_state = rand_state * 22695477 + 1;
+			return (rand_state >> 16) & 0x7fff;
+		};
+		for (auto& v : creep_random_tile_indices) {
+			if (rand() % 100 < 4) v = 6 + rand() % 7;
+			else v = rand() % 6;
+		}
+	}
 	
 	virtual void on_action(int owner, int action) override {
 		apm.at(owner).add_action(st.current_frame);
@@ -376,7 +427,10 @@ struct ui_functions: replay_functions {
 
 		size_t tile_index = screen_tile.from.y * game_st.map_tile_width + screen_tile.from.x;
 		auto* megatile_index = &st.tiles_mega_tile_index[tile_index];
+		auto* tile = &st.tiles[tile_index];
 		size_t width = screen_tile.to.x - screen_tile.from.x;
+		
+		xy dirs[9] = {{1, 1}, {0, 1}, {-1, 1}, {1, 0}, {-1, 0}, {1, -1}, {0, -1}, {-1, -1}, {0, 0}};
 
 		for (size_t tile_y = screen_tile.from.y; tile_y != screen_tile.to.y; ++tile_y) {
 			for (size_t tile_x = screen_tile.from.x; tile_x != screen_tile.to.x; ++tile_x) {
@@ -401,12 +455,63 @@ struct ui_functions: replay_functions {
 				width = std::min(width, screen_width - screen_x);
 				height = std::min(height, screen_height - screen_y);
 
-				draw_tile(img, *megatile_index, dst, screen_width, offset_x, offset_y, width, height);
+				size_t index = *megatile_index;
+				if (tile->flags & tile_t::flag_has_creep) {
+					index = game_st.cv5.at(1).mega_tile_index[creep_random_tile_indices[tile_x + tile_y * game_st.map_tile_width]];
+				}
+				draw_tile(img, index, dst, screen_width, offset_x, offset_y, width, height);
+				
+				if (~tile->flags & tile_t::flag_has_creep) {
+					size_t creep_index = 0;
+					for (size_t i = 0; i != 9; ++i) {
+						int add_x = dirs[i].x;
+						int add_y = dirs[i].y;
+						if (tile_x + add_x >= game_st.map_tile_width) continue;
+						if (tile_y + add_y >= game_st.map_tile_height) continue;
+						if (st.tiles[tile_x + add_x + (tile_y + add_y) * game_st.map_tile_width].flags & tile_t::flag_has_creep) creep_index |= 1 << i;
+					}
+					size_t creep_frame = img.creep_edge_frame_index[creep_index];
+					
+					if (creep_frame) {
+						
+						auto& frame = img.creep_grp.frames.at(creep_frame - 1);
+						
+						screen_x += frame.offset.x;
+						screen_y += frame.offset.y;
+						
+						size_t width = frame.size.x;
+						size_t height = frame.size.y;
+				
+						if (screen_x < (int)screen_width && screen_y < (int)screen_height) {
+							if (screen_x + (int)width > 0 && screen_y + (int)height > 0) {
+								
+								size_t offset_x = 0;
+								size_t offset_y = 0;
+								if (screen_x < 0) {
+									offset_x = -screen_x;
+								}
+								if (screen_y < 0) {
+									offset_y = -screen_y;
+								}
+								
+								uint8_t* dst = data + screen_y * screen_width + screen_x;
+					
+								width = std::min(width, screen_width - screen_x);
+								height = std::min(height, screen_height - screen_y);
+								
+								draw_frame(frame, false, dst, screen_width, offset_x, offset_y, width, height);
+							}
+						}
+					}
+				}
 
 				++megatile_index;
+				++tile;
 			}
 			megatile_index -= width;
 			megatile_index += game_st.map_tile_width;
+			tile -= width;
+			tile += game_st.map_tile_width;
 		}
 	}
 
@@ -439,7 +544,7 @@ struct ui_functions: replay_functions {
 		width = std::min(width, screen_width - screen_x);
 		height = std::min(height, screen_height - screen_y);
 
-		if (image->modifier == 0 || image->modifier == 2 || image->modifier == 3 || image->modifier == 4) {
+		if (image->modifier == 0 || image->modifier == 1 || image->modifier == 2 || image->modifier == 3 || image->modifier == 4) {
 			uint8_t* ptr = img.player_unit_colors.at(color_index).data();
 			auto player_color = [ptr](uint8_t new_value, uint8_t) {
 				if (new_value >= 8 && new_value < 16) return ptr[new_value - 8];
@@ -615,7 +720,9 @@ struct ui_functions: replay_functions {
 	int replay_frame = 0;
 	
 	rect get_replay_slider_area() {
+#ifdef EMSCRIPTEN
 		return {};
+#endif
 		rect r;
 		int width = 192;
 		int height = 32;
@@ -775,20 +882,22 @@ struct ui_functions: replay_functions {
 				}
 				break;
 			case native_window::event_t::type_key_down:
-//				if (e.sym == ' ' || e.sym == 'p') {
-//					is_paused = !is_paused;
-//				}
-//				if (e.sym == 'a' || e.sym == 'u') {
-//					if (game_speed < fp8::integer(128)) game_speed *= 2;
-//				}
-//				if (e.sym == 'z' || e.sym == 'd') {
-//					if (game_speed > 2_fp8) game_speed /= 2;
-//				}
-//				if (e.sym == '\b') {
-//					int t = 5 * 42 / 1000;
-//					if (replay_frame < t) replay_frame = 0;
-//					else replay_frame -= t;
-//				}
+#ifndef EMSCRIPTEN
+				if (e.sym == ' ' || e.sym == 'p') {
+					is_paused = !is_paused;
+				}
+				if (e.sym == 'a' || e.sym == 'u') {
+					if (game_speed < fp8::integer(128)) game_speed *= 2;
+				}
+				if (e.sym == 'z' || e.sym == 'd') {
+					if (game_speed > 2_fp8) game_speed /= 2;
+				}
+				if (e.sym == '\b') {
+					int t = 5 * 42 / 1000;
+					if (replay_frame < t) replay_frame = 0;
+					else replay_frame -= t;
+				}
+#endif
 				break;
 			}
 		}
@@ -962,8 +1071,9 @@ struct main_t {
 						last_tick = now - tick_speed * 16;
 						tick_t = tick_speed * 16;
 					}
-					size_t tick_n = tick_speed.count() == 0 ? 128 : tick_t / tick_speed;
-					for (size_t i = 0; i != tick_n; ++i) {
+					auto tick_n = tick_speed.count() == 0 ? 128 : tick_t / tick_speed;
+					for (auto i = tick_n; i;) {
+						--i;
 						++fps_counter;
 						last_tick += tick_speed;
 						
@@ -1085,13 +1195,37 @@ extern "C" void replay_set_value(int index, double value) {
 	}
 }
 
-struct util_funcs: state_functions {
-	util_funcs(state& st) : state_functions(st) {}
+#include <bind.h>
+#include <val.h>
+using namespace emscripten;
+
+struct js_unit_type {
+	const unit_type_t* ut = nullptr;
+	js_unit_type() {}
+	js_unit_type(const unit_type_t* ut) : ut(ut) {}
+	auto id() const {return ut ? (int)ut->id : 228;}
+	auto build_time() const {return ut->build_time;}
+};
+
+struct js_unit {
+	unit_t* u = nullptr;
+	js_unit() {}
+	js_unit(unit_t* u) : u(u) {}
+	auto owner() const {return u->owner;}
+	auto remaining_build_time() const {return u->remaining_build_time;}
+	auto unit_type() const {return u->unit_type;}
+	auto build_type() const {return u->build_queue.empty() ? nullptr : u->build_queue.front();}
+};
+
+
+struct util_functions: state_functions {
+	util_functions(state& st) : state_functions(st) {}
 	
 	double worker_supply(int owner) {
 		double r = 0.0;
 		for (const unit_t* u : ptr(st.player_units.at(owner))) {
 			if (!ut_worker(u)) continue;
+			if (!u_completed(u)) continue;
 			r += u->unit_type->supply_required.raw_value / 2.0;
 		}
 		return r;
@@ -1101,18 +1235,105 @@ struct util_funcs: state_functions {
 		double r = 0.0;
 		for (const unit_t* u : ptr(st.player_units.at(owner))) {
 			if (ut_worker(u)) continue;
+			if (!u_completed(u)) continue;
 			r += u->unit_type->supply_required.raw_value / 2.0;
+		}
+		return r;
+	}
+	
+	auto get_all_incomplete_units() {
+		val r = val::array();
+		size_t i = 0;
+		for (unit_t* u : ptr(st.visible_units)) {
+			if (u_completed(u)) continue;
+			r.set(i++, u);
+		}
+		for (unit_t* u : ptr(st.hidden_units)) {
+			if (u_completed(u)) continue;
+			r.set(i++, u);
+		}
+		return r;
+	}
+	
+	auto get_all_completed_units() {
+		val r = val::array();
+		size_t i = 0;
+		for (unit_t* u : ptr(st.visible_units)) {
+			if (!u_completed(u)) continue;
+			r.set(i++, u);
+		}
+		for (unit_t* u : ptr(st.hidden_units)) {
+			if (!u_completed(u)) continue;
+			r.set(i++, u);
+		}
+		return r;
+	}
+	
+	auto get_all_units() {
+		val r = val::array();
+		size_t i = 0;
+		for (unit_t* u : ptr(st.visible_units)) {
+			r.set(i++, u);
+		}
+		for (unit_t* u : ptr(st.hidden_units)) {
+			r.set(i++, u);
+		}
+		for (unit_t* u : ptr(st.map_revealer_units)) {
+			r.set(i++, u);
 		}
 		return r;
 	}
 	
 };
 
+optional<util_functions> m_util_funcs;
+
+util_functions& get_util_funcs() {
+	m_util_funcs.emplace(m->ui.st);
+	return *m_util_funcs;
+}
+
+const unit_type_t* unit_t_unit_type(const unit_t* u) {
+	return u->unit_type;
+}
+const unit_type_t* unit_t_build_type(const unit_t* u) {
+	if (u->build_queue.empty()) return nullptr;
+	return u->build_queue.front();
+}
+
+int unit_type_t_id(const unit_type_t& ut) {
+	return (int)ut.id;
+}
+
+EMSCRIPTEN_BINDINGS(openbw) {
+	register_vector<js_unit>("vector_js_unit");
+	class_<util_functions>("util_functions")
+		.function("worker_supply", &util_functions::worker_supply)
+		.function("army_supply", &util_functions::army_supply)
+		.function("get_all_incomplete_units", &util_functions::get_all_incomplete_units, allow_raw_pointers())
+		.function("get_all_completed_units", &util_functions::get_all_completed_units, allow_raw_pointers())
+		.function("get_all_units", &util_functions::get_all_units, allow_raw_pointers())
+		;
+	function("get_util_funcs", &get_util_funcs);
+	
+	class_<unit_type_t>("unit_type_t")
+		.property("id", &unit_type_t_id)
+		.property("build_time", &unit_type_t::build_time)
+		;
+	
+	class_<unit_t>("unit_t")
+		.property("owner", &unit_t::owner)
+		.property("remaining_build_time", &unit_t::remaining_build_time)
+		.function("unit_type", &unit_t_unit_type, allow_raw_pointers())
+		.function("build_type", &unit_t_build_type, allow_raw_pointers())
+		;
+}
+
 extern "C" double player_get_value(int player, int index) {
 	if (player < 0 || player >= 12) return 0;
 	switch (index) {
 	case 0:
-		return m->ui.st.players.at(player).controller == state::player_t::controller_occupied ? 1 : 0;
+		return m->ui.st.players.at(player).controller == player_t::controller_occupied ? 1 : 0;
 	case 1:
 		return (double)m->ui.st.players.at(player).color;
 	case 2:
@@ -1124,19 +1345,19 @@ extern "C" double player_get_value(int player, int index) {
 	case 5:
 		return m->ui.st.supply_used.at(player)[2].raw_value / 2.0;
 	case 6:
-		return m->ui.st.supply_available.at(player)[0].raw_value / 2.0;
+		return std::min(m->ui.st.supply_available.at(player)[0].raw_value / 2.0, 200.0);
 	case 7:
-		return m->ui.st.supply_available.at(player)[1].raw_value / 2.0;
+		return std::min(m->ui.st.supply_available.at(player)[1].raw_value / 2.0, 200.0);
 	case 8:
-		return m->ui.st.supply_available.at(player)[2].raw_value / 2.0;
+		return std::min(m->ui.st.supply_available.at(player)[2].raw_value / 2.0, 200.0);
 	case 9:
 		return (double)m->ui.st.current_minerals.at(player);
 	case 10:
 		return (double)m->ui.st.current_gas.at(player);
 	case 11:
-		return util_funcs(m->ui.st).worker_supply(player);
+		return util_functions(m->ui.st).worker_supply(player);
 	case 12:
-		return util_funcs(m->ui.st).army_supply(player);
+		return util_functions(m->ui.st).army_supply(player);
 	case 13:
 		return (double)(int)m->ui.st.players.at(player).race;
 	case 14:
@@ -1161,8 +1382,8 @@ int main() {
 
 	using namespace bwgame;
 
-	size_t screen_width = 100;
-	size_t screen_height = 100;
+	size_t screen_width = 1280;
+	size_t screen_height = 800;
 	
 	std::chrono::high_resolution_clock clock;
 	auto start = clock.now();
@@ -1184,9 +1405,11 @@ int main() {
 	
 	m.load_all_image_data(load_data_file);
 
-	//ui.load_replay_file("maps/ff1.rep");
+#ifndef EMSCRIPTEN
+	ui.load_replay_file("maps/zz02.rep");
 //	game_load_functions funcs(m.ui.st);
 //	funcs.reset();
+#endif
 
 	auto& wnd = ui.wnd;
 	wnd.create("test", 0, 0, screen_width, screen_height);
@@ -1201,7 +1424,7 @@ int main() {
 	m.set_image_data();
 	
 	log("loaded in %dms\n", std::chrono::duration_cast<std::chrono::milliseconds>(clock.now() - start).count());
-	log("v3\n");
+	log("v9\n");
 
 #ifdef EMSCRIPTEN
 	::m = &m;
