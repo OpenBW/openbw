@@ -648,7 +648,12 @@ void decompress(uint8_t* input, size_t input_size, uint8_t* output, size_t outpu
 					else distance |= r.template get_bits<6>();
 				}
 				size_t src_pos = out_pos - 1 - distance;
-				if (src_pos > output_size || src_pos + len > output_size) xcept("decompress: out of bounds");
+				if (src_pos > output_size) {
+					len = 0;
+				}
+				if (src_pos + len > output_size) {
+					len = output_size - src_pos;
+				}
 				if (out_pos + len > output_size) {
 					len = output_size - out_pos;
 				}
