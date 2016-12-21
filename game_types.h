@@ -51,7 +51,7 @@ struct player_t {
 		controller_computer_defeated
 	};
 	int controller = controller_inactive;
-	race race = race::zerg;
+	race race{};
 	int force = 0;
 	int color = 0;
 };

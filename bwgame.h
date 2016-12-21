@@ -2838,7 +2838,7 @@ struct state_functions {
 		bool was_hatchery = unit_is_hatchery(u);
 		if (was_hatchery) prev_larva_spawn_side_values = u->building.hatchery.larva_spawn_side_values;
 		u->previous_unit_type = prev_unit_type;
-		u->previous_hp = std::max(prev_hp.integer_part(), 1);
+		u->previous_hp = std::max((int)prev_hp.integer_part(), 1);
 		u->order_type = get_order_type(Orders::Die);
 		u->order_state = 1;
 		destroy_sprite(u->sprite);
@@ -5442,7 +5442,18 @@ struct state_functions {
 		if (attack_move_movement(u, false)) {
 			if (u->main_order_timer == 0) {
 				u->main_order_timer = 15;
-				if (unit_is(u, UnitTypes::Terran_Medic)) xcept("order_Patrol: medic fixme");
+				if (unit_is(u, UnitTypes::Terran_Medic) && !u->order_target.unit) {
+					unit_t* target = find_medic_target(u);
+					if (target) {
+						queue_order_front(u, get_order_type(Orders::Patrol), u->order_target.pos);
+						queue_order_front(u, get_order_type(Orders::MedicHeal), {target->sprite->position, target});
+						u->auto_target_unit = nullptr;
+						order_done(u);
+						u_set_status_flag(u, unit_t::status_flag_ready_to_attack);
+						if (u->subunit) u_set_status_flag(u->subunit, unit_t::status_flag_ready_to_attack);
+						return;
+					}
+				}
 				if (!unit_is_at_move_target(u)) {
 					attack_move_acquire_target(u, false);
 				} else {
@@ -6057,7 +6068,7 @@ struct state_functions {
 						set_next_target_waypoint(u, u->order_target.pos);
 						u_set_status_flag(u, unit_t::status_flag_order_not_interruptible);
 						u->order_state = 2;
-					}
+					} else success = false;
 				}
 				if (!success) {
 					// todo: callback for sound
@@ -15606,7 +15617,7 @@ struct state_functions {
 			return nullptr;
 		}
 		if (unit_type_spreads_creep(unit_type, true) || ut_requires_creep(unit_type)) {
-			xcept("apply creep");
+			spread_creep_completely(u, u->sprite->position);
 		}
 		finish_building_unit(u);
 		if (!place_completed_unit(u)) {
@@ -17411,11 +17422,11 @@ struct state_functions {
 				size_t index = tile_y * game_st.map_tile_width + tile_x;
 				auto flags = st.tiles[index].flags;
 				if (flags & tile_t::flag_has_creep) continue;
+				if (!tile_can_have_creep({tile_x, tile_y})) continue;
 				if (flags & tile_t::flag_occupied) {
 					if (!any_tiles_occupied) any_tiles_occupied = true;
 					continue;
 				}
-				if (!tile_can_have_creep({tile_x, tile_y})) continue;
 				if (spreads_creep) {
 					int d = dx*dx * 25 + dy*dy * 64;
 					if (d > 320*320 * 25) continue;

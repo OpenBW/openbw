@@ -1,3 +1,6 @@
+#ifndef COMMON_H
+#define COMMON_H
+
 #include "containers.h"
 #include "strf.h"
 
@@ -29,3 +32,4 @@ void xcept(const char* fmt, T&&... args) {
 	fatal_error_str(format(fmt, std::forward<T>(args)...));
 }
 
+#endif

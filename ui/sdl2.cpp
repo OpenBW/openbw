@@ -3,10 +3,12 @@
 
 #include "common.h"
 #include "SDL.h"
+#include "SDL_image.h"
 
 #include <mutex>
 #include <array>
 #include <cstdlib>
+#include <memory>
 
 namespace native_window {
 
@@ -15,6 +17,7 @@ bool sdl_initialized = false;
 void sdl_init() {
 	std::lock_guard<std::mutex> l(init_mut);
 	if (!sdl_initialized) {
+		IMG_Init(IMG_INIT_PNG);
 		if (SDL_Init(SDL_INIT_VIDEO) == 0) {
 			sdl_initialized = true;
 		} else {
@@ -129,6 +132,10 @@ struct window_impl {
 	bool get_mouse_button_state(int button) {
 		return mouse_button_state.at(button) ? true : false;
 	}
+	
+	void update_surface() {
+		SDL_UpdateWindowSurface(window);
+	}
 
 };
 
@@ -171,6 +178,10 @@ bool window::get_mouse_button_state(int button) {
 	return impl->get_mouse_button_state(button);
 }
 
+void window::update_surface() {
+	return impl->update_surface();
+}
+
 }
 
 namespace native_window_drawing {
@@ -195,20 +206,17 @@ struct palette_impl : palette {
 	}
 };
 
-struct surface_impl : surface {
-	SDL_Surface* window_s = nullptr;
+struct sdl_surface: surface {
 	SDL_Surface* surf = nullptr;
-	SDL_Window* window = nullptr;
-	virtual ~surface_impl() override {
-		if (surf) SDL_FreeSurface(surf);
+	void set(SDL_Surface* surf) {
+		this->surf = surf;
+		w = surf->w;
+		h = surf->h;
+		pitch = surf->pitch;
 	}
-	virtual void create(native_window::window* wnd) override {
-		window = wnd->impl->window;
-		window_s = SDL_GetWindowSurface(window);
-		if (!window_s) fatal_error("SDL_GetWindowSurface failed: %s", SDL_GetError());
 
-		surf = SDL_ConvertSurfaceFormat(window_s, SDL_PIXELFORMAT_INDEX8, 0);
-		if (!surf) fatal_error("SDL_ConvertSurfaceFormat failed: %s", SDL_GetError());
+	virtual ~sdl_surface() override {
+		if (surf) SDL_FreeSurface(surf);
 	}
 	virtual void set_palette(palette* pal) override {
 		if (SDL_SetSurfacePalette(surf, ((palette_impl*)pal)->pal)) fatal_error("SDL_SetSurfacePalette failed: %s", SDL_GetError());
@@ -219,15 +227,55 @@ struct surface_impl : surface {
 	}
 	virtual void unlock() override {
 		SDL_UnlockSurface(surf);
-		SDL_BlitSurface(surf, nullptr, window_s, nullptr);
 	}
-	virtual void refresh() override {
-		SDL_UpdateWindowSurface(window);
+	virtual void blit(surface* dst, int x, int y) override {
+		auto* s = ((sdl_surface*)dst)->surf;
+		SDL_Rect r{x, y, s->w, s->h};
+		SDL_BlitSurface(surf, nullptr, s, &r);
 	}
-	virtual int pitch() override {
-		return surf->pitch;
+	virtual void blit_scaled(surface* dst, int x, int y, int w, int h) override {
+		auto* s = ((sdl_surface*)dst)->surf;
+		SDL_Rect r{x, y, w, h};
+		SDL_BlitScaled(surf, nullptr, s, &r);
 	}
 };
+
+std::unique_ptr<surface> create_rgba_surface(int width, int height) {
+	//SDL_Surface* surf = SDL_CreateRGBSurfaceWithFormat(0, width, height, 32, SDL_PIXELFORMAT_RGBA32);
+	Uint32 rmask, gmask, bmask, amask;
+#if SDL_BYTEORDER == SDL_BIG_ENDIAN
+    rmask = 0xff000000;
+    gmask = 0x00ff0000;
+    bmask = 0x0000ff00;
+    amask = 0x000000ff;
+#else
+    rmask = 0x000000ff;
+    gmask = 0x0000ff00;
+    bmask = 0x00ff0000;
+    amask = 0xff000000;
+#endif
+    SDL_Surface* surf = SDL_CreateRGBSurface(0, width, height, 32, rmask, gmask, bmask, amask);
+	if (!surf) fatal_error("SDL_CreateRGBSurfaceWithFormat failed: %s", SDL_GetError());
+	auto r = std::make_unique<sdl_surface>();
+	r->set(surf);
+	return std::unique_ptr<surface>(r.release());
+}
+
+std::unique_ptr<surface> get_window_surface(native_window::window* wnd) {
+	auto* surf = SDL_GetWindowSurface(wnd->impl->window);
+	if (!surf) fatal_error("SDL_GetWindowSurface failed: %s", SDL_GetError());
+	auto r = std::make_unique<sdl_surface>();
+	r->set(surf);
+	return std::unique_ptr<surface>(r.release());
+}
+
+std::unique_ptr<surface> convert_to_8_bit_indexed(surface* s) {
+	auto* surf = SDL_ConvertSurfaceFormat(((sdl_surface*)s)->surf, SDL_PIXELFORMAT_INDEX8, 0);
+	if (!surf) fatal_error("SDL_ConvertSurfaceFormat failed: %s", SDL_GetError());
+	auto r = std::make_unique<sdl_surface>();
+	r->set(surf);
+	return std::unique_ptr<surface>(r.release());
+}
 
 palette* new_palette() {
 	return new palette_impl();
@@ -235,11 +283,13 @@ palette* new_palette() {
 void delete_palette(palette* pal) {
 	delete pal;
 }
-surface* new_surface() {
-	return new surface_impl();
-}
-void delete_surface(surface* surf) {
-	delete surf;
+
+std::unique_ptr<surface> load_image(const char* filename) {
+	auto* surf = IMG_Load(filename);
+	if (!surf) fatal_error("IMG_Load(%s) failed: %s", filename, IMG_GetError());
+	auto r = std::make_unique<sdl_surface>();
+	r->set(surf);
+	return std::unique_ptr<surface>(r.release());
 }
 
 }
