@@ -302,7 +302,7 @@ public:
 	reference operator[](size_type pos) {
 		return *(ptr_begin() + pos);
 	}
-	constexpr reference operator[](size_type pos) const {
+	constexpr const_reference operator[](size_type pos) const {
 		return *(ptr_begin() + pos);
 	}
 	reference front() {
