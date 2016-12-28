@@ -57,34 +57,18 @@ struct player_t {
 };
 
 struct sight_values_t {
-	struct maskdat_node_t;
-	typedef a_vector<maskdat_node_t> maskdat_t;
 	struct maskdat_node_t {
-		//
-		//  I would like to change this structure a bit, move vision_propagation to a temporary inside reveal_sight_at,
-		//  and change prev_count to a bool since it can only have two values, or remove it entirely.
-		//
-		// TODO: remove vision_propagation, since this struct is supposed to be static (stored in game_state)
-		//
-		maskdat_node_t* prev; // the tile from us directly towards the origin (diagonal is allowed and preferred)
-		// the other tile with equal diagonal distance to the origin as prev, if it exists.
-		// otherwise, it is prev
-		maskdat_node_t* prev2;
-		size_t map_index_offset;
-		// temporary variable used when spreading vision to make sure we don't go through obstacles
-		mutable uint32_t vision_propagation;
-		int8_t x;
-		int8_t y;
-		// prev_count will be 1 if prev and prev2 are equal, otherwise it is 2
-		int8_t prev_count;
+		size_t prev;
+		size_t prev2;
+		int relative_tile_index;
+		int x;
+		int y;
 	};
-
 	int max_width, max_height;
 	int min_width, min_height;
 	int min_mask_size;
 	int ext_masked_count;
-	maskdat_t maskdat;
-
+	a_vector<maskdat_node_t> maskdat;
 };
 
 struct trigger {
@@ -171,20 +155,9 @@ struct tile_t {
 		flag_temporary_creep = 0x4000,
 		flag_unk4 = 0x8000
 	};
-	union {
-		struct {
-			uint8_t visible;
-			uint8_t explored;
-			uint16_t flags;
-		};
-		uint32_t raw;
-	};
-	operator uint32_t() const {
-		return raw;
-	}
-	bool operator==(uint32_t val) const {
-		return raw == val;
-	}
+	uint8_t visible;
+	uint8_t explored;
+	uint16_t flags;
 };
 
 struct regions_t {
@@ -343,6 +316,7 @@ struct image_t: link_base {
 		flag_y_frozen = 4,
 		flag_has_directional_frames = 8,
 		flag_has_iscript_animations = 0x10,
+		flag_clickable = 0x20,
 		flag_hidden = 0x40,
 		flag_uses_special_offset = 0x80
 	};
@@ -663,8 +637,6 @@ struct unit_t: flingy_t {
 	int secondary_order_state;
 	int move_target_timer;
 	uint32_t detected_flags;
-	int secondary_order_unk_a;
-	int secondary_order_unk_b;
 	unit_t* current_build_unit;
 	std::pair<unit_t*, unit_t*> cloaked_unit_link;
 

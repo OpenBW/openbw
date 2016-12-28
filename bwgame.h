@@ -213,14 +213,6 @@ struct state_base_copyable {
 	std::array<type_indexed_array<int, UnitTypes>, 12> unit_counts;
 	std::array<type_indexed_array<int, UnitTypes>, 12> completed_unit_counts;
 
-	std::array<int, 12> factory_counts;
-	std::array<int, 12> building_counts;
-	std::array<int, 12> non_building_counts;
-
-	std::array<int, 12> completed_factory_counts;
-	std::array<int, 12> completed_building_counts;
-	std::array<int, 12> completed_non_building_counts;
-
 	std::array<int, 12> total_buildings_ever_completed;
 	std::array<int, 12> total_non_buildings_ever_completed;
 
@@ -1128,8 +1120,6 @@ struct state_functions {
 		if (u->secondary_order_type == order_type) return;
 		u->secondary_order_type = order_type;
 		u->secondary_order_state = 0;
-		u->secondary_order_unk_a = 0;
-		u->secondary_order_unk_b = 0;
 		u->current_build_unit = nullptr;
 	}
 
@@ -2983,7 +2973,7 @@ struct state_functions {
 	}
 
 	void unit_load_target(unit_t* u, unit_t* target) {
-		size_t index = ~(size_t)0;
+		size_t index = (size_t)-1;
 		for (size_t i = 0; i != u->unit_type->space_provided; ++i) {
 			unit_t* n = get_unit(u->loaded_units.at(i));
 			if (!n) {
@@ -3021,7 +3011,7 @@ struct state_functions {
 		unit_t* container = u->connected_unit;
 		if (container) {
 			auto uid = get_unit_id(u);
-			size_t index = ~(size_t)0;
+			size_t index = (size_t)-1;
 			for (size_t i = 0; i != container->unit_type->space_provided; ++i) {
 				if (container->loaded_units[i] == uid) {
 					index = i;
@@ -11149,41 +11139,39 @@ struct state_functions {
 			else if (height == 1) height_mask = tile_t::flag_very_high | tile_t::flag_high;
 			else height_mask = tile_t::flag_very_high | tile_t::flag_high | tile_t::flag_middle;
 		}
-		tile_t reveal_tile_mask;
-		reveal_tile_mask.visible = visibility_mask;
-		reveal_tile_mask.explored = visibility_mask;
-		reveal_tile_mask.flags = 0xffff;
-		tile_t required_tile_mask;
-		required_tile_mask.visible = ~visibility_mask;
-		required_tile_mask.explored = ~visibility_mask;
-		required_tile_mask.flags = height_mask;
-		auto& sight_vals = game_st.sight_values.at(range);
+		const size_t max_width = 11 * 2 + 3;
+		std::array<uint32_t, max_width * max_width> vision_propagation;
+		uint32_t required_tile_mask = (uint32_t)height_mask << 16 | (uint32_t)(uint8_t)~visibility_mask << 8 | (uint32_t)(uint8_t)~visibility_mask;
+		const auto& sight_vals = game_st.sight_values.at(range);
 		size_t tile_x = (size_t)pos.x / 32;
 		size_t tile_y = (size_t)pos.y / 32;
 		tile_t* base_tile = &st.tiles[tile_x + tile_y*game_st.map_tile_width];
 		if (!in_air) {
-			auto* cur = sight_vals.maskdat.data();
-			auto* end = cur + sight_vals.min_mask_size;
-			for (; cur != end; ++cur) {
-				cur->vision_propagation = 0xff;
-				if (tile_x + cur->x >= game_st.map_tile_width) continue;
-				if (tile_y + cur->y >= game_st.map_tile_height) continue;
-				auto& tile = base_tile[cur->map_index_offset];
-				tile.raw &= reveal_tile_mask.raw;
-				cur->vision_propagation = tile.raw;
+			size_t index = 0;
+			size_t end = sight_vals.min_mask_size;
+			for (; index != end; ++index) {
+				const auto& cur = sight_vals.maskdat[index];
+				vision_propagation[index] = 0xff;
+				if (tile_x + cur.x >= game_st.map_tile_width) continue;
+				if (tile_y + cur.y >= game_st.map_tile_height) continue;
+				auto& tile = base_tile[cur.relative_tile_index];
+				tile.visible &= visibility_mask;
+				tile.explored &= visibility_mask;
+				vision_propagation[index] = (uint32_t)tile.flags << 16 | (uint32_t)tile.explored << 8 | (uint32_t)tile.visible;
 			}
 			end += sight_vals.ext_masked_count;
-			for (; cur != end; ++cur) {
-				cur->vision_propagation = 0xff;
-				if (tile_x + cur->x >= game_st.map_tile_width) continue;
-				if (tile_y + cur->y >= game_st.map_tile_height) continue;
-				bool okay = false;
-				okay |= !(cur->prev->vision_propagation&required_tile_mask.raw);
-				if (cur->prev_count == 2) okay |= !(cur->prev2->vision_propagation&required_tile_mask.raw);
-				if (!okay) continue;
-				auto& tile = base_tile[cur->map_index_offset];
-				tile.raw &= reveal_tile_mask.raw;
-				cur->vision_propagation = tile.raw;
+			for (; index != end; ++index) {
+				const auto& cur = sight_vals.maskdat[index];
+				vision_propagation[index] = 0xff;
+				if (tile_x + cur.x >= game_st.map_tile_width) continue;
+				if (tile_y + cur.y >= game_st.map_tile_height) continue;
+				if (vision_propagation[cur.prev] & required_tile_mask) {
+					if (cur.prev2 == (size_t)~0 || (vision_propagation[cur.prev2] & required_tile_mask)) continue;
+				}
+				auto& tile = base_tile[cur.relative_tile_index];
+				tile.visible &= visibility_mask;
+				tile.explored &= visibility_mask;
+				vision_propagation[index] = (uint32_t)tile.flags << 16 | (uint32_t)tile.explored << 8 | (uint32_t)tile.visible;
 			}
 		} else {
 			// This seems bugged; even for air units, if you only traverse ext_masked_count nodes,
@@ -11193,12 +11181,14 @@ struct state_functions {
 			for (; cur != end; ++cur) {
 				if (tile_x + cur->x >= game_st.map_tile_width) continue;
 				if (tile_y + cur->y >= game_st.map_tile_height) continue;
-				base_tile[cur->map_index_offset].raw &= reveal_tile_mask.raw;
+				auto& tile = base_tile[cur->relative_tile_index];
+				tile.visible &= visibility_mask;
+				tile.explored &= visibility_mask;
 			}
 		}
 	}
 
-	void refresh_unit_vision(unit_t*u) {
+	void refresh_unit_vision(unit_t* u) {
 		if (u->owner >= 8 && !u->parasite_flags) return;
 		if (unit_is(u, UnitTypes::Terran_Nuclear_Missile)) return;
 		int visible_to = 0;
@@ -13739,7 +13729,7 @@ struct state_functions {
 		image->grp = global_st.image_grp[(size_t)image_type->id];
 		int flags = 0;
 		if (image_type->has_directional_frames) flags |= image_t::flag_has_directional_frames;
-		if (image_type->is_clickable) flags |= 0x20;
+		if (image_type->is_clickable) flags |= image_t::flag_clickable;
 		image->flags = flags;
 		image->frame_index_base = 0;
 		image->frame_index_offset = 0;
@@ -13797,8 +13787,7 @@ struct state_functions {
 		}
 		initialize_image(image, image_type, sprite, offset);
 		set_image_modifier(image, image->image_type->modifier);
-		if (image->image_type->has_iscript_animations) image->flags |= image_t::flag_has_iscript_animations;
-		else image->flags &= image_t::flag_has_iscript_animations;
+		i_set_flag(image, image_t::flag_has_iscript_animations, image->image_type->has_iscript_animations);
 		iscript_set_script(image, image->image_type->iscript_id);
 		if (!iscript_run_anim(image, iscript_anims::Init)) xcept("create_image: image destroyed");
 		return image;
@@ -13981,14 +13970,6 @@ struct state_functions {
 			st.supply_used[u->owner][1] += supply_required * count;
 		} else if (race == race::protoss) {
 			st.supply_used[u->owner][2] += supply_required * count;
-		}
-		if (u->unit_type->group_flags & GroupFlags::Factory) st.factory_counts[u->owner] += count;
-		if (u->unit_type->group_flags & GroupFlags::Men) {
-			st.non_building_counts[u->owner] += count;
-		} else if (u->unit_type->group_flags & GroupFlags::Building) {
-			st.building_counts[u->owner] += count;
-		} else if (unit_is_egg(u)) {
-			st.non_building_counts[u->owner] += count;
 		}
 		if (st.unit_counts[u->owner][u->unit_type->id] < 0) st.unit_counts[u->owner][u->unit_type->id] = 0;
 	}
@@ -14698,7 +14679,7 @@ struct state_functions {
 			unit_finder_insert(u);
 			set_unit_tiles_occupied(u, u->sprite->position);
 			check_unit_collision(u);
-			if (u_flying(u)) increment_repulse_field(u); // impossible?
+			if (u_flying(u)) increment_repulse_field(u);
 			set_construction_graphic(u, true);
 			set_sprite_visibility(u->sprite, 0);
 		} else {
@@ -15140,14 +15121,6 @@ struct state_functions {
 			st.supply_available[u->owner][(size_t)race] += u->unit_type->supply_provided * count;
 		}
 
-		if (u->unit_type->group_flags & GroupFlags::Factory) {
-			st.completed_factory_counts[u->owner] += count;
-		}
-		if (u->unit_type->group_flags & GroupFlags::Men) {
-			st.completed_building_counts[u->owner] += count;
-		} else if (u->unit_type->group_flags & GroupFlags::Building) {
-			st.completed_building_counts[u->owner] += count;
-		}
 		if (increment_score) {
 			if (u->owner != 11) {
 				if (u->unit_type->group_flags & GroupFlags::Men) {
@@ -17853,14 +17826,6 @@ struct game_load_functions : state_functions {
 		st.unit_counts = {};
 		st.completed_unit_counts = {};
 
-		st.factory_counts = {};
-		st.building_counts = {};
-		st.non_building_counts = {};
-
-		st.completed_factory_counts = {};
-		st.completed_building_counts = {};
-		st.completed_non_building_counts = {};
-
 		st.total_buildings_ever_completed = {};
 		st.total_non_buildings_ever_completed = {};
 
@@ -18771,7 +18736,6 @@ struct game_load_functions : state_functions {
 			}
 		}
 
-
 		create_unreachable_bottom_region();
 
 		create_regions();
@@ -18831,7 +18795,7 @@ struct game_load_functions : state_functions {
 		default:
 			return score;
 		}
-	};
+	}
 
 	void calculate_unit_strengths() {
 
@@ -18875,12 +18839,14 @@ struct game_load_functions : state_functions {
 			v.ext_masked_count = 0;
 		}
 
+		struct base_mask_t {
+			sight_values_t::maskdat_node_t* maskdat_node;
+			bool masked;
+		};
+		a_vector<base_mask_t> base_mask;
 		for (auto& v : game_st.sight_values) {
-			struct base_mask_t {
-				sight_values_t::maskdat_node_t* maskdat_node;
-				bool masked;
-			};
-			a_vector<base_mask_t> base_mask(v.max_width*v.max_height);
+			base_mask.clear();
+			base_mask.resize(v.max_width*v.max_height);
 			auto mask = [&](size_t index) {
 				if (index >= base_mask.size()) xcept("attempt to mask invalid base mask index %d (size %d)", index, base_mask.size());
 				base_mask[index].masked = true;
@@ -18945,13 +18911,13 @@ struct game_load_functions : state_functions {
 			v.maskdat.clear();
 			v.maskdat.resize(masked_count);
 
-			auto* center = &base_mask[v.max_height / 2 * v.max_width + v.max_width / 2];
-			center->maskdat_node = &v.maskdat.front();
+			size_t center_index = v.max_height / 2 * v.max_width + v.max_width / 2;
+			base_mask[center_index].maskdat_node = &v.maskdat.front();
 
-			auto at = [&](int index) -> base_mask_t& {
-				auto*r = &center[index];
-				if (r < base_mask.data() || r >= base_mask.data() + base_mask.size()) xcept("attempt to access invalid base mask center-relative index %d (size %d)", index, base_mask.size());
-				return *r;
+			auto at = [&](int relative_index) -> base_mask_t& {
+				size_t index = center_index + relative_index;
+				if (index >= base_mask.size()) xcept("attempt to access invalid base mask center-relative index %d (size %d)", index, base_mask.size());
+				return base_mask[index];
 			};
 
 			size_t next_entry_index = 1;
@@ -18961,8 +18927,8 @@ struct game_load_functions : state_functions {
 			int added_count = 1;
 			for (int i = 2; added_count < masked_count; i += 2) {
 				for (int dir = 0; dir < 4; ++dir) {
-					static const std::array<int, 4> direction_x = { 1,0,-1,0 };
-					static const std::array<int, 4> direction_y = { 0,1,0,-1 };
+					static const std::array<int, 4> direction_x = {1, 0, -1, 0};
+					static const std::array<int, 4> direction_y = {0, 1, 0, -1};
 					int this_x;
 					int this_y;
 					auto do_n = [&](int n) {
@@ -18970,6 +18936,11 @@ struct game_load_functions : state_functions {
 							if (at(this_y*v.max_width + this_x).masked) {
 								if (this_x || this_y) {
 									auto* this_entry = &v.maskdat.at(next_entry_index++);
+									
+									auto index = [&](auto* n) {
+										if (!n) return (size_t)-1;
+										return (size_t)(n - v.maskdat.data());
+									};
 
 									int prev_x = this_x;
 									int prev_y = this_y;
@@ -18978,10 +18949,10 @@ struct game_load_functions : state_functions {
 									if (prev_y > 0) --prev_y;
 									else if (prev_y < 0) ++prev_y;
 									if (std::abs(prev_x) == std::abs(prev_y) || (this_x == 0 && direction_x[dir]) || (this_y == 0 && direction_y[dir])) {
-										this_entry->prev = this_entry->prev2 = at(prev_y * v.max_width + prev_x).maskdat_node;
-										this_entry->prev_count = 1;
+										this_entry->prev = index(at(prev_y * v.max_width + prev_x).maskdat_node);
+										this_entry->prev2 = (size_t)-1;
 									} else {
-										this_entry->prev = at(prev_y * v.max_width + prev_x).maskdat_node;
+										this_entry->prev = index(at(prev_y * v.max_width + prev_x).maskdat_node);
 										int prev2_x = prev_x;
 										int prev2_y = prev_y;
 										if (std::abs(prev2_x) <= std::abs(prev2_y)) {
@@ -18991,10 +18962,9 @@ struct game_load_functions : state_functions {
 											if (this_y >= 0) ++prev2_y;
 											else --prev2_y;
 										}
-										this_entry->prev2 = at(prev2_y * v.max_width + prev2_x).maskdat_node;
-										this_entry->prev_count = 2;
+										this_entry->prev2 = index(at(prev2_y * v.max_width + prev2_x).maskdat_node);
 									}
-									this_entry->map_index_offset = this_y * game_st.map_tile_width + this_x;
+									this_entry->relative_tile_index = this_y * (int)game_st.map_tile_width + this_x;
 									this_entry->x = this_x;
 									this_entry->y = this_y;
 									at(this_y * v.max_width + this_x).maskdat_node = this_entry;
@@ -19333,8 +19303,8 @@ struct game_load_functions : state_functions {
 		tag_funcs["MASK"] = [&](data_reader_le r) {
 			auto mask = r.get_vec<uint8_t>(std::min(game_st.map_tile_width*game_st.map_tile_height, r.left()));
 			for (size_t i = 0; i != mask.size(); ++i) {
-				st.tiles[i].visible |= mask[i];
-				st.tiles[i].explored |= mask[i];
+				st.tiles[i].visible = mask[i];
+				st.tiles[i].explored = mask[i];
 			}
 		};
 
@@ -19510,7 +19480,11 @@ struct game_load_functions : state_functions {
 				int flags = r.get<uint16_t>();
 				r.get<uint32_t>();
 				int related_unit_id = r.get<uint32_t>();
-				if ((int)unit_type_id == 0xffff) continue;
+				bool is_invalid = (size_t)unit_type_id == 0xffff;
+				if (is_invalid) {
+					unit_type_id = (UnitTypes)0;
+					owner = 8;
+				}
 
 				(void)id; (void)link; (void)valid_flags; (void)units_in_hangar; (void)flags; (void)related_unit_id;
 
@@ -19545,8 +19519,14 @@ struct game_load_functions : state_functions {
 				if (use_map_settings) {
 					if (owner < 8 && setup_info.create_melee_units_for_player[owner] && ~unit_type->group_flags & GroupFlags::Neutral) continue;
 				}
+				
+				if (is_invalid) {
+					lcg_rand(14);
+					if (is_in_map_bounds(xy(x, y))) xcept("attempt to create invalid initial unit in valid map bounds");
+					continue;
+				}
 
-				unit_t* u = create_initial_unit(unit_type, { x,y }, owner);
+				unit_t* u = create_initial_unit(unit_type, {x, y}, owner);
 
 				if (valid_properties & 0x2) {
 					using tmp_t = fixed_point<32, 8, true>;
