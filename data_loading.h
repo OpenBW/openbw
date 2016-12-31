@@ -1284,6 +1284,7 @@ template<typename data_T>
 sprite_types_t load_sprites_dat(const data_T& data) {
 	static const size_t count = 517;
 	static const size_t selectable_count = 387;
+	static const size_t non_selectable_count = 130;
 
 	sprite_types_t sprite_types;
 	sprite_types.vec.resize(count);
@@ -1298,11 +1299,11 @@ sprite_types_t load_sprites_dat(const data_T& data) {
 	auto& arr = sprite_types.vec;
 
 	rawr(uint16_t, image, count);
-	rawr(uint8_t, health_bar_size, selectable_count);
+	rawro(uint8_t, health_bar_size, selectable_count, non_selectable_count);
 	rawr(uint8_t, unk0, count);
 	rawr(uint8_t, visible, count);
-	rawr(uint8_t, selection_circle, selectable_count);
-	rawr(uint8_t, selection_circle_vpos, selectable_count);
+	rawro(uint8_t, selection_circle, selectable_count, non_selectable_count);
+	rawro(uint8_t, selection_circle_vpos, selectable_count, non_selectable_count);
 
 	if (r.left()) log(" WARNING: %s: %d bytes left\n", "sprites.dat", r.left());
 

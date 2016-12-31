@@ -62,6 +62,8 @@ struct tileset_image_data {
 struct image_data {
 	std::array<std::array<uint8_t, 8>, 16> player_unit_colors;
 	std::array<uint8_t, 16> player_minimap_colors;
+	std::array<uint8_t, 24> selection_colors;
+	std::array<uint8_t, 24> hp_bar_colors;
 	std::array<int, 0x100> creep_edge_frame_index{};
 	
 	a_vector<std::unique_ptr<native_window_drawing::surface>> valkyrie_test;
@@ -175,9 +177,19 @@ void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
 		}
 	}
 	auto tminimap_pcx = load_pcx_file("game/tminimap.pcx");
-	if (tminimap_pcx.width != 16 || tminimap_pcx.height != 1) xcept("tminimap.pcx dimensions are %dx%d (16x16 required)", tminimap_pcx.width, tminimap_pcx.height);
+	if (tminimap_pcx.width != 16 || tminimap_pcx.height != 1) xcept("tminimap.pcx dimensions are %dx%d (16x1 required)", tminimap_pcx.width, tminimap_pcx.height);
 	for (size_t i = 0; i != 16; ++i) {
 		img.player_minimap_colors[i] = tminimap_pcx.data[i];
+	}
+	auto tselect_pcx = load_pcx_file("game/tselect.pcx");
+	if (tselect_pcx.width != 24 || tselect_pcx.height != 1) xcept("tselect.pcx dimensions are %dx%d (24x1 required)", tselect_pcx.width, tselect_pcx.height);
+	for (size_t i = 0; i != 24; ++i) {
+		img.selection_colors[i] = tselect_pcx.data[i];
+	}
+	auto thpbar_pcx = load_pcx_file("game/thpbar.pcx");
+	if (thpbar_pcx.width != 19 || thpbar_pcx.height != 1) xcept("thpbar.pcx dimensions are %dx%d (19x1 required)", thpbar_pcx.width, thpbar_pcx.height);
+	for (size_t i = 0; i != 19; ++i) {
+		img.hp_bar_colors[i] = thpbar_pcx.data[i];
 	}
 	
 	auto flip = [&](auto& dst, auto& src) {
@@ -187,8 +199,8 @@ void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
 			src[i]->blit(&*tmp, 0, 0);
 			void* ptr = tmp->lock();
 			uint32_t* pixels = (uint32_t*)ptr;
-			for (size_t y = 0; y != tmp->h; ++y) {
-				for (size_t x = 0; x != tmp->w / 2; ++x) {
+			for (size_t y = 0; y != (size_t)tmp->h; ++y) {
+				for (size_t x = 0; x != (size_t)tmp->w / 2; ++x) {
 					std::swap(pixels[x], pixels[tmp->w - x]);
 				}
 				pixels += tmp->pitch / 4;
@@ -404,7 +416,6 @@ struct apm_t {
 			last_frame_div = frame / resolution;
 		}
 		if (frame % resolution) return;
-		//log("history.size() is %d\n", history.size());
 		if (history.size() == 0) {
 			current_apm = 0;
 			return;
@@ -415,7 +426,122 @@ struct apm_t {
 	}
 };
 
-struct ui_functions: replay_functions {
+struct ui_util_functions: replay_functions {
+	
+	explicit ui_util_functions(state& st, action_state& action_st, replay_state& replay_st) : replay_functions(st, action_st, replay_st) {}
+	
+	rect sprite_clickable_bounds(const sprite_t* sprite) const {
+		rect r{{(int)game_st.map_width - 1, (int)game_st.map_height - 1}, {0, 0}};
+		for (const image_t* image : ptr(sprite->images)) {
+			if (!i_flag(image, image_t::flag_clickable)) continue;
+			xy pos = get_image_map_position(image);
+			auto size = image->grp->frames.at(image->frame_index).size;
+			xy to = pos + xy((int)size.x, (int)size.y);
+			if (pos.x < r.from.x) r.from.x = pos.x;
+			if (pos.y < r.from.y) r.from.y = pos.y;
+			if (to.x > r.to.x) r.to.x = to.x;
+			if (to.y > r.to.y) r.to.y = to.y;
+		}
+		return r;
+	}
+	
+	bool unit_can_be_selected(const unit_t* u) const {
+		if (unit_is(u, UnitTypes::Terran_Nuclear_Missile)) return false;
+		if (unit_is(u, UnitTypes::Protoss_Scarab)) return false;
+		if (unit_is(u, UnitTypes::Spell_Disruption_Web)) return false;
+		if (unit_is(u, UnitTypes::Spell_Dark_Swarm)) return false;
+		if (unit_is(u, UnitTypes::Special_Upper_Level_Door)) return false;
+		if (unit_is(u, UnitTypes::Special_Right_Upper_Level_Door)) return false;
+		if (unit_is(u, UnitTypes::Special_Pit_Door)) return false;
+		if (unit_is(u, UnitTypes::Special_Right_Pit_Door)) return false;
+		return true;
+	}
+	
+	bool image_has_data_at(const image_t* image, xy pos) const {
+		auto& frame = image->grp->frames.at(image->frame_index);
+		xy map_pos = get_image_map_position(image);
+		int x = pos.x - map_pos.x;
+		if (i_flag(image, image_t::flag_horizontally_flipped)) x = image->grp->width - 2 * frame.offset.x - x;
+		int y = pos.y - map_pos.y;
+		if ((size_t)x >= frame.size.x) return false;
+		if ((size_t)y >= frame.size.y) return false;
+		
+		const uint8_t* d = frame.data_container.data() + frame.line_data_offset.at(y);
+		while (x > 0) {
+			int v = *d++;
+			if (v & 0x80) {
+				v &= 0x7f;
+				x -= v;
+				if (x <= 0) return false;
+			} else if (v & 0x40) {
+				v &= 0x3f;
+				d++;
+				x -= v;
+			} else {
+				x -= v;
+			}
+		}
+		return true;
+	}
+	
+	bool unit_has_clickable_image_data_at(const unit_t* u, xy pos) const {
+		if (!is_in_bounds(pos, sprite_clickable_bounds(u->sprite))) return false;
+		if (ut_flag(u, unit_type_t::flag_100)) {
+			for (const image_t* image : ptr(u->sprite->images)) {
+				if (!i_flag(image, image_t::flag_clickable)) continue;
+				if (image_has_data_at(image, pos)) return true;
+			}
+			return false;
+		} else {
+			return image_has_data_at(u->sprite->main_image, pos);
+		}
+	}
+	
+	unit_t* select_get_unit_at(xy pos) const {
+		rect area = square_at(pos, 32);
+		area.to += xy(game_st.max_unit_width, game_st.max_unit_height);
+		unit_t* best_unit = nullptr;
+		int best_unit_size;
+		for (unit_t* u : find_units_noexpand(area)) {
+			if (!is_in_bounds(pos, sprite_clickable_bounds(u->sprite))) continue;
+			u = unit_main_unit(u);
+			if (!unit_can_be_selected(u)) continue;
+			if (!best_unit) {
+				best_unit = u;
+				best_unit_size = u->unit_type->placement_size.x * u->unit_type->placement_size.y;
+				continue;
+			}
+			if (sprite_depth_order(u->sprite) >= sprite_depth_order(best_unit->sprite)) {
+				if (unit_has_clickable_image_data_at(u, pos) || (u->subunit && unit_has_clickable_image_data_at(u->subunit, pos))) {
+					best_unit = u;
+					best_unit_size = u->sprite->width * u->sprite->height;
+					continue;
+				}
+			} else {
+				if (unit_has_clickable_image_data_at(best_unit, pos)) continue;
+				if (best_unit->subunit && unit_has_clickable_image_data_at(best_unit->subunit, pos)) continue;
+			}
+			if (u->unit_type->placement_size.x * u->unit_type->placement_size.y < best_unit_size) {
+				best_unit = u;
+				best_unit_size = u->unit_type->placement_size.x * u->unit_type->placement_size.y;
+			}
+		}
+		return best_unit;
+	}
+	
+	uint32_t sprite_depth_order(const sprite_t* sprite) const {
+		uint32_t score = 0;
+		score |= sprite->elevation_level;
+		score <<= 13;
+		score |= sprite->elevation_level <= 4 ? sprite->position.y : 0;
+		score <<= 1;
+		score |= s_flag(sprite, sprite_t::flag_turret) ? 1 : 0;
+		return score;
+	}
+	
+};
+
+struct ui_functions: ui_util_functions {
 	image_data img;
 	tileset_image_data tileset_img;
 	native_window::window wnd;
@@ -429,7 +555,7 @@ struct ui_functions: replay_functions {
 	replay_state current_replay_state;
 	action_state current_action_state;
 	std::array<apm_t, 12> apm;
-	ui_functions(game_player player) : replay_functions(player.st(), current_action_state, current_replay_state), player(std::move(player)) {
+	ui_functions(game_player player) : ui_util_functions(player.st(), current_action_state, current_replay_state), player(std::move(player)) {
 		init();
 	}
 	
@@ -631,11 +757,159 @@ struct ui_functions: replay_functions {
 		} else xcept("don't know how to draw image modifier %d", image->modifier);
 
 	}
+	
+	a_vector<const unit_t*> current_selection_sprites_set = a_vector<const unit_t*>(2500);
+	a_vector<const sprite_t*> current_selection_sprites;
+	
+	void draw_selection_circle(const sprite_t* sprite, const unit_t* u, uint8_t* data, size_t data_pitch) {
+		auto* image_type = get_image_type((ImageTypes)((int)ImageTypes::IMAGEID_Selection_Circle_22pixels + sprite->sprite_type->selection_circle));
+		
+		xy map_pos = sprite->position + xy(0, sprite->sprite_type->selection_circle_vpos);
+		
+		auto* grp = global_st.image_grp[(size_t)image_type->id];
+		auto& frame = grp->frames.at(0);
+		
+		map_pos.x += int(frame.offset.x - grp->width / 2);
+		map_pos.y += int(frame.offset.y - grp->height / 2);
+
+		int screen_x = map_pos.x - screen_pos.x;
+		int screen_y = map_pos.y - screen_pos.y;
+
+		if (screen_x >= (int)screen_width || screen_y >= (int)screen_height) return;
+
+		size_t width = frame.size.x;
+		size_t height = frame.size.y;
+
+		if (screen_x + (int)width <= 0 || screen_y + (int)height <= 0) return;
+
+		size_t offset_x = 0;
+		size_t offset_y = 0;
+		if (screen_x < 0) {
+			offset_x = -screen_x;
+		}
+		if (screen_y < 0) {
+			offset_y = -screen_y;
+		}
+
+		uint8_t* dst = data + screen_y * data_pitch + screen_x;
+
+		width = std::min(width, screen_width - screen_x);
+		height = std::min(height, screen_height - screen_y);
+		
+		size_t color_index = st.players[sprite->owner].color;
+		uint8_t* ptr = img.player_unit_colors.at(color_index).data();
+		auto player_color = [ptr](uint8_t new_value, uint8_t) {
+			if (new_value >= 0 && new_value < 8) return ptr[0];
+			if (new_value >= 8 && new_value < 16) return ptr[new_value - 8];
+			return new_value;
+		};
+		draw_frame(frame, false, dst, data_pitch, offset_x, offset_y, width, height, player_color);
+		
+	}
+
+	void draw_health_bars(const sprite_t* sprite, const unit_t* u, uint8_t* data, size_t data_pitch) {
+		
+		auto* selection_circle_image_type = get_image_type((ImageTypes)((int)ImageTypes::IMAGEID_Selection_Circle_22pixels + sprite->sprite_type->selection_circle));
+		
+		auto* selection_circle_grp = global_st.image_grp[(size_t)selection_circle_image_type->id];
+		auto& selection_circle_frame = selection_circle_grp->frames.at(0);
+		
+		int offsety = sprite->sprite_type->selection_circle_vpos + selection_circle_frame.size.y / 2 + 8;
+		
+		int width = sprite->sprite_type->health_bar_size;
+		width -= (width - 1) % 3;
+		if (width < 19) width = 19;
+		int orig_width = width;
+		int height = 5;
+		if (u->unit_type->has_shield) height += 2;
+		if (ut_has_energy(u) || u_hallucination(u) || unit_is(u, UnitTypes::Zerg_Broodling)) height += 6;
+		
+		xy map_pos = sprite->position + xy(0, offsety);
+		
+		map_pos.x += int(0 - width / 2);
+		map_pos.y += int(0 - height / 2);
+
+		int screen_x = map_pos.x - screen_pos.x;
+		int screen_y = map_pos.y - screen_pos.y;
+
+		if (screen_x >= (int)screen_width || screen_y >= (int)screen_height) return;
+		if (screen_x + width <= 0 || screen_y + height <= 0) return;
+		
+		int hp_percent = unit_hp_percent(u);
+		int dw = hp_percent * width / 100;
+		if (dw < 3) dw = 3;
+		else if (dw % 3) {
+			if (dw % 3 > 1) dw += 3 - (dw % 3);
+			else dw -= dw % 3;
+		}
+		
+		int colors_66[] = {18, 0, 1, 2, 18};
+		int colors_33[] = {18, 3, 4, 5, 18};
+		int colors_0[] = {18, 6, 7, 8, 18};
+		int colors_bg[] = {18, 15, 16, 17, 18};
+		
+		int offset_x = 0;
+		int offset_y = 0;
+		if (screen_x < 0) {
+			offset_x = -screen_x;
+			dw += screen_x;
+			width += screen_x;
+			screen_x = 0;
+		}
+		if (screen_y < 0) {
+			offset_y = -screen_y;
+			height += screen_y;
+			screen_y = 0;
+		}
+
+		uint8_t* dst = data + screen_y * data_pitch + screen_x;
+		
+		width = std::min(width, (int)screen_width - screen_x);
+		height = std::min(height, (int)screen_height - screen_y);
+		
+		if (dw > width) dw = width;
+		
+		for (int i = 0; i != 5; ++i) {
+			if (i < offset_y || i >= height) continue;
+			int ci = hp_percent >= 66 ? colors_66[i] : hp_percent >= 33 ? colors_33[i] : colors_0[i];
+			int c = img.hp_bar_colors.at(ci);
+			
+			memset(dst, c, dw);
+			if (width - dw) {
+				c = img.hp_bar_colors.at(colors_bg[i]);
+				memset(dst + dw, c, width - dw);
+			}
+			dst += data_pitch;
+		}
+		
+		dst = data + screen_y * data_pitch + screen_x;
+		
+		int c = img.hp_bar_colors.at(18);
+		for (int x = 0; x < orig_width; x += 3) {
+			if (x < offset_x || x >= width) continue;
+			for (int y = 0; y != height; ++y) {
+				*dst = c;
+				dst += data_pitch;
+			}
+			dst -= height * data_pitch;
+			dst += 3;
+		}
+		
+	}
 
 	void draw_sprite(const sprite_t* sprite, uint8_t* data, size_t data_pitch) {
+		const unit_t* draw_selection_u = current_selection_sprites_set.at(sprite - st.sprites.data());
+		const unit_t* draw_health_bars_u = draw_selection_u;
 		for (auto* image : ptr(reverse(sprite->images))) {
 			if (i_flag(image, image_t::flag_hidden)) continue;
+			if (draw_selection_u && image->modifier != 10) {
+				draw_selection_circle(sprite, draw_selection_u, data, data_pitch);
+				draw_selection_u = nullptr;
+			}
 			draw_image(image, data, data_pitch, st.players[sprite->owner].color);
+		}
+		if (draw_health_bars_u && !u_invincible(draw_health_bars_u)) {
+			draw_health_bars(sprite, draw_health_bars_u, data, data_pitch);
 		}
 	}
 
@@ -643,7 +917,7 @@ struct ui_functions: replay_functions {
 		
 		image_draw_queue.clear();
 
-		a_vector<std::pair<uint_fast32_t, const sprite_t*>> sorted_sprites;
+		a_vector<std::pair<uint32_t, const sprite_t*>> sorted_sprites;
 		
 		auto screen_tile = screen_tile_bounds();
 
@@ -656,22 +930,27 @@ struct ui_functions: replay_functions {
 		for (size_t y = from_y; y != to_y; ++y) {
 			for (auto* sprite : ptr(st.sprites_on_tile_line.at(y))) {
 				if (s_hidden(sprite)) continue;
-				uint_fast32_t score = 0;
-				score |= sprite->elevation_level;
-				score <<= 13;
-				score |= sprite->elevation_level <= 4 ? sprite->position.y : 0;
-				score <<= 1;
-				score |= s_flag(sprite, sprite_t::flag_turret) ? 1 : 0;
-				sorted_sprites.emplace_back(score, sprite);
+				sorted_sprites.emplace_back(sprite_depth_order(sprite), sprite);
 			}
 		}
 
 		std::sort(sorted_sprites.begin(), sorted_sprites.end());
+		
+		for (auto uid : current_selection) {
+			auto* u = get_unit(uid);
+			if (!u) continue;
+			current_selection_sprites_set.at(u->sprite - st.sprites.data()) = u;
+			current_selection_sprites.push_back(u->sprite);
+		}
 
 		for (auto& v : sorted_sprites) {
 			draw_sprite(v.second, data, data_pitch);
 		}
 
+		for (auto* s : current_selection_sprites) {
+			current_selection_sprites_set.at(s - st.sprites.data()) = nullptr;
+		}
+		current_selection_sprites.clear();
 	}
 	
 	void fill_rectangle(uint8_t* data, size_t data_pitch, rect area, uint8_t index) {
@@ -684,7 +963,7 @@ struct ui_functions: replay_functions {
 		size_t pitch = data_pitch;
 		size_t from_y = area.from.y;
 		size_t to_y = area.to.y;
-		uint8_t* ptr = data + screen_width * from_y + area.from.x;
+		uint8_t* ptr = data + data_pitch * from_y + area.from.x;
 		for (size_t i = from_y; i != to_y; ++i) {
 			memset(ptr, index, width);
 			ptr += pitch;
@@ -692,14 +971,38 @@ struct ui_functions: replay_functions {
 	}
 	
 	void line_rectangle(uint8_t* data, size_t data_pitch, rect area, uint8_t index) {
+		if (area.from.x < 0) area.from.x = 0;
+		if (area.from.y < 0) area.from.y = 0;
+		if (area.to.x > (int)screen_width) area.to.x = screen_width;
+		if (area.to.y > (int)screen_height) area.to.y = screen_height;
+		if (area.from.x >= area.to.x || area.from.y >= area.to.y) return;
 		size_t width = area.to.x - area.from.x;
 		size_t height = area.to.y - area.from.y;
-		uint8_t* p = data + screen_width * (size_t)area.from.y + (size_t)area.from.x;
+		uint8_t* p = data + data_pitch * (size_t)area.from.y + (size_t)area.from.x;
 		memset(p, index, width);
 		memset(p + data_pitch * height, index, width);
 		for (size_t y = 0; y != height; ++y) {
 			p[data_pitch * y] = index;
 			p[data_pitch * y + width - 1] = index;
+		}
+	}
+	
+	void line_rectangle_rgba(uint32_t* data, size_t data_pitch, rect area, uint32_t color) {
+		if (area.from.x < 0) area.from.x = 0;
+		if (area.from.y < 0) area.from.y = 0;
+		if (area.to.x > (int)screen_width) area.to.x = screen_width;
+		if (area.to.y > (int)screen_height) area.to.y = screen_height;
+		if (area.from.x >= area.to.x || area.from.y >= area.to.y) return;
+		size_t width = area.to.x - area.from.x;
+		size_t height = area.to.y - area.from.y;
+		uint32_t* p = data + data_pitch * (size_t)area.from.y + (size_t)area.from.x;
+		for (size_t x = 0; x != width; ++x) {
+			p[x] = color;
+			p[height * data_pitch + x] = color;
+		}
+		for (size_t y = 0; y != height; ++y) {
+			p[data_pitch * y] = color;
+			p[data_pitch * y + width - 1] = color;
 		}
 	}
 	
@@ -737,9 +1040,9 @@ struct ui_functions: replay_functions {
 		fill_rectangle(data, data_pitch, area, 0);
 		line_rectangle(data, data_pitch, {area.from - xy(1, 1), area.to + xy(1, 1)}, 0);
 		
-		uint8_t* p = data + screen_width * (size_t)area.from.y + (size_t)area.from.x;
+		uint8_t* p = data + data_pitch * (size_t)area.from.y + (size_t)area.from.x;
 		
-		size_t pitch = screen_width - game_st.map_tile_width;
+		size_t pitch = data_pitch - game_st.map_tile_width;
 		for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 			for (size_t x = 0; x != game_st.map_tile_width; ++x) {
 				auto* images = &tileset_img.vx4.at(st.tiles_mega_tile_index[y * game_st.map_tile_width + x]).images[0];
@@ -854,17 +1157,13 @@ struct ui_functions: replay_functions {
 		for (auto* image : image_draw_queue) {
 			draw_new_image(image);
 		}
-//		//img.valkyrie_test[0]->blit(&*window_surface, 0, 0);
-//		img.valkyrie_test[8]->blit_scaled(&*window_surface, 100, 100, 54, 45);
-		
-//		auto* g = global_st.image_grp[(int)ImageTypes::IMAGEID_Valkyrie];
-//		log("valk is %d %d\n", g->width, g->height);
 	}
 	
 	fp8 game_speed = fp8::integer(1);
 
 	std::unique_ptr<native_window_drawing::surface> window_surface;
 	std::unique_ptr<native_window_drawing::surface> indexed_surface;
+	std::unique_ptr<native_window_drawing::surface> rgba_surface;
 	native_window_drawing::palette* palette = nullptr;
 	std::chrono::high_resolution_clock clock;
 	std::chrono::high_resolution_clock::time_point last_draw;
@@ -878,11 +1177,40 @@ struct ui_functions: replay_functions {
 		screen_height = height;
 		window_surface.reset();
 		indexed_surface.reset();
+		rgba_surface.reset();
+	}
+	
+	a_vector<unit_id> current_selection;
+	
+	bool current_selection_is_selected(unit_t* u) {
+		auto uid = get_unit_id(u);
+		return std::find(current_selection.begin(), current_selection.end(), uid) != current_selection.end();
+	}
+
+	void current_selection_add(unit_t* u) {
+		auto uid = get_unit_id(u);
+		if (std::find(current_selection.begin(), current_selection.end(), uid) != current_selection.end()) return;
+		current_selection.push_back(uid);
+	}
+
+	void current_selection_clear() {
+		current_selection.clear();
+	}
+	
+	void current_selection_remove(const unit_t* u) {
+		auto uid = get_unit_id(u);
+		auto i = std::find(current_selection.begin(), current_selection.end(), uid);
+		if (i != current_selection.end()) current_selection.erase(i);
 	}
 	
 	bool is_moving_minimap = false;
 	bool is_moving_replay_slider = false;
 	bool is_paused = false;
+	bool is_drag_selecting = false;
+	int drag_select_from_x = 0;
+	int drag_select_from_y = 0;
+	int drag_select_to_x = 0;
+	int drag_select_to_y = 0;
 	
 	void update() {
 		auto now = clock.now();
@@ -938,6 +1266,33 @@ struct ui_functions: replay_functions {
 				}
 			}
 		};
+		
+		auto end_drag_select = [&]() {
+			bool shift = wnd.get_key_state(225) || wnd.get_key_state(229);
+			if (drag_select_from_x > drag_select_to_x) std::swap(drag_select_from_x, drag_select_to_x);
+			if (drag_select_from_y > drag_select_to_y) std::swap(drag_select_from_y, drag_select_to_y);
+			if (drag_select_to_x - drag_select_from_x <= 4 || drag_select_to_y - drag_select_from_y <= 4) {
+				unit_t* u = select_get_unit_at(screen_pos + xy(drag_select_from_x, drag_select_from_y));
+				if (u) {
+					if (shift) {
+						if (current_selection_is_selected(u)) current_selection_remove(u);
+						else current_selection_add(u);
+					} else {
+						current_selection_clear();
+						current_selection_add(u);
+					}
+				}
+			} else {
+				if (!shift) current_selection_clear();
+				auto r = rect{{drag_select_from_x, drag_select_from_y}, {drag_select_to_x, drag_select_to_y}};
+				if (r.from.x > r.to.x) std::swap(r.from.x, r.to.x);
+				if (r.from.y > r.to.y) std::swap(r.from.y, r.to.y);
+				for (unit_t* u : find_units(translate_rect(r, screen_pos))) {
+					current_selection_add(u);
+				}
+			}
+			is_drag_selecting = false;
+		};
 	
 		native_window::event_t e;
 		while (wnd.peek_message(e)) {
@@ -952,20 +1307,36 @@ struct ui_functions: replay_functions {
 				if (e.button == 1) {
 					check_move_minimap(e);
 					check_move_replay_slider(e);
+					if (!is_moving_minimap && !is_moving_replay_slider) {
+						is_drag_selecting = true;
+						drag_select_from_x = e.mouse_x;
+						drag_select_from_y = e.mouse_y;
+						drag_select_to_x = e.mouse_x;
+						drag_select_to_y = e.mouse_y;
+					}
 				}
 				break;
 			case native_window::event_t::type_mouse_motion:
 				if (e.button_state & 1) {
-					check_move_minimap(e);
-					check_move_replay_slider(e);
+					if (is_moving_minimap) check_move_minimap(e);
+					if (is_moving_replay_slider) check_move_replay_slider(e);
+					if (is_drag_selecting) {
+						drag_select_to_x = e.mouse_x;
+						drag_select_to_y = e.mouse_y;
+					}
 				} else if (e.button_state & 4) {
 					screen_pos -= xy(e.mouse_xrel, e.mouse_yrel);
 				}
+				
+				if (is_drag_selecting && ~e.button_state & 1) end_drag_select();
 				break;
 			case native_window::event_t::type_mouse_button_up:
 				if (e.button == 1) {
 					if (is_moving_minimap) is_moving_minimap = false;
 					if (is_moving_replay_slider) is_moving_replay_slider = false;
+					if (is_drag_selecting) {
+						end_drag_select();
+					}
 				}
 				break;
 			case native_window::event_t::type_key_down:
@@ -996,8 +1367,9 @@ struct ui_functions: replay_functions {
 			window_surface = native_window_drawing::get_window_surface(&wnd);
 			indexed_surface = native_window_drawing::convert_to_8_bit_indexed(&*window_surface);
 			indexed_surface->set_palette(palette);
+			rgba_surface = native_window_drawing::create_rgba_surface(window_surface->w, window_surface->h);
 			
-			screen_width = indexed_surface->pitch;
+			//screen_width = indexed_surface->pitch;
 		}
 		
 		auto input_poll_speed = std::chrono::milliseconds(12);
@@ -1049,6 +1421,21 @@ struct ui_functions: replay_functions {
 		indexed_surface->blit(&*window_surface, 0, 0);
 		
 		draw_image_queue();
+		
+		if (is_drag_selecting) {
+			rgba_surface->fill(0, 0, 0, 0);
+			uint32_t* data = (uint32_t*)rgba_surface->lock();
+			if (is_drag_selecting) {
+				auto r = rect{{drag_select_from_x, drag_select_from_y}, {drag_select_to_x, drag_select_to_y}};
+				if (r.from.x > r.to.x) std::swap(r.from.x, r.to.x);
+				if (r.from.y > r.to.y) std::swap(r.from.y, r.to.y);
+				
+				line_rectangle_rgba(data, rgba_surface->pitch / 4, r, 0xff18fc10);
+			}
+			rgba_surface->unlock();
+			
+			rgba_surface->blit(&*window_surface, 0, 0);
+		}
 		
 		wnd.update_surface();
 	}
@@ -1239,6 +1626,7 @@ extern "C" void ui_resize(int width, int height) {
 	if (!m) return;
 	m->ui.window_surface.reset();
 	m->ui.indexed_surface.reset();
+	m->ui.rgba_surface.reset();
 	m->ui.wnd.destroy();
 	m->ui.wnd.create("test", 0, 0, width, height);
 	m->ui.resize(width, height);
@@ -1474,7 +1862,7 @@ int main() {
 
 	using namespace bwgame;
 	
-	log("v10\n");
+	log("v11\n");
 
 	size_t screen_width = 1280;
 	size_t screen_height = 800;
@@ -1500,7 +1888,7 @@ int main() {
 	m.load_all_image_data(load_data_file);
 
 #ifndef EMSCRIPTEN
-	ui.load_replay_file("maps/zzvalk.rep");
+	ui.load_replay_file("maps/zz24.rep");
 //	game_load_functions funcs(m.ui.st);
 //	funcs.reset();
 #endif

@@ -238,6 +238,9 @@ struct sdl_surface: surface {
 		SDL_Rect r{x, y, w, h};
 		SDL_BlitScaled(surf, nullptr, s, &r);
 	}
+	virtual void fill(int r, int g, int b, int a) override {
+		SDL_FillRect(surf, nullptr, SDL_MapRGBA(surf->format, r, g, b, a));
+	}
 };
 
 std::unique_ptr<surface> create_rgba_surface(int width, int height) {

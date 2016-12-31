@@ -87,7 +87,8 @@ struct unit_type_t {
 		flag_flying_building = 0x20,
 		flag_hero = 0x40,
 		flag_regens_hp = 0x80,
-
+		flag_100 = 0x100,
+		
 		flag_two_units_in_one_egg = 0x400,
 		flag_powerup = 0x800,
 		flag_resource_depot = 0x1000,

@@ -35,6 +35,7 @@ namespace native_window_drawing {
 		virtual void unlock() = 0;
 		virtual void blit(surface* dst, int x, int y) = 0;
 		virtual void blit_scaled(surface* dst, int x, int y, int w, int h) = 0;
+		virtual void fill(int r, int g, int b, int a) = 0;
 	};
 	
 	std::unique_ptr<surface> create_rgba_surface(int width, int height);
