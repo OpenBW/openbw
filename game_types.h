@@ -616,7 +616,8 @@ struct unit_t: flingy_t {
 				unit_t* exit;
 			} nydus;
 			struct {
-				std::pair<unit_t*, unit_t*> psi_link;
+				sprite_t* psi_field_sprite;
+				std::pair<unit_t*, unit_t*> psionic_matrix_link;
 			} pylon;
 			struct {
 				unit_t* nuke;

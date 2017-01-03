@@ -89,7 +89,7 @@ struct action_functions: state_functions {
 		return *i;
 	}
 
-	virtual void on_unit_deselect(unit_t* u) override final {
+	virtual void on_unit_deselect(unit_t* u) override {
 		for (size_t i = 0; i != 8; ++i) {
 			auto& selection = action_st.selection.at(i);
 			auto it = std::find(selection.begin(), selection.end(), u);
@@ -892,6 +892,42 @@ struct action_functions: state_functions {
 		cancel_building_unit(u);
 		return true;
 	}
+	
+	bool action_morph_archon(int owner) {
+		auto sel = selected_units(owner);
+		auto i = sel.begin();
+		if (i == sel.end()) return false;
+		if (!unit_can_use_tech(*i, get_tech_type(TechTypes::Archon_Warp), owner)) return false;
+		bool retval = false;
+		static_vector<unit_t*, 12> units;
+		for (;i != sel.end(); ++i) {
+			unit_t* u = *i;
+			if (unit_is(u, UnitTypes::Protoss_High_Templar)) units.push_back(u);
+		}
+		if (units.size() < 2) return false;
+		for (size_t index = 0; index != units.size(); ++index) {
+			unit_t* u = units[index];
+			if (!u) continue;
+			int nearest_distance = std::numeric_limits<int>::max();
+			unit_t* nearest_unit = nullptr;
+			for (size_t index2 = index + 1; index2 != units.size(); ++index2) {
+				unit_t* u2 = units[index2];
+				if (!u2) continue;
+				xy relpos = u->sprite->position - u2->sprite->position;
+				int d = relpos.x * relpos.x + relpos.y * relpos.y;
+				if (d < nearest_distance) {
+					units[index2] = nearest_unit;
+					nearest_distance = d;
+					nearest_unit = u2;
+				}
+			}
+			if (!nearest_unit) continue;
+			set_unit_order(u, get_order_type(Orders::ArchonWarp), nearest_unit);
+			set_unit_order(nearest_unit, get_order_type(Orders::ArchonWarp), u);
+			retval = true;
+		}
+		return retval;
+	}
 
 	template<typename reader_T>
 	bool read_action_select(int owner, reader_T&& r) {
@@ -1156,6 +1192,11 @@ struct action_functions: state_functions {
 	bool read_action_cancel_morph(int owner, reader_T&& r) {
 		return action_cancel_morph(owner);
 	}
+	
+	template<typename reader_T>
+	bool read_action_morph_archon(int owner, reader_T&& r) {
+		return action_morph_archon(owner);
+	}
 
 	virtual void on_action(int owner, int action) {
 	}
@@ -1214,6 +1255,8 @@ struct action_functions: state_functions {
 			return read_action_unload_all(owner, r);
 		case 41:
 			return read_action_unload(owner, r);
+		case 42:
+			return read_action_morph_archon(owner, r);
 		case 43:
 			return read_action_hold_position(owner, r);
 		case 44:

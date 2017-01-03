@@ -69,6 +69,14 @@ static const xy hit_near_target_positions[14] = {
 	{-50, 15}, {54, 13}, {-11, 53}, {-15, 9}, {19, -50}, {17, -8}
 };
 
+static const bool psi_field_mask[5][8] = {
+	{ 1, 1, 1, 1, 1, 1, 1, 1 },
+	{ 1, 1, 1, 1, 1, 1, 1, 1 },
+	{ 1, 1, 1, 1, 1, 1, 1, 0 },
+	{ 1, 1, 1, 1, 1, 1, 0, 0 },
+	{ 1, 1, 1, 0, 0, 0, 0, 0 }
+};
+
 // Broodwar linked lists insert new elements between the first and second entry.
 template<typename cont_T, typename T>
 static void bw_insert_list(cont_T& cont, T& v) {
@@ -252,6 +260,16 @@ struct state_base_copyable {
 	size_t recent_lurker_hit_current_index;
 
 	creep_life_t creep_life;
+	bool update_psionic_matrix;
+};
+
+struct psionic_matrix_link_f {
+	auto* operator()(unit_t* ptr) {
+		return &ptr->building.pylon.psionic_matrix_link;
+	}
+	auto* operator()(const unit_t* ptr) {
+		return &ptr->building.pylon.psionic_matrix_link;
+	}
 };
 
 struct state_base_non_copyable {
@@ -270,6 +288,7 @@ struct state_base_non_copyable {
 
 	std::array<intrusive_list<unit_t, void, &unit_t::player_units_link>, 12> player_units;
 	intrusive_list<unit_t, void, &unit_t::cloaked_unit_link> cloaked_units;
+	intrusive_list<unit_t, psionic_matrix_link_f> psionic_matrix_units;
 
 	a_vector<unit_t> units = a_vector<unit_t>(1700);
 
@@ -940,8 +959,8 @@ struct state_functions {
 	void disable_effect_end(unit_t* u, ImageTypes first, ImageTypes last) {
 		bool still_disabled = unit_is_disabled(u);
 		if (u->subunit && !still_disabled) {
-			u_unset_status_flag(u, unit_t::status_flag_disabled);
-			set_unit_order(u, u->unit_type->return_to_idle);
+			u_unset_status_flag(u->subunit, unit_t::status_flag_disabled);
+			set_unit_order(u->subunit, u->subunit->unit_type->return_to_idle);
 		}
 		image_t* image = find_image(u->sprite, first, last);
 		if (!image && u->subunit) image = find_image(u->subunit->sprite, first, last);
@@ -2390,6 +2409,22 @@ struct state_functions {
 		}
 		return nullptr;
 	}
+	
+	bool is_in_psionic_matrix_range(xy rel) const {
+		unsigned x = std::abs(rel.x);
+		unsigned y = std::abs(rel.y);
+		if (x >= 256u) return false;
+		if (y >= 160u) return false;
+		return psi_field_mask[y / 32u][x / 32u];
+	}
+	
+	bool is_in_psionic_matrix(int owner, xy pos) const {
+		for (const unit_t* u : ptr(st.psionic_matrix_units)) {
+			if (u->owner != owner) continue;
+			if (is_in_psionic_matrix_range(pos - u->sprite->position)) return true;
+		}
+		return false;
+	}
 
 	bool can_place_building(const unit_t* u, int owner, const unit_type_t* unit_type, xy pos, bool check_undetected_units, bool check_invisible_tiles) const {
 		xy_t<size_t> tile_pos;
@@ -2426,7 +2461,7 @@ struct state_functions {
 			return get_building_at_center_position(gas_pos, get_unit_type(UnitTypes::Resource_Vespene_Geyser)) != nullptr;
 		}
 		if (ut_requires_psionic_matrix(unit_type)) {
-			xcept("can_place_building: fixme psi matrix");
+			if (!is_in_psionic_matrix(owner, pos)) return false;
 		}
 		bool is_nydus_exit = u && unit_is_nydus(u);
 		if (ut_requires_creep(unit_type) || is_nydus_exit) {
@@ -2795,6 +2830,7 @@ struct state_functions {
 				n->order_target.unit = nullptr;
 			}
 		}
+		if (unit_race(u) == race::protoss && u_grounded_building(u)) st.update_psionic_matrix = true;
 		if (u->subunit) set_unit_owner(u->subunit, owner, increment_score);
 		update_unit_speed_upgrades(u);
 		if (ut_worker(u) && u->worker.gather_target && unit_is(u->worker.gather_target, UnitTypes::Powerup_Flag)) {
@@ -3668,6 +3704,26 @@ struct state_functions {
 		apply_unit_effects(to);
 		update_unit_speed(to);
 	}
+	
+	void merge_status_effects(unit_t* to, unit_t* from) {
+		to->defensive_matrix_hp = std::max(to->defensive_matrix_hp, from->defensive_matrix_hp);
+		to->defensive_matrix_timer = std::max(to->defensive_matrix_timer, from->defensive_matrix_timer);
+		to->stim_timer = std::max(to->stim_timer, from->stim_timer);
+		to->ensnare_timer = std::max(to->ensnare_timer, from->ensnare_timer);
+		to->lockdown_timer = std::max(to->lockdown_timer, from->lockdown_timer);
+		to->stasis_timer = std::max(to->stasis_timer, from->stasis_timer);
+		to->plague_timer = std::max(to->plague_timer, from->plague_timer);
+		if (from->irradiate_timer > from->irradiate_timer) {
+			to->irradiate_timer = from->irradiate_timer;
+			to->irradiated_by = from->irradiated_by;
+			to->irradiate_owner = from->irradiate_owner;
+		}
+		to->parasite_flags |= from->parasite_flags;
+		to->blinded_by |= from->blinded_by;
+		to->maelstrom_timer = std::max(from->maelstrom_timer, to->maelstrom_timer);
+		to->acid_spore_count = from->acid_spore_count;
+		to->acid_spore_time = from->acid_spore_time;
+	}
 
 	bool creep_is_being_sustained(xy_t<size_t> tile_pos) {
 		xy pos((int)tile_pos.x * 32 + 16, (int)tile_pos.y * 32 + 16);
@@ -3864,6 +3920,7 @@ struct state_functions {
 		if (unit_is_ghost(a) != unit_is_ghost(b)) return false;
 		if (ut_resource(a) != ut_resource(b)) return false;
 		if (unit_is_nydus(a) != unit_is_nydus(b)) return false;
+		if (unit_is(a, UnitTypes::Protoss_Pylon) != unit_is(b, UnitTypes::Protoss_Pylon)) return false;
 		if (unit_is(a, UnitTypes::Terran_Nuclear_Silo) != unit_is(b, UnitTypes::Terran_Nuclear_Silo)) return false;
 		if (ut_powerup(a) != ut_powerup(b)) return false;
 		if (unit_is_hatchery(a) != unit_is_hatchery(b)) return false;
@@ -6554,6 +6611,203 @@ struct state_functions {
 		}
 		if (!u->order_queue.empty()) activate_next_order(u);
 	}
+	
+	void order_PlaceProtossBuilding(unit_t* u) {
+		if (u->order_state == 0) {
+			set_unit_move_target(u, u->order_target.pos);
+			set_next_target_waypoint(u, u->order_target.pos);
+			u->order_state = 1;
+		} else if (u->order_state == 1 || u->order_state == 2) {
+			if (u->build_queue.empty()) xcept("order_PlaceProtossBuilding: empty build queue");
+			const unit_type_t* build_type = u->build_queue.front();
+			if (u->order_state == 2 && u_movement_flag(u, 2)) return;
+			int d = 70;
+			if (unit_is(build_type, UnitTypes::Protoss_Assimilator)) d += 18;
+			if (xy_length(to_xy_fp8(u->order_target.pos) - u->exact_position).integer_part() <= d) {
+				if (u->order_state == 1) {
+					stop_unit(u);
+					set_next_target_waypoint(u, u->move_target.pos);
+					u->order_state = 2;
+				} else {
+					auto can_build = [&]() {
+						if (!player_has_supply_and_resources_for(u->owner, build_type, true)) return false;
+						if (!can_place_building(u, u->owner, build_type, u->order_target.pos, true, false)) return false;
+						return true;
+					};
+					if (can_build()) {
+						st.current_minerals[u->owner] -= build_type->mineral_cost;
+						st.current_gas[u->owner] -= build_type->gas_cost;
+						unit_t* build_unit;
+						if (build_type->id == UnitTypes::Protoss_Assimilator) build_unit = build_refinery(u, build_type);
+						else build_unit = create_unit(build_type, u->order_target.pos, u->owner);
+						u->build_queue.erase(u->build_queue.begin());
+						if (build_unit) {
+							replace_sprite_images(build_unit->sprite, get_image_type(ImageTypes::IMAGEID_Warp_Anchor), 0_dir);
+							if (unit_is(build_type, UnitTypes::Protoss_Assimilator)) create_image(get_image_type(ImageTypes::IMAGEID_Vespene_Geyser), build_unit->sprite, xy(), image_order_below);
+							set_unit_order(build_unit, get_order_type(Orders::IncompleteWarping));
+							u->order_target.unit = build_unit;
+							u->order_state = 3;
+							// todo: callback for sound
+						} else {
+							display_last_error_for_player(u->owner);
+							order_done(u);
+						}
+					} else {
+						order_done(u);
+					}
+				}
+			} else {
+				if (unit_is_at_move_target(u)) {
+					set_unit_move_target(u, u->order_target.pos);
+					set_next_target_waypoint(u, u->order_target.pos);
+				}
+			}
+		} else if (u->order_state == 3) {
+			if (u->order_target.unit && unit_is(u->order_target.unit, UnitTypes::Protoss_Assimilator) && u->order_queue.empty()) {
+				set_unit_order(u, get_order_type(Orders::WaitForGas), u->order_target.unit);
+				sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
+			} else {
+				order_done(u);
+			}
+		}
+	}
+	
+	void order_IncompleteWarping(unit_t* u) {
+		if (u->order_state == 0) {
+			if (u->remaining_build_time == 0) {
+				sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
+				// todo: callback for sound
+				u->order_state = 1;
+			}
+		} else if (u->order_state == 1) {
+			if (u->order_signal & 1) {
+				u->order_signal &= ~1;
+				replace_sprite_images(u->sprite, u->sprite->sprite_type->image, 0_dir);
+				
+				iscript_set_script(u->sprite->main_image, 193);
+				iscript_run_anim(u->sprite->main_image, iscript_anims::Init);
+				iscript_set_script(u->sprite->main_image, u->sprite->main_image->image_type->iscript_id);
+				set_image_modifier(u->sprite->main_image, 12);
+				iscript_execute(u->sprite->main_image, u->sprite->main_image->iscript_state);
+				
+				u->order_state = 2;
+			}
+			return;
+		} else if (u->order_state == 2) {
+			if (u->order_signal & 1) {
+				u->order_signal &= ~1;
+				replace_sprite_images(u->sprite, u->sprite->sprite_type->image, 0_dir);
+				sprite_run_anim(u->sprite, iscript_anims::WarpIn);
+				u->order_state = 3;
+			}
+			return;
+		} else if (u->order_state == 3) {
+			if (~u->order_signal & 1) return;
+			u->order_signal &= ~1;
+			finish_building_unit(u);
+			complete_unit(u);
+			check_unit_collision(u);
+			if (u_disabled(u)) {
+				sprite_run_anim(u->sprite, iscript_anims::Disable);
+			}
+		}
+		if (u->remaining_build_time) --u->remaining_build_time;
+		set_unit_hp(u, u->hp + u->hp_construction_rate);
+		set_unit_shield_points(u, u->shield_points + u->shield_construction_rate);
+	}
+	
+	void order_InitializePsiProvider(unit_t* u) {
+		if (!unit_is(u, UnitTypes::Protoss_Pylon)) xcept("order_InitializePsiProvider: unit is not a pylon");
+		if (!u->building.pylon.psionic_matrix_link.first) {
+			st.psionic_matrix_units.push_front(*u);
+			sprite_t* s = create_sprite(get_sprite_type(SpriteTypes::SPRITEID_Psi_Field_Right_Upper), u->sprite->position, 0);
+			u->building.pylon.psi_field_sprite = s;
+			if (s) {
+				s->flags |= sprite_t::flag_hidden;
+				set_sprite_visibility(s, 0);
+			}
+			st.update_psionic_matrix = true;
+		}
+		set_unit_order(u, u->unit_type->return_to_idle);
+		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+		order_done(u);
+	}
+	
+	void order_InitializeArbiter(unit_t* u) {
+		if (u->order_queue.empty()) {
+			set_unit_order(u, get_unit_type(UnitTypes::Protoss_Arbiter)->return_to_idle);
+		}
+		if (!u_hallucination(u)) {
+			set_secondary_order(u, get_order_type(Orders::CloakNearbyUnits));
+		}
+		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+		order_done(u);
+	}
+	
+	void order_ArchonWarp(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		if (!target || target->owner != u->owner || target->order_type->id != Orders::ArchonWarp || target->order_target.unit != u) {
+			stop_unit(u);
+			set_next_target_waypoint(u, u->move_target.pos);
+			order_done(u);
+			return;
+		}
+		if (u_ground_unit(u)) {
+			if (unit_target_in_range(u, target, u->next_speed.integer_part() * 2)) {
+				u_unset_status_flag(u, unit_t::status_flag_ground_unit);
+				queue_order_front(u, get_order_type(Orders::ResetCollision), {});
+			}
+		}
+		int d = xy_length(u->sprite->position - target->sprite->position);
+		if (d <= 2) {
+			merge_status_effects(u, target);
+			morph_unit(u, get_unit_type(UnitTypes::Protoss_Archon));
+			u->sprite->flags &= ~sprite_t::flag_iscript_nobrk;
+			sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
+			u->kill_count += target->kill_count;
+			target->user_action_flags |= 4;
+			kill_unit(target);
+			u_unset_status_flag(u, unit_t::status_flag_can_move);
+			reset_movement_state(u);
+			set_unit_order(u, get_order_type(Orders::CompletingArchonSummon));
+		} else {
+			if (u->order_state && unit_is_at_move_target(u) && u_immovable(u)) {
+				stop_unit(u);
+				set_next_target_waypoint(u, u->move_target.pos);
+				order_done(u);
+			} else {
+				u->order_state = 1;
+				if (u->move_target_timer == 0) {
+					if (d <= 10) {
+						set_unit_move_target(u, (u->sprite->position + target->sprite->position) / 2);
+					} else {
+						set_unit_move_target(u, target->sprite->position);
+					}
+				}
+			}
+		}
+	}
+	
+	void order_CompletingArchonSummon(unit_t* u) {
+		if (u->order_state == 0) {
+			if (u->remaining_build_time) --u->remaining_build_time;
+			else {
+				u->sprite->flags &= ~sprite_t::flag_iscript_nobrk;
+				sprite_run_anim(u->sprite, iscript_anims::Init);
+				u->order_state = 1;
+			}
+		} else if (u->order_state == 1) {
+			if (u->order_signal & 4) {
+				u->order_signal &= ~4;
+				u_set_status_flag(u, unit_t::status_flag_can_move);
+				reset_movement_state(u);
+				// todo: callback for sound
+				set_queued_order(u, false, u->unit_type->human_ai_idle, {});
+				u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+				order_done(u);
+			}
+		}
+	}
 
 	void execute_main_order(unit_t* u) {
 		switch (u->order_type->id) {
@@ -6561,7 +6815,7 @@ struct state_functions {
 			order_Die(u);
 			return;
 		case Orders::IncompleteWarping:
-			xcept("IncompleteWarping");
+			order_IncompleteWarping(u);
 			return;
 		case Orders::NukeTrack:
 			order_NukeTrack(u);
@@ -6592,7 +6846,7 @@ struct state_functions {
 			order_PlaceBuilding(u);
 			break;
 		case Orders::PlaceProtossBuilding:
-			xcept("PlaceProtossBuilding");
+			order_PlaceProtossBuilding(u);
 			break;
 		case Orders::ConstructingBuilding:
 			order_ConstructingBuilding(u);
@@ -6646,16 +6900,16 @@ struct state_functions {
 			order_Unsieging(u);
 			break;
 		case Orders::ArchonWarp:
-			xcept("ArchonWarp");
+			order_ArchonWarp(u);
 			break;
 		case Orders::CompletingArchonSummon:
-			xcept("CompletingArchonSummon");
+			order_CompletingArchonSummon(u);
 			break;
 		case Orders::NukeTrain:
 			order_NukeTrain(u);
 			break;
 		case Orders::InitializeArbiter:
-			xcept("InitializeArbiter");
+			order_InitializeArbiter(u);
 			break;
 		case Orders::ResetCollision:
 			order_ResetCollision(u);
@@ -6761,9 +7015,6 @@ struct state_functions {
 			break;
 		case Orders::InfestingCommandCenter:
 			order_InfestingCommandCenter(u);
-			break;
-		case Orders::PlaceProtossBuilding:
-			xcept("PlaceProtossBuilding");
 			break;
 		case Orders::MoveToRepair:
 			order_MoveToTargetOrder(u);
@@ -6903,9 +7154,6 @@ struct state_functions {
 		case Orders::InitCreepGrowth:
 			order_InitCreepGrowth(u);
 			break;
-		case Orders::CompletingArchonSummon:
-			xcept("CompletingArchonSummon");
-			break;
 		case Orders::HoldPosition:
 			order_HoldPosition(u);
 			break;
@@ -6960,9 +7208,6 @@ struct state_functions {
 		case Orders::CastNuclearStrike:
 			order_CastNuclearStrike(u);
 			break;
-		case Orders::CloakNearbyUnits:
-			xcept("CloakNearbyUnits");
-			break;
 		case Orders::PlaceMine:
 			order_PlaceMine(u);
 			break;
@@ -6977,6 +7222,9 @@ struct state_functions {
 			break;
 		case Orders::SuicideHoldPosition:
 			order_SuicideHoldPosition(u);
+			break;
+		case Orders::CastRecall:
+			xcept("CastRecall");
 			break;
 		case Orders::Teleport:
 			xcept("Teleport");
@@ -7040,6 +7288,9 @@ struct state_functions {
 			break;
 		case Orders::ComputerReturn:
 			xcept("ComputerReturn");
+			break;
+		case Orders::InitializePsiProvider:
+			order_InitializePsiProvider(u);
 			break;
 		case Orders::HiddenGun:
 			xcept("HiddenGun");
@@ -7232,6 +7483,29 @@ struct state_functions {
 			else set_secondary_order(u, get_order_type(Orders::Nothing));
 		}
 	}
+	
+	void secondary_order_CloakNearbyUnits(unit_t* u) {
+		auto* w = unit_air_weapon(u);
+		if (!w) xcept("secondary_order_CloakNearbyUnits: no air weapon");
+		int range = weapon_max_range(u, w);
+		auto area = square_at(u->sprite->position, range);
+		if (area.from.x < 0) area.from.x = 0;
+		else if (area.from.x > (int)game_st.map_width) area.from.x = (int)game_st.map_width;
+		if (area.to.x < 0) area.to.x = 0;
+		else if (area.to.x > (int)game_st.map_height) area.to.x = (int)game_st.map_height;
+		for (unit_t* target : find_units_noexpand(area)) {
+			if (target->owner != u->owner) continue;
+			if (ut_building(target)) continue;
+			if (unit_is_arbiter(target)) continue;
+			if (u_hallucination(target)) continue;
+			if (ut_powerup(target)) continue;
+			if (unit_is(target, UnitTypes::Terran_Nuclear_Missile)) continue;
+			if (target->order_type->id == Orders::WarpIn) continue;
+			if (!unit_target_in_range(u, target, range)) continue;
+			set_unit_cloaked(target);
+			if (!u_flag_800(target)) u_set_status_flag(target, unit_t::status_flag_800);
+		}
+	}
 
 	void execute_secondary_order(unit_t* u) {
 		if (u->secondary_order_type->id == Orders::Hallucination2) {
@@ -7267,7 +7541,7 @@ struct state_functions {
 			secondary_order_Decloak(u);
 			break;
 		case Orders::CloakNearbyUnits:
-			xcept("CloakNearbyUnits");
+			secondary_order_CloakNearbyUnits(u);
 			break;
 		default:
 			break;
@@ -9718,6 +9992,7 @@ struct state_functions {
 		if (is_moving_along_path(u)) return true;
 		if (!u_ground_unit(u)) {
 			set_unit_move_target(u, to);
+			free_path(u);
 			u->path = create_single_step_path(u->sprite->position, to);
 			if (!u->path) return false;
 			return true;
@@ -10186,7 +10461,7 @@ struct state_functions {
 				u->terrain_no_collision_bounds = {};
 				return true;
 			} else {
-				u->status_flags |= unit_t::status_flag_collision;
+				u_set_status_flag(u, unit_t::status_flag_collision);
 				return false;
 			}
 		};
@@ -11594,6 +11869,30 @@ struct state_functions {
 			}
 		}
 	}
+	
+	void update_psionic_matrix() {
+		st.update_psionic_matrix = false;
+		for (unit_t* u : ptr(st.visible_units)) {
+			if (!u_grounded_building(u)) continue;
+			if (unit_race(u) != race::protoss) continue;
+			if (st.players[u->owner].controller == player_t::controller_rescue_passive) continue;
+			if (!ut_requires_psionic_matrix(u)) continue;
+			bool was_disabled = u_disabled(u);
+			if (is_in_psionic_matrix(u->owner, u->sprite->position)) {
+				u_unset_status_flag(u, unit_t::status_flag_disabled);
+				if (u_completed(u) && was_disabled) {
+					sprite_run_anim(u->sprite, iscript_anims::Enable);
+					if (unit_is_building_protoss_thing(u) || unit_is_upgrading(u)) sprite_run_anim(u->sprite, iscript_anims::IsWorking);
+				}
+			} else {
+				u_set_status_flag(u, unit_t::status_flag_disabled);
+				iscript_run_to_idle(u);
+				if (u_completed(u) && !was_disabled) {
+					sprite_run_anim(u->sprite, iscript_anims::Disable);
+				}
+			}
+		}
+	}
 
 	void update_dead_unit(unit_t* u) {
 
@@ -11715,14 +12014,14 @@ struct state_functions {
 				u_unset_status_flag(u, unit_t::status_flag_800);
 				decloak_unit(u);
 			} else {
-				if (!u_burrowed(u) && u->secondary_order_type->id != Orders::Cloak && u->cloak_counter == 1 && u_flag_800(u)) {
+				if (!u_burrowed(u) && u->secondary_order_type->id == Orders::Cloak && u->cloak_counter == 1 && u_flag_800(u)) {
 					u_unset_status_flag(u, unit_t::status_flag_800);
 				}
 				if (!u_requires_detector(u)) cloak_unit(u);
 			}
 		}
 
-		// update_psi()
+		if (st.update_psionic_matrix) update_psionic_matrix();
 
 		st.recent_lurker_hit_current_index = (st.recent_lurker_hit_current_index + 1) % st.recent_lurker_hits.size();
 		st.recent_lurker_hits[st.recent_lurker_hit_current_index].clear();
@@ -11999,8 +12298,8 @@ struct state_functions {
 		return map_pos;
 	}
 
-	xy get_image_lo_offset(const image_t* image, size_t lo_index, size_t offset_index) const {
-		size_t frame = image->frame_index;
+	xy get_image_lo_offset(const image_t* image, size_t lo_index, size_t offset_index, bool use_frame_index_offset = false) const {
+		size_t frame = use_frame_index_offset ? image->frame_index_offset : image->frame_index;
 		auto& lo_offsets = global_st.image_lo_offsets.at((size_t)image->image_type->id);
 		if ((size_t)lo_index >= lo_offsets.size()) xcept("invalid lo index %d\n", lo_index);
 		auto& frame_offsets = *lo_offsets[lo_index];
@@ -12354,9 +12653,9 @@ struct state_functions {
 		unit_deal_damage(target, damage, source_unit, source_owner, weapon->id != WeaponTypes::Irradiate);
 		if (shield_damage != 0_fp8) {
 			target->shield_points -= shield_damage;
-			if (weapon->damage_type == weapon_type_t::damage_type_explosive && target->shield_points != 0_fp8) {
+			if (weapon->damage_type != weapon_type_t::damage_type_none && target->shield_points != 0_fp8) {
 				size_t index = (direction_index(heading) - 124) / 8 % 32;
-				xy offset = get_image_lo_offset(target->sprite->main_image, 5, index);
+				xy offset = get_image_lo_offset(target->sprite->main_image, 5, index, true);
 				auto* image = create_image(get_image_type(ImageTypes::IMAGEID_Shield_Overlay), target->sprite, offset, image_order_above);
 				if (image) set_image_heading_by_index(image, index);
 			}
@@ -12619,6 +12918,30 @@ struct state_functions {
 	void parasite_unit(unit_t* u, int owner) {
 		u->parasite_flags |= 1 << owner;
 	}
+	
+	void stasis_unit(unit_t* u) {
+		if (u->stasis_timer == 0) {
+			create_sized_image(u, ImageTypes::IMAGEID_Stasis_Field_Small);
+			u_set_status_flag(u, unit_t::status_flag_invincible);
+		}
+		if (u->stasis_timer < 131) u->stasis_timer = 131;
+		set_unit_disabled(u);
+	}
+	
+	void stasis_field(xy pos, unit_t* source_unit) {
+		thingy_t* t = create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Stasis_Field_Hit), pos, 0);
+		if (t) {
+			t->sprite->elevation_level = 17;
+			if (!us_hidden(t)) set_sprite_visibility(t->sprite, tile_visibility(t->sprite->position));
+		}
+		for (unit_t* target : find_units_noexpand(square_at(pos, 48))) {
+			if (target == source_unit) continue;
+			if (u_invincible(target)) continue;
+			if (u_burrowed(target)) continue;
+			if (ut_building(target)) continue;
+			stasis_unit(target);
+		}
+	}
 
 	void bullet_hit(bullet_t* b) {
 		switch (b->weapon_type->hit_type) {
@@ -12692,6 +13015,9 @@ struct state_functions {
 		case weapon_type_t::hit_type_plague:
 			plague(b->bullet_target_pos, b->bullet_owner_unit);
 			break;
+		case weapon_type_t::hit_type_stasis_field:
+			if (b->bullet_target_pos != xy()) stasis_field(b->bullet_target_pos, b->bullet_owner_unit);
+			break;
 		case weapon_type_t::hit_type_dark_swarm:
 			dark_swarm(b->bullet_target_pos, b->owner);
 			break;
@@ -12757,6 +13083,10 @@ struct state_functions {
 		case weapon_type_t::bullet_type_follow_target:
 			b->bullet_state = bullet_t::state_follow;
 			sprite_run_anim(b->sprite, iscript_anims::GndAttkInit);
+			break;
+		case weapon_type_t::bullet_type_persist_at_target_pos:
+			b->bullet_state = bullet_t::state_damage_over_time;
+			sprite_run_anim(b->sprite, iscript_anims::SpecialState2);
 			break;
 		case weapon_type_t::bullet_type_bounce:
 			b->bullet_state = bullet_t::state_bounce;
@@ -12843,6 +13173,15 @@ struct state_functions {
 		}
 		return false;
 	}
+	
+	bool bullet_state_damage_over_time(bullet_t* b, execute_movement_struct& ems) {
+		if (b->remaining_time-- == 0) {
+			bullet_kill(b);
+		} else {
+			if (b->remaining_time % 7 == 0) bullet_hit(b);
+		}
+		return false;
+	}
 
 	void bullet_execute(bullet_t* b) {
 		execute_movement_struct ems;
@@ -12860,6 +13199,9 @@ struct state_functions {
 				break;
 			case bullet_t::state_bounce:
 				cont = bullet_state_bounce(b, ems);
+				break;
+			case bullet_t::state_damage_over_time:
+				cont = bullet_state_damage_over_time(b, ems);
 				break;
 			case bullet_t::state_dying:
 				cont = bullet_state_dying(b, ems);
@@ -13622,7 +13964,12 @@ struct state_functions {
 					p = program_data + a;
 				}
 				break;
-
+			case opc_warpoverlay:
+				a = *p++;
+				if (noop) break;
+				image->modifier_data1 = a & 0xff;
+				image->modifier_data2 = (a >> 8) & 0xff;
+				break;
 			case opc_orderdone:
 				a = *p++;
 				if (noop) break;
@@ -13696,13 +14043,25 @@ struct state_functions {
 			}
 		}
 	}
+	
+	void image_update_warpin(image_t* image) {
+		if (image->modifier_data2) --image->modifier_data2;
+		else {
+			image->modifier_data2 = 2;
+			if (image->modifier_data1 < 63) ++image->modifier_data1;
+			else {
+				iscript_run_anim(image, iscript_anims::Death);
+				if (iscript_flingy) iscript_flingy->order_signal |= 1;
+			}
+		}
+	}
 
 	bool iscript_execute_sprite(sprite_t* sprite) {
 		for (auto i = sprite->images.begin(); i != sprite->images.end();) {
 			image_t* image = &*i++;
 			if (image->modifier == 2 || image->modifier == 5) image_update_cloak(image);
 			else if (image->modifier == 4 || image->modifier == 7) image_update_decloak(image);
-			else if (image->modifier == 17) xcept("iscript_execute_sprite: fixme");
+			else if (image->modifier == 17) image_update_warpin(image);
 			bool is_main_image = image == sprite->main_image;
 			bool destroyed = !iscript_execute(image, image->iscript_state, false, nullptr, true);
 			if (is_main_image && destroyed && !sprite->images.empty()) {
@@ -14124,11 +14483,11 @@ struct state_functions {
 			int begin_x = area.from.x;
 			int end_x = area.to.x;
 			if (expand) {
-				if (end_x - begin_x <= funcs.game_st.max_unit_width) {
+				if (end_x - begin_x + 1 < funcs.game_st.max_unit_width) {
 					end_x = begin_x + funcs.game_st.max_unit_width - 1;
 					++this->area.to.x;
 				}
-				if (area.to.y - area.from.y <= funcs.game_st.max_unit_height) {
+				if (area.to.y - area.from.y + 1 < funcs.game_st.max_unit_height) {
 					++this->area.to.y;
 				}
 			}
@@ -14399,6 +14758,12 @@ struct state_functions {
 			building_union_used = true;
 			u->building.nydus.exit = nullptr;
 		}
+		if (unit_is(u, UnitTypes::Protoss_Pylon)) {
+			if (building_union_used) xcept("building union already used");
+			building_union_used = true;
+			u->building.pylon.psionic_matrix_link = {};
+			u->building.pylon.psi_field_sprite = nullptr;
+		}
 		bool unit_union_used = false;
 		if (unit_is_ghost(u)) {
 			if (unit_union_used) xcept("unit union already used");
@@ -14487,7 +14852,15 @@ struct state_functions {
 				}
 				break;
 			case UnitTypes::Protoss_Pylon:
-				xcept("destroy_unit_impl fixme");
+				if (u->building.pylon.psionic_matrix_link.first) {
+					st.psionic_matrix_units.remove(*u);
+					u->building.pylon.psionic_matrix_link = {};
+				}
+				st.update_psionic_matrix = true;
+				if (u->building.pylon.psi_field_sprite) {
+					destroy_sprite(u->building.pylon.psi_field_sprite);
+					u->building.pylon.psi_field_sprite = nullptr;
+				}
 			case UnitTypes::Zerg_Nydus_Canal:
 				if (u->building.nydus.exit) {
 					unit_t* exit = u->building.nydus.exit;
@@ -14801,7 +15174,10 @@ struct state_functions {
 			u->ensnare_timer = timer;
 		}
 		if (u->stasis_timer) {
-			xcept("apply stasis");
+			auto timer = u->stasis_timer;
+			u->stasis_timer = 0;
+			stasis_unit(u);
+			u->stasis_timer = timer;
 		}
 		if (u->plague_timer) {
 			auto timer = u->plague_timer;
@@ -15355,10 +15731,12 @@ struct state_functions {
 
 	void check_unit_collision(unit_t* u) {
 		for (unit_t* nu : find_units(unit_sprite_inner_bounding_box(u))) {
-			if (u_grounded_building(nu)) u->status_flags |= unit_t::status_flag_collision;
+			if (u_grounded_building(nu)) {
+				u_set_status_flag(u, unit_t::status_flag_collision);
+			}
 			else if (!u_flying(nu) && (!u_gathering(nu) || u_grounded_building(u))) {
 				if (unit_finder_units_intersecting(u, nu)) {
-					nu->status_flags |= unit_t::status_flag_collision;
+					u_set_status_flag(nu, unit_t::status_flag_collision);
 				}
 			}
 		}
@@ -17942,6 +18320,7 @@ struct game_load_functions : state_functions {
 		st.total_gas_gathered = {};
 
 		st.creep_life = {};
+		st.update_psionic_matrix = false;
 	}
 
 	regions_t::region* get_new_region() {
@@ -19344,7 +19723,7 @@ struct game_load_functions : state_functions {
 		};
 
 		auto upgrades = [&](data_reader_le r, bool broodwar) {
-			auto uses_default_settings = r.get_vec<uint8_t>(broodwar ? 62 : 46);
+			auto uses_default_settings = r.get_vec<uint8_t>(broodwar ? 61 : 46);
 			auto mineral_cost = r.get_vec<uint16_t>(broodwar ? 61 : 46);
 			auto mineral_cost_factor = r.get_vec<uint16_t>(broodwar ? 61 : 46);
 			auto gas_cost = r.get_vec<uint16_t>(broodwar ? 61 : 46);
@@ -19552,7 +19931,7 @@ struct game_load_functions : state_functions {
 			for (unit_t* u : ptr(st.visible_units)) {
 				update_unit_sprite(u);
 			}
-
+			st.update_psionic_matrix = true;
 		};
 
 		tag_funcs["UPRP"] = [&](data_reader_le r) {
