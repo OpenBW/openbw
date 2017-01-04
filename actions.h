@@ -300,9 +300,8 @@ struct action_functions: state_functions {
 		if (u->owner != owner) return false;
 		if (!unit_can_build(u, unit_type)) return false;
 		if (unit_type->id > UnitTypes::Spell_Disruption_Web) return false;
-		if (build_queue_push(u, unit_type)) {
-			set_secondary_order(u, get_order_type(Orders::Train));
-		}
+		if (!build_queue_push(u, unit_type)) return false;
+		set_secondary_order(u, get_order_type(Orders::Train));
 		return true;
 	}
 
@@ -856,7 +855,7 @@ struct action_functions: state_functions {
 			if (u->owner != owner) continue;
 			if (!unit_is_zerg_building(u)) continue;
 			if (!unit_can_build(u, unit_type)) continue;
-			build_queue_push(u, unit_type);
+			if (!build_queue_push(u, unit_type)) continue;
 			if (u->order_type->id != Orders::ZergBuildingMorph) set_unit_order(u, get_order_type(Orders::ZergBuildingMorph));
 			retval = true;
 		}
@@ -924,6 +923,35 @@ struct action_functions: state_functions {
 			if (!nearest_unit) continue;
 			set_unit_order(u, get_order_type(Orders::ArchonWarp), nearest_unit);
 			set_unit_order(nearest_unit, get_order_type(Orders::ArchonWarp), u);
+			retval = true;
+		}
+		return retval;
+	}
+	
+	bool action_carrier_stop(int owner) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (!unit_can_receive_order(u, get_order_type(Orders::CarrierStop), owner)) continue;
+			set_unit_order(u, get_order_type(Orders::CarrierStop));
+			retval = true;
+		}
+		return retval;
+	}
+	
+	bool action_train_fighter(int owner) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (u->owner != owner) continue;
+			const unit_type_t* build_type = nullptr;
+			if (unit_is_carrier(u)) build_type = get_unit_type(UnitTypes::Protoss_Interceptor);
+			else if (unit_is_reaver(u)) build_type = get_unit_type(UnitTypes::Protoss_Reaver);
+			if (!build_type) continue;
+			if (!unit_can_build(u, build_type)) continue;
+			if (!build_queue_push(u, build_type)) continue;
+			if (u->secondary_order_state != 2) {
+				u->secondary_order_type = nullptr;
+				set_secondary_order(u, get_order_type(Orders::TrainFighter));
+			}
 			retval = true;
 		}
 		return retval;
@@ -1197,6 +1225,16 @@ struct action_functions: state_functions {
 	bool read_action_morph_archon(int owner, reader_T&& r) {
 		return action_morph_archon(owner);
 	}
+	
+	template<typename reader_T>
+	bool read_action_carrier_stop(int owner, reader_T&& r) {
+		return action_carrier_stop(owner);
+	}
+	
+	template<typename reader_T>
+	bool read_action_train_fighter(int owner, reader_T&& r) {
+		return action_train_fighter(owner);
+	}
 
 	virtual void on_action(int owner, int action) {
 	}
@@ -1235,6 +1273,8 @@ struct action_functions: state_functions {
 			return read_action_cancel_morph(owner, r);
 		case 26:
 			return read_action_stop(owner, r);
+		case 27:
+			return read_action_carrier_stop(owner, r);
 		case 30:
 			return read_action_return_cargo(owner, r);
 		case 31:
@@ -1251,6 +1291,8 @@ struct action_functions: state_functions {
 			return read_action_unsiege(owner, r);
 		case 38:
 			return read_action_siege(owner, r);
+		case 39:
+			return read_action_train_fighter(owner, r);
 		case 40:
 			return read_action_unload_all(owner, r);
 		case 41:

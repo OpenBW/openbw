@@ -1403,6 +1403,12 @@ struct state_functions {
 	bool unit_is_zerg_building(unit_type_autocast ut) const {
 		return ut->id >= UnitTypes::Zerg_Infested_Command_Center && ut->id <= UnitTypes::Special_Cerebrate_Daggoth;
 	}
+	
+	bool unit_is_fighter(unit_type_autocast ut) const {
+		if (unit_is(ut, UnitTypes::Protoss_Interceptor)) return true;
+		if (unit_is(ut, UnitTypes::Protoss_Scarab)) return true;
+		return false;
+	}
 
 	bool unit_target_is_undetected(const unit_t* u, const unit_t* target) const {
 		if (!u_cloaked(target) && !u_requires_detector(target)) return false;
@@ -1748,7 +1754,7 @@ struct state_functions {
 	}
 	size_t unit_scarab_count(const unit_t* u) const {
 		if (!unit_is_reaver(u)) return 0;
-		return u->reaver.inside_count + u->reaver.outside_count;
+		return u->reaver.inside_count;
 	}
 
 	size_t unit_max_interceptor_count(const unit_t* u) const {
@@ -1760,6 +1766,14 @@ struct state_functions {
 		if (!unit_is_reaver(u)) return 0;
 		if (ut_hero(u)) return 10;
 		return player_has_upgrade(u->owner, UpgradeTypes::Reaver_Capacity) ? 8 : 4;
+	}
+	
+	size_t unit_queued_fighter_units(const unit_t* u) const {
+		size_t r = 0;
+		for (const unit_type_t* ut : u->build_queue) {
+			if (unit_is_fighter(ut)) ++r;
+		}
+		return r;
 	}
 
 	size_t unit_spider_mine_count(const unit_t* u) const {
@@ -2411,10 +2425,10 @@ struct state_functions {
 	}
 	
 	bool is_in_psionic_matrix_range(xy rel) const {
-		unsigned x = std::abs(rel.x);
-		unsigned y = std::abs(rel.y);
-		if (x >= 256u) return false;
-		if (y >= 160u) return false;
+		unsigned x = rel.x < 0 ? std::abs(rel.x + 1) : std::abs(rel.x);
+		unsigned y = rel.y < 0 ? std::abs(rel.y + 1) : std::abs(rel.y);
+		if (x >= 256) return false;
+		if (y >= 160) return false;
 		return psi_field_mask[y / 32u][x / 32u];
 	}
 	
@@ -2913,7 +2927,7 @@ struct state_functions {
 			set_sprite_cloak_modifier(u->sprite, requires_detector, cloaked, data1, data2);
 		}
 		set_sprite_visibility(u->sprite, visibility);
-		if (u_completed(u) && (requires_detector || cloaked)) {
+		if (ut_building(u) && (requires_detector || cloaked)) {
 			set_secondary_order(u, get_order_type(Orders::Nothing));
 			u_unset_status_flag(u, unit_t::status_flag_requires_detector);
 			u_unset_status_flag(u, unit_t::status_flag_cloaked);
@@ -3912,7 +3926,7 @@ struct state_functions {
 		if (turret) reset_movement_state(turret);
 	}
 	
-	bool units_share_unions(unit_type_autocast a, unit_type_autocast b) {
+	bool units_share_unions(unit_type_autocast a, unit_type_autocast b) const {
 		if (unit_is(a, UnitTypes::Protoss_Interceptor) != unit_is(b, UnitTypes::Protoss_Interceptor)) return false;
 		if (unit_is(a, UnitTypes::Protoss_Scarab) != unit_is(b, UnitTypes::Protoss_Scarab)) return false;
 		if (unit_is_carrier(a) != unit_is_carrier(b)) return false;
@@ -3925,6 +3939,133 @@ struct state_functions {
 		if (ut_powerup(a) != ut_powerup(b)) return false;
 		if (unit_is_hatchery(a) != unit_is_hatchery(b)) return false;
 		return true;
+	}
+	
+	void interceptors_attack(unit_t* u) {
+		if (!unit_is_carrier(u)) return;
+		for (unit_t* n : ptr(u->carrier.outside_units)) {
+			n->sprite->elevation_level = u->sprite->elevation_level - 1;
+			set_unit_order(n, n->unit_type->attack_unit, u->order_target.unit);
+		}
+	}
+	
+	bool carrier_reaver_attack(unit_t* u, int acquire_range, int max_ground_distance) {
+		bool can_move = u->order_type->id != Orders::CarrierHoldPosition && u->order_type->id != Orders::ReaverHoldPosition;
+		if (!can_move && u_movement_flag(u, 2)) stop_unit(u);
+		unit_t* target = u->order_target.unit;
+		auto can_attack_target = [&]() {
+			if (unit_can_see_target(u, target) && unit_target_in_range(u, target, acquire_range + unit_target_movement_range(u, target))) {
+				if (max_ground_distance == 0 || unit_long_path_distance(u, u->sprite->position, u->order_target.pos) < max_ground_distance) {
+					return true;
+				}
+			}
+			return false;
+		};
+		if (target) {
+			if (u_invincible(target) || !unit_can_attack_target(u, target)) {
+				if (u->auto_target_unit == target) u->auto_target_unit = nullptr;
+				u->order_target.unit = nullptr;
+			} else {
+				u->order_target.pos = target->sprite->position;
+				bool move = true;
+				if (unit_can_see_target(u, target)) {
+					if (unit_target_in_range(u, target, acquire_range + unit_target_movement_range(u, target))) {
+						if (max_ground_distance == 0 || unit_long_path_distance(u, u->sprite->position, u->order_target.pos) < max_ground_distance) {
+							move = false;
+						}
+					}
+				}
+				if (can_attack_target()) stop_unit(u);
+				else {
+					if (!can_move || u_ready_to_attack(u)) {
+						if (u->auto_target_unit == target) u->auto_target_unit = nullptr;
+						u->order_target.unit = nullptr;
+						return false;
+					}
+					set_unit_move_target(u, u->order_target.pos);
+					set_next_target_waypoint(u, u->order_target.pos);
+				}
+			}
+		}
+		if (unit_interceptor_count(u) == 0 && (!unit_is_reaver(u) || u->reaver.inside_count + u->reaver.outside_count == 0)) {
+			stop_unit(u);
+			order_done(u);
+			return false;
+		}
+		if (u->main_order_timer) return false;
+		target = u->order_target.unit;
+		if (!target) {
+			if (!u->order_queue.empty()) {
+				activate_next_order(u);
+				return false;
+			}
+		}
+		if (!target || u_ready_to_attack(u)) {
+			attack_unit_reacquire_target(u);
+			if (unit_is_carrier(u) && u->order_target.unit != target) interceptors_attack(u);
+			target = u->order_target.unit;
+		}
+		if (target) {
+			if (can_move) {
+				if (unit_is_reaver(u)) u->order_type = get_order_type(Orders::ReaverFight);
+				else u->order_type = get_order_type(Orders::CarrierFight);
+			}
+			return can_attack_target();
+		} else {
+			unit_t* new_target = find_acquire_random_target(u);
+			if (!new_target) {
+				if (can_move && u->order_type->id != Orders::CarrierIgnore2) {
+					if (unit_is_reaver(u)) u->order_type = get_order_type(Orders::Reaver);
+					else u->order_type = get_order_type(Orders::Carrier);
+				}
+				return false;
+			}
+			if (can_move) {
+				if (unit_is_reaver(u)) u->order_type = get_order_type(Orders::ReaverFight);
+				else u->order_type = get_order_type(Orders::CarrierFight);
+			}
+			u->order_target.pos = new_target->sprite->position;
+			u_set_status_flag(u, unit_t::status_flag_ready_to_attack);
+			if (u->subunit) u_set_status_flag(u->subunit, unit_t::status_flag_ready_to_attack);
+			if (max_ground_distance != 0 && unit_long_path_distance(u, u->sprite->position, u->order_target.pos) >= max_ground_distance) return false;
+			u->order_target.unit = new_target;
+			return true;
+		}
+	}
+	
+	unit_t* release_fighter(unit_t* u) {
+		if (!unit_is_carrier(u) && !unit_is_reaver(u)) return nullptr;
+		auto& inside_units = unit_is_reaver(u) ? u->reaver.inside_units : u->carrier.inside_units;
+		unit_t* r = nullptr;
+		fp8 best_hp;
+		for (unit_t* n : ptr(inside_units)) {
+			if (!u_completed(n)) continue;
+			if (!r || n->hp > best_hp) {
+				r = n;
+				best_hp = n->hp;
+			}
+		}
+		if (!r) return nullptr;
+		if (unit_is(r, UnitTypes::Protoss_Interceptor) && r->hp < r->unit_type->hitpoints / 2) return nullptr;
+		xy pos = u->position;
+		if (unit_is(r, UnitTypes::Protoss_Scarab)) {
+			pos += to_xy(direction_xy(u->heading, 25));
+			set_unit_heading(r, u->heading);
+		}
+		inside_units.remove(*r);
+		if (unit_is_reaver(u)) {
+			--u->reaver.inside_count;
+			u->reaver.outside_units.push_front(*r);
+			++u->reaver.outside_count;
+		} else {
+			--u->carrier.inside_count;
+			u->carrier.outside_units.push_front(*r);
+			++u->carrier.outside_count;
+		}
+		move_unit(r, pos);
+		show_unit(r);
+		r->fighter.is_outside = true;
+		return r;
 	}
 
 	void order_Stop(unit_t* u) {
@@ -6808,6 +6949,233 @@ struct state_functions {
 			}
 		}
 	}
+	
+	void order_CastRecall(unit_t* u) {
+		if (u->order_state == 0) {
+			if (u->energy < fp8::integer(get_tech_type(TechTypes::Recall)->energy_cost)) {
+				// todo: callback for error message/sound?
+				order_done(u);
+				return;
+			}
+			u->energy -= fp8::integer(get_tech_type(TechTypes::Recall)->energy_cost);
+			if (u->order_target.unit) u->order_target.pos = u->order_target.unit->sprite->position;
+			thingy_t* t = create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Recall_Field), u->order_target.pos, 0);
+			if (t) {
+				t->sprite->elevation_level = u->sprite->elevation_level + 1;
+				if (!us_hidden(t)) set_sprite_visibility(t->sprite, tile_visibility(t->sprite->position));
+			}
+			lcg_rand(17);
+			// todo: callback for sound
+			u->main_order_timer = 22;
+			u->order_state = 1;
+		} else if (u->order_state == 1 && u->main_order_timer == 0) {
+			int n_recalled = 0;
+			a_vector<unit_t*> targets;
+			for (unit_t* target : find_units_noexpand(square_at(u->order_target.pos, 64))) {
+				if (target == u) continue;
+				if (target->owner != u->owner) continue;
+				if (us_hidden(target)) continue;
+				if (ut_building(target)) continue;
+				if (u_invincible(target)) continue;
+				if (u_hallucination(target)) continue;
+				if (u_burrowed(target)) continue;
+				if (unit_is(target, UnitTypes::Zerg_Larva)) continue;
+				if (unit_is(target, UnitTypes::Zerg_Egg)) continue;
+				if (unit_is(target, UnitTypes::Zerg_Lurker_Egg)) continue;
+				
+				targets.push_back(target);
+			}
+			for (unit_t* target : targets) {
+				
+				xy target_pos = target->sprite->position;
+				move_unit(target, u->sprite->position);
+				auto r = find_unit_placement(target, u->sprite->position, false);
+				if (!r.first) {
+					move_unit(target, target_pos);
+					continue;
+				}
+				
+				for (unit_t* n : ptr(st.visible_units)) {
+					remove_target_references(n, target);
+				}
+				for (bullet_t* n : ptr(st.active_bullets)) {
+					remove_target_references(n, target);
+				}
+				unit_finder_remove(target);
+				if (u_grounded_building(target)) set_unit_tiles_unoccupied(target, target->sprite->position);
+				if (u_flying(target)) decrement_repulse_field(target);
+				reset_movement_state(target);
+				
+				move_unit(target, r.second);
+				refresh_unit_position(target);
+				if (!unit_is(target, UnitTypes::Zerg_Cocoon)) set_unit_order(target, target->unit_type->return_to_idle);
+				thingy_t* t = create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Recall_Field), r.second, 0);
+				if (t) {
+					t->sprite->elevation_level = target->sprite->elevation_level + 1;
+					if (!us_hidden(t)) set_sprite_visibility(t->sprite, tile_visibility(t->sprite->position));
+				}
+				if (unit_is_ghost(target) && target->connected_unit && unit_is(target->connected_unit, UnitTypes::Terran_Nuclear_Missile)) {
+					target->connected_unit->connected_unit = nullptr;
+					target->connected_unit = nullptr;
+				}
+				++n_recalled;
+			}
+			if (n_recalled) {
+				lcg_rand(18);
+				// todo: callback for sound
+			}
+			order_done(u);
+		}
+	}
+	
+	void order_Carrier(unit_t* u) {
+		if (carrier_reaver_attack(u, 32 * unit_target_acquisition_range(u), 0))  {
+			unit_t* fighter = release_fighter(u);
+			if (fighter) {
+				fighter->shield_points = fp8::integer(fighter->unit_type->shield_points);
+				fighter->sprite->elevation_level = u->sprite->elevation_level - 1;
+				set_unit_order(fighter, get_unit_type(UnitTypes::Protoss_Interceptor)->attack_unit, u->order_target.unit);
+				u->main_order_timer = 7;
+			}
+		}
+	}
+	
+	void order_CarrierStop(unit_t* u) {
+		stop_unit(u);
+		set_next_target_waypoint(u, u->move_target.pos);
+		return_interceptors(u);
+		set_unit_order(u, get_order_type(Orders::Carrier), u->order_target.unit);
+	}
+	
+	void order_CarrierAttack(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		if (!target) {
+			order_done(u);
+			return;
+		}
+		if (!unit_can_attack_target(u, target)) {
+			set_unit_order(u, get_order_type(Orders::Move), u->order_target.pos);
+			return;
+		}
+		bool ready_to_attack = u_ready_to_attack(u);
+		bool flag_8 = u_status_flag(u, unit_t::status_flag_8);
+		interceptors_attack(u);
+		const order_type_t* next_order;
+		if (unit_is_reaver(u)) next_order = get_order_type(Orders::ReaverFight);
+		else next_order = get_order_type(Orders::CarrierFight);
+		queue_order_front(u, next_order, target);
+		activate_next_order(u);
+		u_set_status_flag(u, unit_t::status_flag_ready_to_attack, ready_to_attack);
+		u_set_status_flag(u, unit_t::status_flag_8, flag_8);
+	}
+	
+	void order_InterceptorAttack(unit_t* u) {
+		if (!unit_is_fighter(u)) xcept("order_InterceptorAttack: unit is not a fighter");
+		unit_t* parent = u->fighter.parent;
+		if (parent && u->shield_points < fp8::integer(get_unit_type(UnitTypes::Protoss_Interceptor)->shield_points) / 4) {
+			set_unit_order(u, get_order_type(Orders::InterceptorReturn));
+			return;
+		}
+		unit_t* target = u->order_target.unit;
+		if (!target || u_invincible(target)) {
+			if (!unit_autoattack(u)) {
+				set_unit_order(u, get_order_type(Orders::InterceptorReturn));
+				return;
+			}
+			target = u->order_target.unit;
+		}
+		u->order_target.pos = target->sprite->position;
+		if (parent) {
+			int range = 32 * (unit_target_acquisition_range(parent) + 2);
+			if (!unit_target_in_range(parent, target, range + unit_target_movement_range(parent, target))) {
+				set_unit_order(u, get_order_type(Orders::InterceptorReturn));
+				return;
+			}
+		}
+		
+		auto set_interceptor_move_target = [&](int mult) {
+			int x = lcg_rand(11, -127, 128) * mult;
+			int y = lcg_rand(11, -127, 128) * mult;
+			xy pos = u->order_target.pos + xy(x, y);
+			auto dims = get_unit_type(UnitTypes::Protoss_Interceptor)->dimensions;
+			if (pos.x < dims.from.x || pos.x >= (int)game_st.map_width - dims.to.x) pos.x = u->order_target.pos.x - x;
+			if (pos.y < dims.from.y || pos.y >= (int)game_st.map_height - dims.to.y) pos.y = u->order_target.pos.y - y;
+			pos = restrict_move_target_to_valid_bounds(get_unit_type(UnitTypes::Protoss_Interceptor), pos);
+			set_unit_move_target(u, pos);
+			set_next_target_waypoint(u, pos);
+		};
+		
+		if (u->order_state == 0) {
+			if (!parent) {
+				kill_unit(u);
+				return;
+			}
+			// todo: callback for sound
+			set_interceptor_move_target(3);
+			u->main_order_timer = 15;
+			u->order_state = 1;
+		} else if (u->order_state == 1) {
+			if (u->main_order_timer == 0) {
+				u->sprite->elevation_level += 2;
+				u->order_state = 3;
+			}
+		}
+		if (u->order_state == 3) {
+			if (unit_target_in_weapon_movement_range(u, target)) attack_unit_fire_weapon(u);
+			if (unit_target_in_range(u, target, 50 + unit_target_movement_range(u, target))) {
+				set_interceptor_move_target(1);
+				u->order_state = 4;
+			} else {
+				set_unit_move_target(u, u->order_target.pos);
+				set_next_target_waypoint(u, u->order_target.pos);
+			}
+		} else if (u->order_state == 4) {
+			if (xy_length(to_xy_fp8(u->move_target.pos) - u->exact_position).integer_part() <= 50) {
+				set_interceptor_move_target(2);
+				u->order_state = 5;
+			}
+		} else if (u->order_state == 5) {
+			if (xy_length(to_xy_fp8(u->move_target.pos) - u->exact_position).integer_part() <= 50) {
+				set_unit_move_target(u, u->order_target.pos);
+				set_next_target_waypoint(u, u->order_target.pos);
+				u->order_state = 3;
+			}
+		}
+	}
+	
+	void order_InterceptorReturn(unit_t* u) {
+		if (!unit_is_fighter(u)) xcept("order_InterceptorReturn: unit is not a fighter");
+		unit_t* parent = u->fighter.parent;
+		if (!parent) {
+			kill_unit(u);
+			return;
+		}
+		if (u->order_state == 0) {
+			if (xy_length(to_xy_fp8(parent->sprite->position) - u->exact_position).integer_part() <= 60) {
+				u->order_state = 1;
+				if (unit_is(u, UnitTypes::Protoss_Interceptor)) u->sprite->elevation_level = parent->sprite->elevation_level - 2;
+			}
+		}
+		if (xy_length(to_xy_fp8(parent->sprite->position) - u->exact_position).integer_part() <= 10) {
+			if (unit_is_carrier(parent)) {
+				parent->carrier.outside_units.remove(*u);
+				--parent->carrier.outside_count;
+				parent->carrier.inside_units.push_front(*u);
+				++parent->carrier.inside_count;
+			} else if (unit_is_reaver(parent)) {
+				parent->reaver.outside_units.remove(*u);
+				--parent->reaver.outside_count;
+				parent->reaver.inside_units.push_front(*u);
+				++parent->reaver.inside_count;
+			}
+			u->fighter.is_outside = false;
+			hide_unit(u);
+			set_unit_order(u, get_order_type(Orders::Nothing));
+		} else {
+			set_unit_move_target(u, parent->sprite->position);
+			set_next_target_waypoint(u, parent->sprite->position);
+		}
+	}
 
 	void execute_main_order(unit_t* u) {
 		switch (u->order_type->id) {
@@ -7038,25 +7406,25 @@ struct state_functions {
 			order_Follow(u);
 			break;
 		case Orders::Carrier:
-			xcept("Carrier");
+			order_Carrier(u);
 			break;
 		case Orders::ReaverCarrierMove:
 			order_Move(u);
 			break;
 		case Orders::CarrierStop:
-			xcept("CarrierStop");
+			order_CarrierStop(u);
 			break;
 		case Orders::CarrierAttack:
-			xcept("CarrierAttack");
+			order_CarrierAttack(u);
 			break;
 		case Orders::CarrierMoveToAttack:
-			xcept("CarrierMoveToAttack");
+			order_MoveToTargetOrder(u);
 			break;
 		case Orders::CarrierIgnore2:
 			xcept("CarrierIgnore2");
 			break;
 		case Orders::CarrierFight:
-			xcept("CarrierFight");
+			order_Carrier(u);
 			break;
 		case Orders::CarrierHoldPosition:
 			xcept("CarrierHoldPosition");
@@ -7073,8 +7441,14 @@ struct state_functions {
 		case Orders::ReaverFight:
 			xcept("ReaverFight");
 			break;
-		case Orders::TrainFighter:
-			xcept("TrainFighter");
+		case Orders::ReaverHoldPosition:
+			xcept("ReaverHoldPosition");
+			break;
+		case Orders::InterceptorAttack:
+			order_InterceptorAttack(u);
+			break;
+		case Orders::ScarabAttack:
+			xcept("ScarabAttack");
 			break;
 		case Orders::RechargeShieldsUnit:
 			xcept("RechargeShieldsUnit");
@@ -7083,7 +7457,7 @@ struct state_functions {
 			xcept("ShieldBattery");
 			break;
 		case Orders::InterceptorReturn:
-			xcept("InterceptorReturn");
+			order_InterceptorReturn(u);
 			break;
 		case Orders::DroneLand:
 			order_DroneLand(u);
@@ -7224,7 +7598,7 @@ struct state_functions {
 			order_SuicideHoldPosition(u);
 			break;
 		case Orders::CastRecall:
-			xcept("CastRecall");
+			order_CastRecall(u);
 			break;
 		case Orders::Teleport:
 			xcept("Teleport");
@@ -7380,7 +7754,6 @@ struct state_functions {
 				sprite_run_anim(u->sprite, iscript_anims::WorkingToIdle);
 			} else {
 				unit_t* build_unit = nullptr;
-				if (u->build_queue.empty()) xcept("secondary_order_Train: empty build queue");
 				const unit_type_t* build_unit_type = u->build_queue.front();
 				if (u_grounded_building(u) || unit_is_carrier(u) || unit_is_reaver(u)) {
 					if (has_available_supply_for(u->owner, build_unit_type, u->secondary_order_state == 0)) {
@@ -7506,6 +7879,60 @@ struct state_functions {
 			if (!u_flag_800(target)) u_set_status_flag(target, unit_t::status_flag_800);
 		}
 	}
+	
+	void secondary_order_TrainFighter(unit_t* u) {
+		if (!unit_is_carrier(u) && !unit_is_reaver(u)) return;
+		if (u->secondary_order_state == 0 || u->secondary_order_state == 1) {
+			if (u->build_queue.empty()) {
+				u->secondary_order_state = 3;
+				u->current_build_unit = nullptr;
+			} else {
+				unit_t* build_unit = nullptr;
+				const unit_type_t* build_unit_type = u->build_queue.front();
+				if (u_grounded_building(u) || unit_is_carrier(u) || unit_is_reaver(u)) {
+					if (has_available_supply_for(u->owner, build_unit_type, u->secondary_order_state == 0)) {
+						build_unit = create_unit(build_unit_type, u->sprite->position, u->owner);
+						if (!build_unit) display_last_error_for_player(u->owner);
+					}
+				}
+				u->current_build_unit = build_unit;
+				if (build_unit) {
+					if (unit_is_fighter(build_unit)) build_unit->fighter.parent = u;
+					u->secondary_order_state = 2;
+				} else u->secondary_order_state = 1;
+			}
+		} else if (u->secondary_order_state == 2) {
+			unit_t* build_unit = u->current_build_unit;
+			if (!build_unit) {
+				u->secondary_order_state = 0;
+			} else {
+				resume_building_unit(build_unit, false);
+				if (u_completed(build_unit)) {
+					hide_unit(build_unit);
+					if (unit_is_fighter(build_unit)) {
+						if (unit_is_carrier(u)) {
+							u->carrier.inside_units.push_front(*build_unit);
+							++u->carrier.inside_count;
+						} else if (unit_is_reaver(u)) {
+							u->reaver.inside_units.push_front(*build_unit);
+							++u->reaver.inside_count;
+						}
+						build_unit->fighter.is_outside = false;
+					}
+					u->build_queue.erase(u->build_queue.begin());
+					u->current_build_unit = nullptr;
+					u->secondary_order_state = 0;
+				}
+			}
+		} else if (u->secondary_order_state == 3) {
+			if (unit_is_carrier(u)) {
+				for (unit_t* n : ptr(u->carrier.inside_units)) {
+					if (n->hp >= n->unit_type->hitpoints) continue;
+					set_unit_hp(n, n->hp + 128_fp8);
+				}
+			} else u->secondary_order_state = 4;
+		}
+	}
 
 	void execute_secondary_order(unit_t* u) {
 		if (u->secondary_order_type->id == Orders::Hallucination2) {
@@ -7523,7 +7950,7 @@ struct state_functions {
 			secondary_order_Train(u);
 			break;
 		case Orders::TrainFighter:
-			xcept("TrainFighter");
+			secondary_order_TrainFighter(u);
 			break;
 		case Orders::ShieldBattery:
 			xcept("ShieldBattery");
@@ -14348,6 +14775,7 @@ struct state_functions {
 
 	void unit_finder_remove(unit_t* u) {
 		if (u->unit_finder_bounding_box.from.x == -1) return;
+		if (unit_finder_search_index) xcept("attempt to modify unit finder while search is active");
 		auto remove = [&](auto& vec, int value) {
 			auto cmp_l = [&](auto& a, int b) {
 				return a.value < b;
@@ -14364,6 +14792,7 @@ struct state_functions {
 	}
 
 	void unit_finder_insert(unit_t* u, rect bb) {
+		if (unit_finder_search_index) xcept("attempt to modify unit finder while search is active");
 		auto insert = [&](auto& vec, int from_value, int to_value) {
 			auto cmp_l = [&](auto& a, int b) {
 				return a.value < b;
@@ -14378,6 +14807,7 @@ struct state_functions {
 		u->unit_finder_bounding_box = bb;
 	}
 	void unit_finder_reinsert(unit_t* u, rect bb) {
+		if (unit_finder_search_index) xcept("attempt to modify unit finder while search is active");
 		auto reinsert = [&](auto& vec, int old_value, int new_value) {
 			if (old_value == new_value) return;
 			auto cmp_l = [&](auto& a, int b) {
@@ -14775,6 +15205,29 @@ struct state_functions {
 			unit_union_used = true;
 			u->vulture.spider_mine_count = 0;
 		}
+		if (unit_is_carrier(u)) {
+			if (unit_union_used) xcept("unit union already used");
+			unit_union_used = true;
+			u->carrier.inside_units.clear();
+			u->carrier.outside_units.clear();
+			u->carrier.inside_count = 0;
+			u->carrier.outside_count = 0;
+		}
+		if (unit_is_reaver(u)) {
+			if (unit_union_used) xcept("unit union already used");
+			unit_union_used = true;
+			u->reaver.inside_units.clear();
+			u->reaver.outside_units.clear();
+			u->reaver.inside_count = 0;
+			u->reaver.outside_count = 0;
+		}
+		if (unit_is_fighter(u)) {
+			if (unit_union_used) xcept("unit union already used");
+			unit_union_used = true;
+			u->fighter.parent = nullptr;
+			u->fighter.fighter_link = {};
+			u->fighter.is_outside = false;
+		}
 
 		if (ut_worker(u)) {
 			u->worker.powerup = nullptr;
@@ -14838,7 +15291,31 @@ struct state_functions {
 			switch (u->unit_type->id) {
 			case UnitTypes::Protoss_Interceptor:
 			case UnitTypes::Protoss_Scarab:
-				xcept("destroy_unit_impl fixme");
+				if (u_completed(u)) {
+					unit_t* parent = u->fighter.parent;
+					if (u->fighter.parent) {
+						if (u->fighter.is_outside) {
+							if (unit_is(parent, UnitTypes::Protoss_Carrier)) {
+								parent->carrier.outside_units.remove(*u);
+								--parent->carrier.outside_count;
+							} else if (unit_is(parent, UnitTypes::Protoss_Reaver)) {
+								parent->reaver.outside_units.remove(*u);
+								--parent->reaver.outside_count;
+							}
+						} else {
+							if (unit_is(parent, UnitTypes::Protoss_Carrier)) {
+								parent->carrier.inside_units.remove(*u);
+								--parent->carrier.inside_count;
+							} else if (unit_is(parent, UnitTypes::Protoss_Reaver)) {
+								parent->reaver.inside_units.remove(*u);
+								--parent->reaver.inside_count;
+							}
+						}
+					}
+					u->fighter.parent = nullptr;
+					u->fighter.fighter_link = {};
+				}
+				break;
 			case UnitTypes::Terran_Nuclear_Silo:
 				if (u->building.silo.nuke) {
 					kill_unit(u->building.silo.nuke);
@@ -14927,14 +15404,14 @@ struct state_functions {
 					if (u_flying(u)) decrement_repulse_field(u);
 				}
 				if (!ut_building(u)) {
-					if (u->cloak_counter) {
-						u->cloak_counter = 0;
+					if (u->cloak_counter) u->cloak_counter = 0;
+					if (u->cloaked_unit_link.first) {
 						st.cloaked_units.remove(*u);
 						u->cloaked_unit_link = {};
-						u_unset_status_flag(u, unit_t::status_flag_800);
-						if (u_requires_detector(u)) {
-							// todo: callback for sound
-						}
+					}
+					if (u_flag_800(u)) u_unset_status_flag(u, unit_t::status_flag_800);
+					if (u_requires_detector(u)) {
+						// todo: callback for sound
 					}
 				}
 				if (u_grounded_building(u)) {
@@ -16245,7 +16722,7 @@ struct state_functions {
 			return true;
 		case UnitTypes::Protoss_Interceptor:
 			if (!unit_is_carrier(u)) return false;
-			if (unit_interceptor_count(u) >= unit_max_interceptor_count(u)) return false;
+			if (unit_interceptor_count(u) + unit_queued_fighter_units(u) >= unit_max_interceptor_count(u)) return false;
 			return true;
 		case UnitTypes::Protoss_Reaver:
 			if (!unit_is(u, UnitTypes::Protoss_Robotics_Facility)) return false;
@@ -16253,7 +16730,7 @@ struct state_functions {
 			return true;
 		case UnitTypes::Protoss_Scarab:
 			if (!unit_is_reaver(u)) return false;
-			if (unit_scarab_count(u) >= unit_max_scarab_count(u)) return false;
+			if (unit_scarab_count(u) + unit_queued_fighter_units(u) >= unit_max_scarab_count(u)) return false;
 			return true;
 		case UnitTypes::Protoss_Observer:
 			if (!unit_is(u, UnitTypes::Protoss_Robotics_Facility)) return false;

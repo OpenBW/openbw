@@ -555,7 +555,7 @@ struct unit_t: flingy_t {
 		struct {
 			unit_t* parent;
 			std::pair<unit_t*, unit_t*> fighter_link;
-			bool in_hangar;
+			bool is_outside;
 		} fighter;
 		struct {
 			intrusive_list<unit_t, fighter_link> inside_units;
