@@ -228,6 +228,42 @@ struct action_functions: state_functions {
 		}
 		return target_pos;
 	}
+	
+	bool morph_archon_impl(int owner, bool is_dark_archon) {
+		auto sel = selected_units(owner);
+		auto i = sel.begin();
+		if (i == sel.end()) return false;
+		if (!unit_can_use_tech(*i, get_tech_type(is_dark_archon ? TechTypes::Dark_Archon_Meld : TechTypes::Archon_Warp), owner)) return false;
+		bool retval = false;
+		static_vector<unit_t*, 12> units;
+		for (;i != sel.end(); ++i) {
+			unit_t* u = *i;
+			if (unit_is(u, is_dark_archon ? UnitTypes::Protoss_Dark_Templar : UnitTypes::Protoss_High_Templar)) units.push_back(u);
+		}
+		if (units.size() < 2) return false;
+		for (size_t index = 0; index != units.size(); ++index) {
+			unit_t* u = units[index];
+			if (!u) continue;
+			int nearest_distance = std::numeric_limits<int>::max();
+			unit_t* nearest_unit = nullptr;
+			for (size_t index2 = index + 1; index2 != units.size(); ++index2) {
+				unit_t* u2 = units[index2];
+				if (!u2) continue;
+				xy relpos = u->sprite->position - u2->sprite->position;
+				int d = relpos.x * relpos.x + relpos.y * relpos.y;
+				if (d < nearest_distance) {
+					units[index2] = nearest_unit;
+					nearest_distance = d;
+					nearest_unit = u2;
+				}
+			}
+			if (!nearest_unit) continue;
+			set_unit_order(u, get_order_type(is_dark_archon ? Orders::DarkArchonMeld : Orders::ArchonWarp), nearest_unit);
+			set_unit_order(nearest_unit, get_order_type(is_dark_archon ? Orders::DarkArchonMeld : Orders::ArchonWarp), u);
+			retval = true;
+		}
+		return retval;
+	}
 
 	template<typename units_T>
 	bool action_select(int owner, units_T&& units) {
@@ -893,39 +929,7 @@ struct action_functions: state_functions {
 	}
 	
 	bool action_morph_archon(int owner) {
-		auto sel = selected_units(owner);
-		auto i = sel.begin();
-		if (i == sel.end()) return false;
-		if (!unit_can_use_tech(*i, get_tech_type(TechTypes::Archon_Warp), owner)) return false;
-		bool retval = false;
-		static_vector<unit_t*, 12> units;
-		for (;i != sel.end(); ++i) {
-			unit_t* u = *i;
-			if (unit_is(u, UnitTypes::Protoss_High_Templar)) units.push_back(u);
-		}
-		if (units.size() < 2) return false;
-		for (size_t index = 0; index != units.size(); ++index) {
-			unit_t* u = units[index];
-			if (!u) continue;
-			int nearest_distance = std::numeric_limits<int>::max();
-			unit_t* nearest_unit = nullptr;
-			for (size_t index2 = index + 1; index2 != units.size(); ++index2) {
-				unit_t* u2 = units[index2];
-				if (!u2) continue;
-				xy relpos = u->sprite->position - u2->sprite->position;
-				int d = relpos.x * relpos.x + relpos.y * relpos.y;
-				if (d < nearest_distance) {
-					units[index2] = nearest_unit;
-					nearest_distance = d;
-					nearest_unit = u2;
-				}
-			}
-			if (!nearest_unit) continue;
-			set_unit_order(u, get_order_type(Orders::ArchonWarp), nearest_unit);
-			set_unit_order(nearest_unit, get_order_type(Orders::ArchonWarp), u);
-			retval = true;
-		}
-		return retval;
+		return morph_archon_impl(owner, false);
 	}
 	
 	bool action_carrier_stop(int owner) {
@@ -955,6 +959,10 @@ struct action_functions: state_functions {
 			retval = true;
 		}
 		return retval;
+	}
+	
+	bool action_morph_dark_archon(int owner) {
+		return morph_archon_impl(owner, true);
 	}
 
 	template<typename reader_T>
@@ -1235,6 +1243,11 @@ struct action_functions: state_functions {
 	bool read_action_train_fighter(int owner, reader_T&& r) {
 		return action_train_fighter(owner);
 	}
+	
+	template<typename reader_T>
+	bool read_action_morph_dark_archon(int owner, reader_T&& r) {
+		return action_morph_dark_archon(owner);
+	}
 
 	virtual void on_action(int owner, int action) {
 	}
@@ -1327,6 +1340,8 @@ struct action_functions: state_functions {
 			return read_action_player_leave(owner, r);
 		case 88:
 			return read_action_ping_minimap(owner, r);
+		case 90:
+			return read_action_morph_dark_archon(owner, r);
 		case 92:
 			return read_action_chat(owner, r);
 		default:

@@ -1155,7 +1155,7 @@ struct state_functions {
 			}
 		} else {
 			fp8 max_energy = unit_max_energy(u);
-			if (unit_is(u, UnitTypes::Protoss_Dark_Archon) && u->order_type->id == Orders::CompletingArchonSummon && u->order_state) {
+			if (unit_is(u, UnitTypes::Protoss_Dark_Archon) && u->order_type->id == Orders::CompletingArchonSummon && u->order_state == 0) {
 				max_energy = fp8::integer(50);
 			}
 			u->energy = std::min(u->energy + 8_fp8, max_energy);
@@ -2425,10 +2425,12 @@ struct state_functions {
 	}
 	
 	bool is_in_psionic_matrix_range(xy rel) const {
-		unsigned x = rel.x < 0 ? std::abs(rel.x + 1) : std::abs(rel.x);
-		unsigned y = rel.y < 0 ? std::abs(rel.y + 1) : std::abs(rel.y);
+		unsigned x = std::abs(rel.x);
+		unsigned y = std::abs(rel.y);
 		if (x >= 256) return false;
 		if (y >= 160) return false;
+		if (rel.x < 0) --x;
+		if (rel.y < 0) --y;
 		return psi_field_mask[y / 32u][x / 32u];
 	}
 	
@@ -3967,16 +3969,9 @@ struct state_functions {
 				u->order_target.unit = nullptr;
 			} else {
 				u->order_target.pos = target->sprite->position;
-				bool move = true;
-				if (unit_can_see_target(u, target)) {
-					if (unit_target_in_range(u, target, acquire_range + unit_target_movement_range(u, target))) {
-						if (max_ground_distance == 0 || unit_long_path_distance(u, u->sprite->position, u->order_target.pos) < max_ground_distance) {
-							move = false;
-						}
-					}
-				}
-				if (can_attack_target()) stop_unit(u);
-				else {
+				if (can_attack_target()) {
+					stop_unit(u);
+				} else {
 					if (!can_move || u_ready_to_attack(u)) {
 						if (u->auto_target_unit == target) u->auto_target_unit = nullptr;
 						u->order_target.unit = nullptr;
@@ -4041,8 +4036,8 @@ struct state_functions {
 		for (unit_t* n : ptr(inside_units)) {
 			if (!u_completed(n)) continue;
 			if (!r || n->hp > best_hp) {
+				if (!r) best_hp = n->hp;
 				r = n;
-				best_hp = n->hp;
 			}
 		}
 		if (!r) return nullptr;
@@ -5711,7 +5706,7 @@ struct state_functions {
 
 	void order_CastDefensiveMatrix(unit_t* u) {
 		auto* tech = get_tech_type(TechTypes::Defensive_Matrix);
-		if (spell_cast_target_movement(u, tech, unit_sight_range(u))) {
+		if (spell_cast_target_movement(u, tech, unit_sight_range(u, true))) {
 				u->energy -= fp8::integer(tech->energy_cost);
 				create_defensive_matrix_image(u);
 				unit_t* target = u->order_target.unit;
@@ -6886,8 +6881,9 @@ struct state_functions {
 	}
 	
 	void order_ArchonWarp(unit_t* u) {
+		bool is_dark_archon = u->order_type->id == Orders::DarkArchonMeld;
 		unit_t* target = u->order_target.unit;
-		if (!target || target->owner != u->owner || target->order_type->id != Orders::ArchonWarp || target->order_target.unit != u) {
+		if (!target || target->owner != u->owner || target->order_type != u->order_type || target->order_target.unit != u) {
 			stop_unit(u);
 			set_next_target_waypoint(u, u->move_target.pos);
 			order_done(u);
@@ -6900,12 +6896,14 @@ struct state_functions {
 			}
 		}
 		int d = xy_length(u->sprite->position - target->sprite->position);
-		if (d <= 2) {
+		if (d <= (is_dark_archon ? 20 : 2)) {
 			merge_status_effects(u, target);
-			morph_unit(u, get_unit_type(UnitTypes::Protoss_Archon));
+			morph_unit(u, get_unit_type(is_dark_archon ? UnitTypes::Protoss_Dark_Archon : UnitTypes::Protoss_Archon));
+			if (is_dark_archon) decloak_unit(u);
 			u->sprite->flags &= ~sprite_t::flag_iscript_nobrk;
 			sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
 			u->kill_count += target->kill_count;
+			if (is_dark_archon) u->energy = fp8::integer(50);
 			target->user_action_flags |= 4;
 			kill_unit(target);
 			u_unset_status_flag(u, unit_t::status_flag_can_move);
@@ -6919,7 +6917,7 @@ struct state_functions {
 			} else {
 				u->order_state = 1;
 				if (u->move_target_timer == 0) {
-					if (d <= 10) {
+					if (d <= (is_dark_archon ? 19 : 10)) {
 						set_unit_move_target(u, (u->sprite->position + target->sprite->position) / 2);
 					} else {
 						set_unit_move_target(u, target->sprite->position);
@@ -7034,7 +7032,7 @@ struct state_functions {
 			if (fighter) {
 				fighter->shield_points = fp8::integer(fighter->unit_type->shield_points);
 				fighter->sprite->elevation_level = u->sprite->elevation_level - 1;
-				set_unit_order(fighter, get_unit_type(UnitTypes::Protoss_Interceptor)->attack_unit, u->order_target.unit);
+				set_unit_order(fighter, fighter->unit_type->attack_unit, u->order_target.unit);
 				u->main_order_timer = 7;
 			}
 		}
@@ -7072,7 +7070,7 @@ struct state_functions {
 	void order_InterceptorAttack(unit_t* u) {
 		if (!unit_is_fighter(u)) xcept("order_InterceptorAttack: unit is not a fighter");
 		unit_t* parent = u->fighter.parent;
-		if (parent && u->shield_points < fp8::integer(get_unit_type(UnitTypes::Protoss_Interceptor)->shield_points) / 4) {
+		if (parent && u->shield_points < fp8::integer(u->unit_type->shield_points) / 4) {
 			set_unit_order(u, get_order_type(Orders::InterceptorReturn));
 			return;
 		}
@@ -7097,10 +7095,10 @@ struct state_functions {
 			int x = lcg_rand(11, -127, 128) * mult;
 			int y = lcg_rand(11, -127, 128) * mult;
 			xy pos = u->order_target.pos + xy(x, y);
-			auto dims = get_unit_type(UnitTypes::Protoss_Interceptor)->dimensions;
+			auto dims = u->unit_type->dimensions;
 			if (pos.x < dims.from.x || pos.x >= (int)game_st.map_width - dims.to.x) pos.x = u->order_target.pos.x - x;
 			if (pos.y < dims.from.y || pos.y >= (int)game_st.map_height - dims.to.y) pos.y = u->order_target.pos.y - y;
-			pos = restrict_move_target_to_valid_bounds(get_unit_type(UnitTypes::Protoss_Interceptor), pos);
+			pos = restrict_move_target_to_valid_bounds(u, pos);
 			set_unit_move_target(u, pos);
 			set_next_target_waypoint(u, pos);
 		};
@@ -7174,6 +7172,29 @@ struct state_functions {
 		} else {
 			set_unit_move_target(u, parent->sprite->position);
 			set_next_target_waypoint(u, parent->sprite->position);
+		}
+	}
+	
+	void order_DarkArchonMeld(unit_t* u) {
+		order_ArchonWarp(u);
+	}
+	
+	void order_CastMindControl(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		if (!target || target->owner == u->owner) {
+			order_done(u);
+			return;
+		}
+		auto* tech = get_tech_type(TechTypes::Mind_Control);
+		if (spell_cast_target_movement(u, tech, unit_sight_range(u, true))) {
+			if (u_hallucination(target)) kill_unit(target);
+			else {
+				create_sized_image(target, ImageTypes::IMAGEID_Mind_Control_Hit_Small);
+				mind_control_unit(target, u);
+			}
+			u->energy -= tech->energy_cost;
+			u->shield_points = 0_fp8;
+			order_done(u);
 		}
 	}
 
@@ -7307,7 +7328,7 @@ struct state_functions {
 			order_MedicHealToIdle(u);
 			break;
 		case Orders::DarkArchonMeld:
-			xcept("DarkArchonMeld");
+			order_DarkArchonMeld(u);
 			break;
 		default:
 			break;
@@ -7427,7 +7448,7 @@ struct state_functions {
 			order_Carrier(u);
 			break;
 		case Orders::CarrierHoldPosition:
-			xcept("CarrierHoldPosition");
+			order_Carrier(u);
 			break;
 		case Orders::Reaver:
 			xcept("Reaver");
@@ -7471,14 +7492,11 @@ struct state_functions {
 		case Orders::Larva:
 			order_Larva(u);
 			break;
-		case Orders::SpawningLarva:
-			xcept("SpawningLarva");
-			break;
 		case Orders::Harvest1:
 			order_MoveToGas(u);
 			break;
 		case Orders::Harvest2:
-			xcept("Harvest2");
+			order_MoveToTargetOrder(u);
 			break;
 		case Orders::MoveToGas:
 			order_MoveToGas(u);
@@ -7503,9 +7521,6 @@ struct state_functions {
 			break;
 		case Orders::ReturnMinerals:
 			order_ReturnMinerals(u);
-			break;
-		case Orders::Interrupted:
-			xcept("Interrupted");
 			break;
 		case Orders::EnterTransport:
 			order_EnterTransport(u);
@@ -7566,9 +7581,6 @@ struct state_functions {
 			break;
 		case Orders::CastEMPShockwave:
 			order_Spell(u);
-			break;
-		case Orders::NukeWait:
-			xcept("NukeWait");
 			break;
 		case Orders::NukeLaunch:
 			order_NukeLaunch(u);
@@ -7696,8 +7708,8 @@ struct state_functions {
 		case Orders::CastDisruptionWeb:
 			xcept("CastDisruptionWeb");
 			break;
-		case Orders::DarkArchonMeld:
-			xcept("DarkArchonMeld");
+		case Orders::CastMindControl:
+			order_CastMindControl(u);
 			break;
 		case Orders::CastFeedback:
 			xcept("CastFeedback");
@@ -7929,6 +7941,7 @@ struct state_functions {
 				for (unit_t* n : ptr(u->carrier.inside_units)) {
 					if (n->hp >= n->unit_type->hitpoints) continue;
 					set_unit_hp(n, n->hp + 128_fp8);
+					break;
 				}
 			} else u->secondary_order_state = 4;
 		}
@@ -13369,6 +13382,10 @@ struct state_functions {
 			stasis_unit(target);
 		}
 	}
+	
+	void mind_control_unit(unit_t* u, unit_t* source_unit) {
+		xcept("mind_control_unit");
+	}
 
 	void bullet_hit(bullet_t* b) {
 		switch (b->weapon_type->hit_type) {
@@ -15273,8 +15290,31 @@ struct state_functions {
 	virtual void on_unit_deselect(unit_t* u) {}
 
 	void destroy_unit_impl(unit_t* u) {
-		if (unit_is_carrier(u) || unit_is_reaver(u)) {
-			xcept("fixme: destroy carrier/reaver");
+		if (unit_is_carrier(u)) {
+			for (auto i = u->carrier.inside_units.begin(); i != u->carrier.inside_units.end();) {
+				unit_t* n = &*i++;
+				kill_unit(n);
+			}
+			for (auto i = u->carrier.outside_units.begin(); i != u->carrier.outside_units.end();) {
+				unit_t* n = &*i++;
+				n->fighter.parent = nullptr;
+				set_remove_timer(n, lcg_rand(39, 15, 45));
+				u->carrier.outside_units.remove(*n);
+				--u->carrier.outside_count;
+				n->fighter.fighter_link = {};
+			}
+		} else if (unit_is_reaver(u)) {
+			for (auto i = u->reaver.inside_units.begin(); i != u->reaver.inside_units.end();) {
+				unit_t* n = &*i++;
+				kill_unit(n);
+			}
+			for (auto i = u->reaver.outside_units.begin(); i != u->reaver.outside_units.end();) {
+				unit_t* n = &*i++;
+				n->fighter.parent = nullptr;
+				u->reaver.outside_units.remove(*n);
+				--u->reaver.outside_count;
+				n->fighter.fighter_link = {};
+			}
 		} else if (unit_is_ghost(u)) {
 			if (u->ghost.nuke_dot) {
 				sprite_run_anim(u->ghost.nuke_dot->sprite, iscript_anims::Death);
