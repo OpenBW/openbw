@@ -1423,6 +1423,10 @@ struct state_functions {
 	bool unit_position_is_visible(const unit_t* u, xy position) const {
 		return (st.tiles[tile_index(position)].visible & (1 << u->owner)) == 0;
 	}
+	
+	bool unit_position_is_explored(const unit_t* u, xy position) const {
+		return (st.tiles[tile_index(position)].explored & (1 << u->owner)) == 0;
+	}
 
 	bool unit_can_see_target(const unit_t* u, const unit_t* target) const {
 		if (unit_target_is_undetected(u, target)) return false;
@@ -1765,7 +1769,7 @@ struct state_functions {
 	size_t unit_max_scarab_count(const unit_t* u) const {
 		if (!unit_is_reaver(u)) return 0;
 		if (ut_hero(u)) return 10;
-		return player_has_upgrade(u->owner, UpgradeTypes::Reaver_Capacity) ? 8 : 4;
+		return player_has_upgrade(u->owner, UpgradeTypes::Reaver_Capacity) ? 10 : 5;
 	}
 	
 	size_t unit_queued_fighter_units(const unit_t* u) const {
@@ -3118,6 +3122,52 @@ struct state_functions {
 		}
 		return true;
 	}
+	
+	bool trigger_give_unit_to(unit_t* u, int new_owner) {
+		if (u_hallucination(u)) return false;
+		if (unit_is_mineral_field(u)) return false;
+		if (unit_is(u, UnitTypes::Resource_Vespene_Geyser)) return false;
+		if (unit_is_fighter(u)) return false;
+		if (ut_addon(u)) return false;
+		if (u->owner == new_owner) return false;
+		if (u_completed(u) && unit_is_refinery(u)) {
+			for (unit_t* n : ptr(st.player_units[u->owner])) {
+				if (!ut_worker(n)) continue;
+				if (!us_hidden(n)) continue;
+				if (n->order_type->id != Orders::HarvestGas) continue;
+				if (n->order_target.unit != u) continue;
+				give_unit_to(n, new_owner);
+				break;
+			}
+		}
+		give_unit_to(u, new_owner);
+		if (unit_provides_space(u)) {
+			for (unit_t* n : loaded_units(u)) {
+				give_unit_to(n, new_owner);
+			}
+		}
+		if (unit_is_carrier(u)) {
+			for (unit_t* n : ptr(u->carrier.inside_units)) {
+				give_unit_to(n, new_owner);
+			}
+			for (unit_t* n : ptr(u->carrier.outside_units)) {
+				give_unit_to(n, new_owner);
+			}
+		} else if (unit_is_reaver(u)) {
+			for (unit_t* n : ptr(u->reaver.inside_units)) {
+				give_unit_to(n, new_owner);
+			}
+			for (unit_t* n : ptr(u->reaver.outside_units)) {
+				give_unit_to(n, new_owner);
+			}
+		}
+		if (u_grounded_building(u)) {
+			if (u->building.addon) give_unit_to(u->building.addon, new_owner);
+			if (unit_is_building_addon(u)) give_unit_to(u->current_build_unit, new_owner);
+			if (unit_is_nydus(u) && u->building.nydus.exit) give_unit_to(u->building.nydus.exit, new_owner);
+		}
+		return true;
+	}
 
 	void give_unit_to(unit_t* u, int new_owner) {
 		bool any_upgrades_granted = false;
@@ -4134,7 +4184,7 @@ struct state_functions {
 				if (!any_neighbor_tile_unoccupied(target)) return false;
 				if (!is_reachable(u->sprite->position, target->sprite->position)) return false;
 				if (get_ground_height_at(target->sprite->position) != ground_height) return false;
-				if (!unit_position_is_visible(u, target->sprite->position)) return false;
+				if (!unit_position_is_explored(u, target->sprite->position)) return false;
 				if (unit_long_path_distance(target, target->sprite->position, u->sprite->position) > 2 * range) return false;
 				if (require_not_being_gathered && target->building.resource.is_being_gathered) return false;
 				return true;
@@ -4610,7 +4660,7 @@ struct state_functions {
 				}
 			} else if (unit_is(target, UnitTypes::Protoss_Shield_Battery)) {
 				if (unit_can_use_shield_battery(u, target)) {
-					set_unit_order(u, get_order_type(Orders::RechargeShieldsUnit));
+					set_unit_order(u, get_order_type(Orders::RechargeShieldsUnit), target);
 					return;
 				}
 			}
@@ -6890,7 +6940,7 @@ struct state_functions {
 			return;
 		}
 		if (u_ground_unit(u)) {
-			if (unit_target_in_range(u, target, u->next_speed.integer_part() * 2)) {
+			if (unit_target_in_range(u, target, (u->next_speed * 2).integer_part())) {
 				u_unset_status_flag(u, unit_t::status_flag_ground_unit);
 				queue_order_front(u, get_order_type(Orders::ResetCollision), {});
 			}
@@ -7058,10 +7108,7 @@ struct state_functions {
 		bool ready_to_attack = u_ready_to_attack(u);
 		bool flag_8 = u_status_flag(u, unit_t::status_flag_8);
 		interceptors_attack(u);
-		const order_type_t* next_order;
-		if (unit_is_reaver(u)) next_order = get_order_type(Orders::ReaverFight);
-		else next_order = get_order_type(Orders::CarrierFight);
-		queue_order_front(u, next_order, target);
+		queue_order_front(u, get_order_type(Orders::CarrierFight), target);
 		activate_next_order(u);
 		u_set_status_flag(u, unit_t::status_flag_ready_to_attack, ready_to_attack);
 		u_set_status_flag(u, unit_t::status_flag_8, flag_8);
@@ -7190,12 +7237,172 @@ struct state_functions {
 			if (u_hallucination(target)) kill_unit(target);
 			else {
 				create_sized_image(target, ImageTypes::IMAGEID_Mind_Control_Hit_Small);
-				mind_control_unit(target, u);
+				trigger_give_unit_to(target, u->owner);
+				if (unit_is(target, UnitTypes::Protoss_Dark_Archon)) target->energy = 0_fp8;
 			}
-			u->energy -= tech->energy_cost;
+			u->energy -= fp8::integer(tech->energy_cost);
 			u->shield_points = 0_fp8;
 			order_done(u);
 		}
+	}
+	
+	void order_Reaver(unit_t* u) {
+		if (!unit_is_reaver(u)) xcept("order_Reaver: unit is not a reaver");
+		int range = 32 * unit_target_acquisition_range(u);
+		if (carrier_reaver_attack(u, range, range * 2))  {
+			set_next_target_waypoint(u, u->order_target.pos);
+			if (direction_index(u->heading) - direction_index(xy_direction(u->next_target_waypoint - u->sprite->position)) <= 1) {
+				if (!u_cannot_attack(u) && u->reaver.outside_count == 0) {
+					unit_t* fighter = release_fighter(u);
+					if (fighter) {
+						set_unit_order(fighter, fighter->unit_type->attack_unit, u->order_target.unit);
+						u->main_order_timer = 60;
+					}
+				}
+			} else {
+				u->order_process_timer = 0;
+			}
+		}
+	}
+	
+	void order_ReaverAttack(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		if (!target) {
+			order_done(u);
+			return;
+		}
+		if (!unit_can_attack_target(u, target)) {
+			set_unit_order(u, get_order_type(Orders::Move), u->order_target.pos);
+			return;
+		}
+		bool ready_to_attack = u_ready_to_attack(u);
+		bool flag_8 = u_status_flag(u, unit_t::status_flag_8);
+		queue_order_front(u, get_order_type(Orders::ReaverFight), target);
+		activate_next_order(u);
+		u_set_status_flag(u, unit_t::status_flag_ready_to_attack, ready_to_attack);
+		u_set_status_flag(u, unit_t::status_flag_8, flag_8);
+	}
+	
+	void order_ScarabAttack(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		if (u->order_state == 0) {
+			set_remove_timer(u, 90);
+			u_set_status_flag(u, unit_t::status_flag_no_collide);
+			u->main_order_timer = 7;
+			if (target) move_to_target(u, target);
+			else {
+				set_unit_move_target(u, u->order_target.pos);
+				set_next_target_waypoint(u, u->order_target.pos);
+			}
+			u->order_state = 2;
+		} else if (u->order_state == 2 || u->order_state == 3) {
+			if (u->order_state == 2) {
+				if (u->main_order_timer == 0) {
+					u_unset_status_flag(u, unit_t::status_flag_no_collide);
+					u->order_state = 3;
+				}
+			}
+			bool is_at_target;
+			if (target) {
+				if (unit_target_in_range(u, target, 256) && u_movement_flag(target, 2)) crappy_move_to_target(u, target);
+				else try_follow_unit(u, target);
+				const weapon_type_t* w = u->unit_type->ground_weapon;
+				if (!w) xcept("order_ScarabAttack: no ground weapon");
+				is_at_target = unit_target_in_range(u, target, w->inner_splash_radius / 2);
+			} else {
+				is_at_target = unit_is_at_move_target(u);
+			}
+			if (is_at_target) {
+				u->order_target.pos = u->sprite->position;
+				sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
+				u->order_state = 6;
+			}
+		} else if (u->order_state == 6) {
+			if (u->order_signal & 1) {
+				u_set_status_flag(u, unit_t::status_flag_lifetime_expired);
+				kill_unit(u);
+			}
+		}
+	}
+	
+	void order_ReaverStop(unit_t* u) {
+		if (!unit_is_reaver(u)) xcept("order_ReaverStop: unit is not a reaver");
+		stop_unit(u);
+		set_next_target_waypoint(u, u->move_target.pos);
+		for (unit_t* n : ptr(u->reaver.outside_units)) {
+			set_unit_order(n, get_order_type(Orders::SelfDestructing));
+		}
+		set_unit_order(u, get_order_type(Orders::Reaver), u->order_target.unit);
+	}
+	
+	void order_RechargeShieldsUnit(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		if (!target || target->energy == 0_fp8 || unit_is_disabled(target)) {
+			order_done(u);
+			return;
+		}
+		if (u->order_state == 0) {
+			move_to_target_reset(u, target);
+			u->order_state = 1;
+		} else if (u->order_state == 1) {
+			if (unit_is_at_move_target(u)) {
+				if (u_immovable(u)) {
+					order_done(u);
+					return;
+				}
+				stop_unit(u);
+				set_next_target_waypoint(u, u->move_target.pos);
+				u->order_state = 2;
+			} else if (unit_target_in_range(u, target, 128)) {
+				stop_unit(u);
+				set_next_target_waypoint(u, u->move_target.pos);
+				u->order_state = 2;
+			}
+		}
+		if (u->order_state == 2) {
+			set_secondary_order(target, get_order_type(Orders::ShieldBattery));
+			create_sized_image(u, ImageTypes::IMAGEID_Recharge_Shields_Small, false);
+			queue_order_front(u, get_order_type(Orders::RechargeShieldsUnitRemoveOverlay), {});
+			u->order_state = 3;
+		}
+		if (u->order_state == 3) {
+			if (!target->order_target.unit) target->order_target.unit = u;
+			
+			fp8 shield_recharge = fp8::integer(u->unit_type->shield_points) - u->shield_points;
+			if (shield_recharge > fp8::integer(5)) shield_recharge = fp8::integer(5);
+			fp8 energy_cost = shield_recharge / 2;
+			if (energy_cost > target->energy) {
+				energy_cost = target->energy;
+				shield_recharge = energy_cost * 2;
+			}
+			set_unit_shield_points(u, u->shield_points + shield_recharge);
+			target->energy -= energy_cost;
+			
+			if (u->shield_points >= fp8::integer(u->unit_type->shield_points) || target->energy == 0_fp8) {
+				if (target->order_target.unit == u) target->order_target.unit = nullptr;
+				order_done(u);
+			}
+		}
+	}
+	
+	void order_RechargeShieldsUnitRemoveOverlay(unit_t* u) {
+		destroy_image_from_to(u, ImageTypes::IMAGEID_Recharge_Shields_Small, ImageTypes::IMAGEID_Recharge_Shields_Large);
+		if (u->order_queue.empty()) set_queued_order(u, false, u->unit_type->return_to_idle, {});
+		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
+		order_done(u);
+	}
+	
+	void order_RechargeShieldsBattery(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		set_secondary_order(u, get_order_type(Orders::ShieldBattery));
+		if (target && unit_can_use_shield_battery(target, u)) {
+			set_unit_order(target, get_order_type(Orders::Follow), u);
+		} else {
+			for (unit_t* n : find_units_noexpand(square_at(u->order_target.pos, 128))) {
+				if (unit_can_use_shield_battery(n, u)) set_unit_order(n, get_order_type(Orders::Follow), u);
+			}
+		}
+		order_done(u);
 	}
 
 	void execute_main_order(unit_t* u) {
@@ -7256,10 +7463,10 @@ struct state_functions {
 			order_IncompleteMorphing(u);
 			break;
 		case Orders::ScarabAttack:
-			xcept("ScarabAttack");
+			order_ScarabAttack(u);
 			break;
 		case Orders::RechargeShieldsUnit:
-			xcept("RechargeShieldsUnit");
+			order_RechargeShieldsUnit(u);
 			break;
 		case Orders::BuildingLand:
 			order_BuildingLand(u);
@@ -7279,8 +7486,8 @@ struct state_functions {
 		case Orders::GatherWaitInterrupted:
 			order_GatherWaitInterrupted(u);
 			break;
-		case Orders::Interrupted:
-			xcept("Interrupted");
+		case Orders::RechargeShieldsUnitRemoveOverlay:
+			order_RechargeShieldsUnitRemoveOverlay(u);
 			break;
 		case Orders::Sieging:
 			order_Sieging(u);
@@ -7353,6 +7560,9 @@ struct state_functions {
 			break;
 		case Orders::Move:
 			order_Move(u);
+			break;
+		case Orders::ReaverStop:
+			order_ReaverStop(u);
 			break;
 		case Orders::MoveToAttack:
 			order_MoveToTargetOrder(u);
@@ -7451,31 +7661,25 @@ struct state_functions {
 			order_Carrier(u);
 			break;
 		case Orders::Reaver:
-			xcept("Reaver");
+			order_Reaver(u);
 			break;
 		case Orders::ReaverAttack:
-			xcept("ReaverAttack");
+			order_ReaverAttack(u);
 			break;
 		case Orders::ReaverMoveToAttack:
-			xcept("ReaverMoveToAttack");
+			order_MoveToTargetOrder(u);
 			break;
 		case Orders::ReaverFight:
-			xcept("ReaverFight");
+			order_Reaver(u);
 			break;
 		case Orders::ReaverHoldPosition:
-			xcept("ReaverHoldPosition");
+			order_Reaver(u);
 			break;
 		case Orders::InterceptorAttack:
 			order_InterceptorAttack(u);
 			break;
-		case Orders::ScarabAttack:
-			xcept("ScarabAttack");
-			break;
-		case Orders::RechargeShieldsUnit:
-			xcept("RechargeShieldsUnit");
-			break;
-		case Orders::ShieldBattery:
-			xcept("ShieldBattery");
+		case Orders::RechargeShieldsBattery:
+			order_RechargeShieldsBattery(u);
 			break;
 		case Orders::InterceptorReturn:
 			order_InterceptorReturn(u);
@@ -7718,7 +7922,7 @@ struct state_functions {
 			order_Spell(u);
 			break;
 		case Orders::CastMaelstrom:
-			xcept("CastMaelstrom");
+			order_Spell(u);
 			break;
 		default:
 			break;
@@ -7946,6 +8150,29 @@ struct state_functions {
 			} else u->secondary_order_state = 4;
 		}
 	}
+	
+	void secondary_order_ShieldBattery(unit_t* u) {
+		unit_t* target = u->order_target.unit;
+		if (u->secondary_order_state == 0) {
+			if (target) {
+				sprite_run_anim(u->sprite, iscript_anims::IsWorking);
+				u->secondary_order_state = 1;
+			}
+		} else if (u->secondary_order_state == 1) {
+			if (target) {
+				if (target->order_type->id != Orders::RechargeShieldsUnit) {
+					u->order_target.unit = nullptr;
+					u->secondary_order_state = 2;
+				}
+			} else u->secondary_order_state = 2;
+		} else if (u->secondary_order_state == 2) {
+			if (target) u->secondary_order_state = 1;
+			else {
+				sprite_run_anim(u->sprite, iscript_anims::WorkingToIdle);
+				u->secondary_order_state = 0;
+			}
+		}
+	}
 
 	void execute_secondary_order(unit_t* u) {
 		if (u->secondary_order_type->id == Orders::Hallucination2) {
@@ -7966,7 +8193,7 @@ struct state_functions {
 			secondary_order_TrainFighter(u);
 			break;
 		case Orders::ShieldBattery:
-			xcept("ShieldBattery");
+			secondary_order_ShieldBattery(u);
 			break;
 		case Orders::SpawningLarva:
 			secondary_order_SpawningLarva(u);
@@ -12176,7 +12403,7 @@ struct state_functions {
 	void execute_hidden_unit_secondary_order(unit_t* u) {
 		switch (u->secondary_order_type->id) {
 		case Orders::TrainFighter:
-			xcept("hidden TrainFighter");
+			secondary_order_TrainFighter(u);
 			break;
 		case Orders::Cloak:
 			secondary_order_Cloak(u);
@@ -12874,9 +13101,9 @@ struct state_functions {
 		return 0;
 	}
 
-	image_t* create_sized_image(unit_t* u, ImageTypes small_image) {
+	image_t* create_sized_image(unit_t* u, ImageTypes small_image, bool on_subunit = true) {
 		ImageTypes image = (ImageTypes)((int)small_image + unit_sprite_size(u));
-		return create_image(get_image_type(image), (u->subunit ? u->subunit : u)->sprite, {}, image_order_top);
+		return create_image(get_image_type(image), (on_subunit ? u->subunit ? u->subunit : u : u)->sprite, {}, image_order_top);
 	}
 
 	void create_defensive_matrix_image(unit_t* u) {
@@ -13169,7 +13396,7 @@ struct state_functions {
 		bool damages_allies = !is_air_splash && b->weapon_type->hit_type != weapon_type_t::hit_type_enemy_splash;
 		for (unit_t* target : find_units(bb)) {
 			if (target == b->bullet_owner_unit && b->weapon_type->id != WeaponTypes::Psionic_Storm) continue;
-			if (!damages_allies && target->owner == b->owner && target != b->bullet_owner_unit) continue;
+			if (!damages_allies && target->owner == b->owner && target != b->bullet_target) continue;
 			if (!weapon_can_target_unit(b->weapon_type, target)) continue;
 			int distance = unit_distance_to(target, b->sprite->position);
 			if (distance > b->weapon_type->outer_splash_radius) continue;
@@ -13383,8 +13610,33 @@ struct state_functions {
 		}
 	}
 	
-	void mind_control_unit(unit_t* u, unit_t* source_unit) {
-		xcept("mind_control_unit");
+	void maelstrom_unit(unit_t* u) {
+		if (u->maelstrom_timer == 0) {
+			create_sized_image(u, ImageTypes::IMAGEID_Maelstorm_Overlay_Small);
+		}
+		if (u->maelstrom_timer < 22) u->maelstrom_timer = 22;
+		set_unit_disabled(u);
+	}
+	
+	void maelstrom(xy pos, unit_t* source_unit) {
+		thingy_t* t = create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Maelstrom_Hit), pos, 0);
+		if (t) {
+			t->sprite->elevation_level = 17;
+			if (!us_hidden(t)) set_sprite_visibility(t->sprite, tile_visibility(t->sprite->position));
+		}
+		// todo: callback for sound
+		for (unit_t* target : find_units_noexpand(square_at(pos, 48))) {
+			if (u_hallucination(target)) {
+				kill_unit(target);
+				continue;
+			}
+			if (target == source_unit) continue;
+			if (u_invincible(target)) continue;
+			if (u_burrowed(target)) continue;
+			if (ut_building(target)) continue;
+			if (!ut_organic(target)) continue;
+			maelstrom_unit(target);
+		}
 	}
 
 	void bullet_hit(bullet_t* b) {
@@ -13482,6 +13734,9 @@ struct state_functions {
 			break;
 		case weapon_type_t::hit_type_consume:
 			if (b->bullet_target && b->bullet_owner_unit && !unit_dying(b->bullet_target)) consume_unit(b->bullet_target, b->bullet_owner_unit);
+			break;
+		case weapon_type_t::hit_type_maelstrom:
+			if (b->bullet_target_pos != xy()) maelstrom(b->bullet_target_pos, b->bullet_owner_unit);
 			break;
 		default: xcept("unknown bullet hit type %d", b->weapon_type->hit_type);
 		}
@@ -14853,10 +15108,20 @@ struct state_functions {
 				*i = {u, new_value};
 			}
 		};
-		reinsert(st.unit_finder_x, u->unit_finder_bounding_box.from.x, bb.from.x);
-		reinsert(st.unit_finder_x, u->unit_finder_bounding_box.to.x, bb.to.x);
-		reinsert(st.unit_finder_y, u->unit_finder_bounding_box.from.y, bb.from.y);
-		reinsert(st.unit_finder_y, u->unit_finder_bounding_box.to.y, bb.to.y);
+		if (bb.from.x <= u->unit_finder_bounding_box.from.x) {
+			reinsert(st.unit_finder_x, u->unit_finder_bounding_box.from.x, bb.from.x);
+			reinsert(st.unit_finder_x, u->unit_finder_bounding_box.to.x, bb.to.x);
+		} else {
+			reinsert(st.unit_finder_x, u->unit_finder_bounding_box.to.x, bb.to.x);
+			reinsert(st.unit_finder_x, u->unit_finder_bounding_box.from.x, bb.from.x);
+		}
+		if (bb.from.y <= u->unit_finder_bounding_box.from.y) {
+			reinsert(st.unit_finder_y, u->unit_finder_bounding_box.from.y, bb.from.y);
+			reinsert(st.unit_finder_y, u->unit_finder_bounding_box.to.y, bb.to.y);
+		} else {
+			reinsert(st.unit_finder_y, u->unit_finder_bounding_box.to.y, bb.to.y);
+			reinsert(st.unit_finder_y, u->unit_finder_bounding_box.from.y, bb.from.y);
+		}
 		u->unit_finder_bounding_box = bb;
 	}
 
@@ -15670,8 +15935,10 @@ struct state_functions {
 			u->lockdown_timer = timer;
 		}
 		if (u->maelstrom_timer) {
+			auto timer = u->maelstrom_timer;
 			u->maelstrom_timer = 0;
-			xcept("apply maelstrom");
+			maelstrom_unit(u);
+			u->maelstrom_timer = timer;
 		}
 		if (u->irradiate_timer) {
 			if (!weapon_can_target_unit(get_weapon_type(WeaponTypes::Irradiate), u)) {
@@ -17478,119 +17745,119 @@ struct state_functions {
 		switch (tech->id) {
 		case TechTypes::Stim_Packs:
 			if (!unit_is(u, UnitTypes::Terran_Academy)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!u_grounded_building(u)) return false;
 			return true;
 		case TechTypes::Lockdown:
 			if (!unit_is(u, UnitTypes::Terran_Covert_Ops)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!u_grounded_building(u)) return false;
 			return true;
 		case TechTypes::Spider_Mines:
 			if (!unit_is(u, UnitTypes::Terran_Machine_Shop)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!u_grounded_building(u)) return false;
 			return true;
 		case TechTypes::Tank_Siege_Mode:
 			if (!unit_is(u, UnitTypes::Terran_Machine_Shop)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!u_grounded_building(u)) return false;
 			return true;
 		case TechTypes::EMP_Shockwave:
 			if (!unit_is(u, UnitTypes::Terran_Science_Facility)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!u_grounded_building(u)) return false;
 			return true;
 		case TechTypes::Irradiate:
 			if (!unit_is(u, UnitTypes::Terran_Science_Facility)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!u_grounded_building(u)) return false;
 			return true;
 		case TechTypes::Yamato_Gun:
 			if (!unit_is(u, UnitTypes::Terran_Physics_Lab)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!u_grounded_building(u)) return false;
 			return true;
 		case TechTypes::Cloaking_Field:
 			if (!unit_is(u, UnitTypes::Terran_Control_Tower)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!u_grounded_building(u)) return false;
 			return true;
 		case TechTypes::Personnel_Cloaking:
 			if (!unit_is(u, UnitTypes::Terran_Covert_Ops)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!u_grounded_building(u)) return false;
 			return true;
 		case TechTypes::Restoration:
 			if (!unit_is(u, UnitTypes::Terran_Academy)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!u_grounded_building(u)) return false;
 			return true;
 		case TechTypes::Optical_Flare:
 			if (!unit_is(u, UnitTypes::Terran_Academy)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!u_grounded_building(u)) return false;
 			return true;
 		case TechTypes::Burrowing:
 			if (!unit_is(u, UnitTypes::Zerg_Hatchery) && !unit_is(u, UnitTypes::Zerg_Lair) && !unit_is(u, UnitTypes::Zerg_Hive)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Spawn_Broodlings:
 			if (!unit_is(u, UnitTypes::Zerg_Queens_Nest)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Parasite:
 			if (!unit_is(u, UnitTypes::Zerg_Queens_Nest)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Plague:
 			if (!unit_is(u, UnitTypes::Zerg_Defiler_Mound)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Consume:
 			if (!unit_is(u, UnitTypes::Zerg_Defiler_Mound)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Ensnare:
 			if (!unit_is(u, UnitTypes::Zerg_Queens_Nest)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Lurker_Aspect:
 			if (!unit_is(u, UnitTypes::Zerg_Hydralisk_Den)) return false;
 			if (!player_has_completed_unit(owner, UnitTypes::Zerg_Lair) && !player_has_completed_unit(owner, UnitTypes::Zerg_Hive)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Psionic_Storm:
 			if (!unit_is(u, UnitTypes::Protoss_Templar_Archives)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Hallucination:
 			if (!unit_is(u, UnitTypes::Protoss_Templar_Archives)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Recall:
 			if (!unit_is(u, UnitTypes::Protoss_Arbiter_Tribunal)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Stasis_Field:
 			if (!unit_is(u, UnitTypes::Protoss_Arbiter_Tribunal)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Disruption_Web:
 			if (!unit_is(u, UnitTypes::Protoss_Fleet_Beacon)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Mind_Control:
 			if (!unit_is(u, UnitTypes::Protoss_Templar_Archives)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Feedback:
 			if (!unit_is(u, UnitTypes::Protoss_Templar_Archives)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case TechTypes::Maelstrom:
 			if (!unit_is(u, UnitTypes::Protoss_Templar_Archives)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		default:
 			return false;
@@ -17613,7 +17880,7 @@ struct state_functions {
 		case UpgradeTypes::Terran_Infantry_Armor:
 			if (!unit_is(u, UnitTypes::Terran_Engineering_Bay)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (player_upgrade_level(owner, UpgradeTypes::Terran_Infantry_Armor) != 0) {
 				if (!player_has_completed_unit(owner, UnitTypes::Terran_Science_Facility)) return false;
 			}
@@ -17621,7 +17888,7 @@ struct state_functions {
 		case UpgradeTypes::Terran_Vehicle_Plating:
 			if (!unit_is(u, UnitTypes::Terran_Armory)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (player_upgrade_level(owner, UpgradeTypes::Terran_Vehicle_Plating) != 0) {
 				if (!player_has_completed_unit(owner, UnitTypes::Terran_Science_Facility)) return false;
 			}
@@ -17629,14 +17896,14 @@ struct state_functions {
 		case UpgradeTypes::Terran_Ship_Plating:
 			if (!unit_is(u, UnitTypes::Terran_Armory)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (player_upgrade_level(owner, UpgradeTypes::Terran_Ship_Plating) != 0) {
 				if (!player_has_completed_unit(owner, UnitTypes::Terran_Science_Facility)) return false;
 			}
 			return true;
 		case UpgradeTypes::Zerg_Carapace:
 			if (!unit_is(u, UnitTypes::Zerg_Evolution_Chamber)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			switch (player_upgrade_level(owner, UpgradeTypes::Zerg_Carapace)) {
 			case 1:
 				if (!player_has_completed_unit(owner, UnitTypes::Zerg_Lair) && !player_has_unit(owner, UnitTypes::Zerg_Hive)) return false;
@@ -17648,7 +17915,7 @@ struct state_functions {
 			return true;
 		case UpgradeTypes::Zerg_Flyer_Carapace:
 			if (!unit_is(u, UnitTypes::Zerg_Spire) && !unit_is(u, UnitTypes::Zerg_Greater_Spire)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			switch (player_upgrade_level(owner, UpgradeTypes::Zerg_Flyer_Carapace)) {
 			case 1:
 				if (!player_has_completed_unit(owner, UnitTypes::Zerg_Lair) && !player_has_unit(owner, UnitTypes::Zerg_Hive)) return false;
@@ -17660,14 +17927,14 @@ struct state_functions {
 			return true;
 		case UpgradeTypes::Protoss_Ground_Armor:
 			if (!unit_is(u, UnitTypes::Protoss_Forge)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (player_upgrade_level(owner, UpgradeTypes::Protoss_Ground_Armor) != 0) {
 				if (!player_has_completed_unit(owner, UnitTypes::Protoss_Templar_Archives)) return false;
 			}
 			return true;
 		case UpgradeTypes::Protoss_Air_Armor:
 			if (!unit_is(u, UnitTypes::Protoss_Cybernetics_Core)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (player_upgrade_level(owner, UpgradeTypes::Protoss_Air_Armor) != 0) {
 				if (!player_has_completed_unit(owner, UnitTypes::Protoss_Fleet_Beacon)) return false;
 			}
@@ -17675,7 +17942,7 @@ struct state_functions {
 		case UpgradeTypes::Terran_Infantry_Weapons:
 			if (!unit_is(u, UnitTypes::Terran_Engineering_Bay)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (player_upgrade_level(owner, UpgradeTypes::Terran_Infantry_Weapons) != 0) {
 				if (!player_has_completed_unit(owner, UnitTypes::Terran_Science_Facility)) return false;
 			}
@@ -17683,7 +17950,7 @@ struct state_functions {
 		case UpgradeTypes::Terran_Vehicle_Weapons:
 			if (!unit_is(u, UnitTypes::Terran_Armory)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (player_upgrade_level(owner, UpgradeTypes::Terran_Vehicle_Weapons) != 0) {
 				if (!player_has_completed_unit(owner, UnitTypes::Terran_Science_Facility)) return false;
 			}
@@ -17691,14 +17958,14 @@ struct state_functions {
 		case UpgradeTypes::Terran_Ship_Weapons:
 			if (!unit_is(u, UnitTypes::Terran_Armory)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (player_upgrade_level(owner, UpgradeTypes::Terran_Ship_Weapons) != 0) {
 				if (!player_has_completed_unit(owner, UnitTypes::Terran_Science_Facility)) return false;
 			}
 			return true;
 		case UpgradeTypes::Zerg_Melee_Attacks:
 			if (!unit_is(u, UnitTypes::Zerg_Evolution_Chamber)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			switch (player_upgrade_level(owner, UpgradeTypes::Zerg_Melee_Attacks)) {
 			case 1:
 				if (!player_has_completed_unit(owner, UnitTypes::Zerg_Lair) && !player_has_unit(owner, UnitTypes::Zerg_Hive)) return false;
@@ -17710,7 +17977,7 @@ struct state_functions {
 			return true;
 		case UpgradeTypes::Zerg_Missile_Attacks:
 			if (!unit_is(u, UnitTypes::Zerg_Evolution_Chamber)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			switch (player_upgrade_level(owner, UpgradeTypes::Zerg_Missile_Attacks)) {
 			case 1:
 				if (!player_has_completed_unit(owner, UnitTypes::Zerg_Lair) && !player_has_unit(owner, UnitTypes::Zerg_Hive)) return false;
@@ -17722,7 +17989,7 @@ struct state_functions {
 			return true;
 		case UpgradeTypes::Zerg_Flyer_Attacks:
 			if (!unit_is(u, UnitTypes::Zerg_Spire) && !unit_is(u, UnitTypes::Zerg_Greater_Spire)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			switch (player_upgrade_level(owner, UpgradeTypes::Zerg_Flyer_Attacks)) {
 			case 1:
 				if (!player_has_completed_unit(owner, UnitTypes::Zerg_Lair) && !player_has_unit(owner, UnitTypes::Zerg_Hive)) return false;
@@ -17734,21 +18001,21 @@ struct state_functions {
 			return true;
 		case UpgradeTypes::Protoss_Ground_Weapons:
 			if (!unit_is(u, UnitTypes::Protoss_Forge)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (player_upgrade_level(owner, UpgradeTypes::Protoss_Ground_Weapons) != 0) {
 				if (!player_has_completed_unit(owner, UnitTypes::Protoss_Templar_Archives)) return false;
 			}
 			return true;
 		case UpgradeTypes::Protoss_Air_Weapons:
 			if (!unit_is(u, UnitTypes::Protoss_Cybernetics_Core)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (player_upgrade_level(owner, UpgradeTypes::Protoss_Air_Weapons) != 0) {
 				if (!player_has_completed_unit(owner, UnitTypes::Protoss_Fleet_Beacon)) return false;
 			}
 			return true;
 		case UpgradeTypes::Protoss_Plasma_Shields:
 			if (!unit_is(u, UnitTypes::Protoss_Forge)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (player_upgrade_level(owner, UpgradeTypes::Protoss_Plasma_Shields) != 0) {
 				if (!player_has_completed_unit(owner, UnitTypes::Protoss_Cybernetics_Core)) return false;
 			}
@@ -17756,147 +18023,147 @@ struct state_functions {
 		case UpgradeTypes::U_238_Shells:
 			if (!unit_is(u, UnitTypes::Terran_Academy)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Ion_Thrusters:
 			if (!unit_is(u, UnitTypes::Terran_Machine_Shop)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Titan_Reactor:
 			if (!unit_is(u, UnitTypes::Terran_Science_Facility)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Ocular_Implants:
 			if (!unit_is(u, UnitTypes::Terran_Covert_Ops)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Moebius_Reactor:
 			if (!unit_is(u, UnitTypes::Terran_Covert_Ops)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Apollo_Reactor:
 			if (!unit_is(u, UnitTypes::Terran_Control_Tower)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Colossus_Reactor:
 			if (!unit_is(u, UnitTypes::Terran_Physics_Lab)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Ventral_Sacs:
 			if (!unit_is(u, UnitTypes::Zerg_Lair) && !unit_is(u, UnitTypes::Zerg_Hive)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Antennae:
 			if (!unit_is(u, UnitTypes::Zerg_Lair) && !unit_is(u, UnitTypes::Zerg_Hive)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Pneumatized_Carapace:
 			if (!unit_is(u, UnitTypes::Zerg_Lair) && !unit_is(u, UnitTypes::Zerg_Hive)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Metabolic_Boost:
 			if (!unit_is(u, UnitTypes::Zerg_Spawning_Pool)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Adrenal_Glands:
 			if (!unit_is(u, UnitTypes::Zerg_Spawning_Pool)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!player_has_completed_unit(owner, UnitTypes::Zerg_Hive)) return false;
 			return true;
 		case UpgradeTypes::Muscular_Augments:
 			if (!unit_is(u, UnitTypes::Zerg_Hydralisk_Den)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Grooved_Spines:
 			if (!unit_is(u, UnitTypes::Zerg_Hydralisk_Den)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Gamete_Meiosis:
 			if (!unit_is(u, UnitTypes::Zerg_Queens_Nest)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Metasynaptic_Node:
 			if (!unit_is(u, UnitTypes::Zerg_Defiler_Mound)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Singularity_Charge:
 			if (!unit_is(u, UnitTypes::Protoss_Cybernetics_Core)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Leg_Enhancements:
 			if (!unit_is(u, UnitTypes::Protoss_Citadel_of_Adun)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Scarab_Damage:
 			if (!unit_is(u, UnitTypes::Protoss_Robotics_Support_Bay)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Reaver_Capacity:
 			if (!unit_is(u, UnitTypes::Protoss_Robotics_Support_Bay)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Gravitic_Drive:
 			if (!unit_is(u, UnitTypes::Protoss_Robotics_Support_Bay)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Sensor_Array:
 			if (!unit_is(u, UnitTypes::Protoss_Observatory)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Gravitic_Boosters:
 			if (!unit_is(u, UnitTypes::Protoss_Observatory)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Khaydarin_Amulet:
 			if (!unit_is(u, UnitTypes::Protoss_Templar_Archives)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Apial_Sensors:
 			if (!unit_is(u, UnitTypes::Protoss_Fleet_Beacon)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Gravitic_Thrusters:
 			if (!unit_is(u, UnitTypes::Protoss_Fleet_Beacon)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Carrier_Capacity:
 			if (!unit_is(u, UnitTypes::Protoss_Fleet_Beacon)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Khaydarin_Core:
 			if (!unit_is(u, UnitTypes::Protoss_Arbiter_Tribunal)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Argus_Jewel:
 			if (!unit_is(u, UnitTypes::Protoss_Fleet_Beacon)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Caduceus_Reactor:
 			if (!unit_is(u, UnitTypes::Terran_Academy)) return false;
 			if (!u_grounded_building(u)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Argus_Talisman:
 			if (!unit_is(u, UnitTypes::Protoss_Templar_Archives)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Chitinous_Plating:
 			if (!unit_is(u, UnitTypes::Zerg_Ultralisk_Cavern)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Anabolic_Synthesis:
 			if (!unit_is(u, UnitTypes::Zerg_Ultralisk_Cavern)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			return true;
 		case UpgradeTypes::Charon_Boosters:
 			if (!unit_is(u, UnitTypes::Terran_Machine_Shop)) return false;
-			if (unit_is_constructing(u) || unit_is_researching(u)) return false;
+			if (unit_is_constructing(u) || unit_is_researching(u) || unit_is_upgrading(u)) return false;
 			if (!player_has_completed_unit(owner, UnitTypes::Terran_Armory)) return false;
 			return true;
 		default:

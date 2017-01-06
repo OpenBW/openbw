@@ -453,7 +453,7 @@ enum struct Orders : int {
 	GatheringInterrupted,
 	GatherWaitInterrupted,
 	ReturnMinerals,
-	Interrupted,
+	RechargeShieldsUnitRemoveOverlay,
 	EnterTransport,
 	PickupIdle,
 	PickupTransport,

@@ -274,7 +274,7 @@ struct action_functions: state_functions {
 			if (u && u->unit_type->id != UnitTypes::Terran_Nuclear_Missile) {
 				if (std::find(selection.begin(), selection.end(), u) == selection.end()) {
 					if (!us_hidden(u) && (selection.empty() || unit_can_be_multi_selected(u))) {
-						if (selection.size() == 12) xcept("attempt to select more than 12 units");
+						if (selection.size() == 12) xcept("action_select: attempt to select more than 12 units");
 						selection.push_back(u);
 						retval = true;
 					}
@@ -291,12 +291,13 @@ struct action_functions: state_functions {
 	template<typename units_T>
 	bool action_shift_select(int owner, units_T&& units) {
 		auto& selection = action_st.selection.at(owner);
+		if (selection.size() + units.size() > 12) return false;
 		bool retval = false;
 		for (unit_t* u : units) {
 			if (u) {
 				if (std::find(selection.begin(), selection.end(), u) == selection.end()) {
 					if (!us_hidden(u) && (selection.empty() || unit_can_be_multi_selected(u))) {
-						if (selection.size() == 12) xcept("attempt to select more than 12 units");
+						if (selection.size() == 12) xcept("action_shift_select: attempt to select more than 12 units");
 						selection.push_back(u);
 						retval = true;
 					}
@@ -948,7 +949,7 @@ struct action_functions: state_functions {
 			if (u->owner != owner) continue;
 			const unit_type_t* build_type = nullptr;
 			if (unit_is_carrier(u)) build_type = get_unit_type(UnitTypes::Protoss_Interceptor);
-			else if (unit_is_reaver(u)) build_type = get_unit_type(UnitTypes::Protoss_Reaver);
+			else if (unit_is_reaver(u)) build_type = get_unit_type(UnitTypes::Protoss_Scarab);
 			if (!build_type) continue;
 			if (!unit_can_build(u, build_type)) continue;
 			if (!build_queue_push(u, build_type)) continue;
@@ -963,6 +964,16 @@ struct action_functions: state_functions {
 	
 	bool action_morph_dark_archon(int owner) {
 		return morph_archon_impl(owner, true);
+	}
+	
+	bool action_reaver_stop(int owner) {
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (!unit_can_receive_order(u, get_order_type(Orders::ReaverStop), owner)) continue;
+			set_unit_order(u, get_order_type(Orders::ReaverStop));
+			retval = true;
+		}
+		return retval;
 	}
 
 	template<typename reader_T>
@@ -1248,6 +1259,11 @@ struct action_functions: state_functions {
 	bool read_action_morph_dark_archon(int owner, reader_T&& r) {
 		return action_morph_dark_archon(owner);
 	}
+	
+	template<typename reader_T>
+	bool read_action_reaver_stop(int owner, reader_T&& r) {
+		return action_reaver_stop(owner);
+	}
 
 	virtual void on_action(int owner, int action) {
 	}
@@ -1288,6 +1304,8 @@ struct action_functions: state_functions {
 			return read_action_stop(owner, r);
 		case 27:
 			return read_action_carrier_stop(owner, r);
+		case 28:
+			return read_action_reaver_stop(owner, r);
 		case 30:
 			return read_action_return_cargo(owner, r);
 		case 31:
