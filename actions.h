@@ -923,10 +923,12 @@ struct action_functions: state_functions {
 	}
 	
 	bool action_cancel_morph(int owner) {
-		unit_t* u = get_single_selected_unit(owner);
-		if (!u || u->owner != owner) return false;
-		cancel_building_unit(u);
-		return true;
+		bool retval = false;
+		for (unit_t* u : selected_units(owner)) {
+			if (!u || u->owner != owner) return false;
+			if (cancel_building_unit(u)) retval = true;
+		}
+		return retval;
 	}
 	
 	bool action_morph_archon(int owner) {

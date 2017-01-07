@@ -945,6 +945,12 @@ struct state_functions {
 		}
 		return nullptr;
 	}
+	
+	image_t* find_image(unit_t* u, ImageTypes first_id, ImageTypes last_id) const {
+		image_t* r = find_image(u->sprite, first_id, last_id);
+		if (!r && u->subunit) r = find_image(u->subunit->sprite, first_id, last_id);
+		return r;
+	}
 
 	void destroy_image_from_to(sprite_t* sprite, ImageTypes first_id, ImageTypes last_id) {
 		image_t* image = find_image(sprite, first_id, last_id);
@@ -1110,7 +1116,7 @@ struct state_functions {
 				if (!v) --u->acid_spore_count;
 			}
 			if (u->acid_spore_count) {
-				xcept("acid spore stuff");
+				update_acid_spore_image(u);
 			} else {
 				remove_acid_spores(u);
 			}
@@ -1409,11 +1415,15 @@ struct state_functions {
 		if (unit_is(ut, UnitTypes::Protoss_Scarab)) return true;
 		return false;
 	}
+	
+	bool unit_is_undetected(const unit_t* u, int owner) const {
+		if (!u_cloaked(u) && !u_requires_detector(u)) return false;
+		if (u->detected_flags & (1 << owner)) return false;
+		return true;
+	}
 
 	bool unit_target_is_undetected(const unit_t* u, const unit_t* target) const {
-		if (!u_cloaked(target) && !u_requires_detector(target)) return false;
-		if (target->detected_flags & (1 << u->owner)) return false;
-		return true;
+		return unit_is_undetected(target, u->owner);
 	}
 
 	bool unit_target_is_visible(const unit_t* u, const unit_t* target) const {
@@ -2323,20 +2333,19 @@ struct state_functions {
 		}
 	}
 
-	void cancel_building_unit(unit_t* u) {
-		if (!u->sprite) return;
-		if (u->order_type->id == Orders::Die) return;
-		if (u_completed(u)) return;
-		if (unit_is(u, UnitTypes::Zerg_Guardian)) return;
-		if (unit_is(u, UnitTypes::Zerg_Lurker)) return;
-		if (unit_is(u, UnitTypes::Zerg_Devourer)) return;
-		if (unit_is(u, UnitTypes::Zerg_Mutalisk)) return;
-		if (unit_is(u, UnitTypes::Zerg_Hydralisk)) return;
-		if (unit_is_nydus(u) && !u->building.nydus.exit) return;
+	bool cancel_building_unit(unit_t* u) {
+		if (unit_dying(u)) return false;
+		if (u_completed(u)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Guardian)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Lurker)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Devourer)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Mutalisk)) return false;
+		if (unit_is(u, UnitTypes::Zerg_Hydralisk)) return false;
+		if (unit_is_nydus(u) && !u->building.nydus.exit) return false;
 		if (u_grounded_building(u)) {
 			if (unit_race(u) == race::zerg) {
 				cancel_morphing_building(u);
-				return;
+				return true;
 			}
 			partially_refund_unit_costs(u->owner, u->unit_type);
 		} else {
@@ -2351,7 +2360,14 @@ struct state_functions {
 			morph_to = get_unit_type(UnitTypes::Zerg_Hydralisk);
 		}
 		if (morph_to) {
-			xcept("cancel_building_unit: morph fixme");
+			morph_unit(u, morph_to);
+			if (!u->build_queue.empty()) u->build_queue.erase(u->build_queue.begin());
+			u->remaining_build_time = 0;
+			if (!u->previous_unit_type) xcept("cancel_building_unit: previous_unit_type is null");
+			replace_sprite_images(u->sprite, u->previous_unit_type->flingy->sprite->image, 0_dir);
+			u->order_signal &= ~4;
+			sprite_run_anim(u->sprite, iscript_anims::SpecialState2);
+			set_unit_order(u, get_order_type(Orders::ZergBirth));
 		} else {
 			if (unit_is(u, UnitTypes::Terran_Nuclear_Missile) && u->connected_unit) {
 				if (unit_is_ghost(u->connected_unit)) {
@@ -2361,6 +2377,7 @@ struct state_functions {
 			}
 			kill_unit(u);
 		}
+		return true;
 	}
 
 	void cancel_build_queue(unit_t* u, size_t index) {
@@ -3671,8 +3688,9 @@ struct state_functions {
 
 	void make_unit_hallucination(unit_t* u) {
 		increment_unit_counts(u, -1);
-		add_completed_unit(u, -1, true);
+		if (u_completed(u)) add_completed_unit(u, -1, true);
 		u_set_status_flag(u, unit_t::status_flag_hallucination);
+		u_set_status_flag(u, unit_t::status_flag_completed);
 		increment_unit_counts(u, 1);
 		add_completed_unit(u, 1, true);
 		if (!ut_turret(u)) {
@@ -3687,8 +3705,12 @@ struct state_functions {
 				increment_unit_counts(u->subunit, 1);
 				add_completed_unit(u->subunit, 1, true);
 			}
-			if (unit_is_carrier(u) || unit_is_reaver(u)) {
-				xcept("fixme: carrier/reaver hallucination");
+			if (unit_is_carrier(u)) {
+				kill_interceptors(u);
+			} else if (unit_is_reaver(u)) {
+				for (unit_t* n : ptr(u->reaver.inside_units)) {
+					make_unit_hallucination(n);
+				}
 			}
 		}
 	}
@@ -3764,7 +3786,6 @@ struct state_functions {
 		to->cycle_counter = from->cycle_counter;
 		to->blinded_by = from->blinded_by;
 		to->maelstrom_timer = from->maelstrom_timer;
-		to->unused_0x125 = from->unused_0x125;
 		to->acid_spore_count = from->acid_spore_count;
 		to->acid_spore_time = from->acid_spore_time;
 		apply_unit_effects(to);
@@ -4111,6 +4132,44 @@ struct state_functions {
 		show_unit(r);
 		r->fighter.is_outside = true;
 		return r;
+	}
+	
+	unit_t* create_hallucination(unit_t* source_unit, int owner) {
+		unit_t* u = create_unit(source_unit->unit_type, source_unit->sprite->position, owner);
+		if (!u) {
+			display_last_error_for_player(owner);
+			return nullptr;
+		}
+		u->hp = u->unit_type->hitpoints;
+		make_unit_hallucination(u);
+		set_unit_order(u, u->unit_type->human_ai_idle);
+		if (unit_is_reaver(source_unit) && unit_is_reaver(u)) {
+			for (unit_t* source_n : ptr(source_unit->reaver.inside_units)) {
+				unit_t* n = create_hallucination(source_n, owner);
+				if (n) {
+					hide_unit(n);
+					if (unit_is_fighter(n)) {
+						n->fighter.parent = u;
+						n->fighter.is_outside = false;
+						u->reaver.inside_units.push_front(*n);
+						++u->reaver.inside_count;
+					}
+				}
+			}
+			for (unit_t* source_n : ptr(source_unit->reaver.outside_units)) {
+				unit_t* n = create_hallucination(source_n, owner);
+				if (n) {
+					hide_unit(n);
+					if (unit_is_fighter(n)) {
+						n->fighter.parent = u;
+						n->fighter.is_outside = false;
+						u->reaver.inside_units.push_front(*n);
+						++u->reaver.inside_count;
+					}
+				}
+			}
+		}
+		return u;
 	}
 
 	void order_Stop(unit_t* u) {
@@ -5757,14 +5816,14 @@ struct state_functions {
 	void order_CastDefensiveMatrix(unit_t* u) {
 		auto* tech = get_tech_type(TechTypes::Defensive_Matrix);
 		if (spell_cast_target_movement(u, tech, unit_sight_range(u, true))) {
-				u->energy -= fp8::integer(tech->energy_cost);
-				create_defensive_matrix_image(u);
-				unit_t* target = u->order_target.unit;
-				target->defensive_matrix_hp = fp8::integer(250);
-				target->defensive_matrix_timer = 168;
-				// todo: callback for sound
-				create_image(get_image_type(ImageTypes::IMAGEID_Science_Vessel_Overlay_Part2), target->sprite, {}, image_order_above);
-				order_done(u);
+			u->energy -= fp8::integer(tech->energy_cost);
+			create_defensive_matrix_image(u);
+			unit_t* target = u->order_target.unit;
+			target->defensive_matrix_hp = fp8::integer(250);
+			target->defensive_matrix_timer = 168;
+			// todo: callback for sound
+			create_image(get_image_type(ImageTypes::IMAGEID_Science_Vessel_Overlay_Part2), target->sprite, {}, image_order_above);
+			order_done(u);
 		}
 	}
 
@@ -7404,6 +7463,61 @@ struct state_functions {
 		}
 		order_done(u);
 	}
+	
+	void order_Feedback(unit_t*  u) {
+		unit_t* target = u->order_target.unit;
+		if (!target || !ut_has_energy(target) || u_hallucination(target)) {
+			order_done(u);
+			return;
+		}
+		auto* tech = get_tech_type(TechTypes::Feedback);
+		if (spell_cast_target_movement(u, tech, unit_sight_range(u, true))) {
+			if (target->energy != 0_fp8) {
+				weapon_deal_damage(get_weapon_type(WeaponTypes::Feedback), target->energy, 1, target, 1_dir, u, u->owner);
+				target->energy = 0_fp8;
+				u->energy -= fp8::integer(tech->energy_cost);
+				// todo: callback for sound
+				if (unit_dying(target)) {
+					SpriteTypes sprite_id = (SpriteTypes)((int)SpriteTypes::SPRITEID_Feedback_Hit_Small + unit_sprite_size(target));
+					thingy_t* t = create_thingy(get_sprite_type(sprite_id), u->sprite->position, 0);
+					if (t) {
+						t->sprite->elevation_level = u->sprite->elevation_level + 1;
+						if (!us_hidden(t)) set_sprite_visibility(t->sprite, tile_visibility(t->sprite->position));
+					}
+				} else {
+					create_sized_image(u, ImageTypes::IMAGEID_Feedback_Small);
+				}
+			}
+			order_done(u);
+		}
+	}
+	
+	void order_CastHallucination(unit_t* u) {
+		auto* tech = get_tech_type(TechTypes::Hallucination);
+		if (spell_cast_target_movement(u, tech, unit_sight_range(u, true))) {
+			unit_t* target = u->order_target.unit;
+			for (int i = 0; i != 2; ++i) {
+				unit_t* n = create_hallucination(target, u->owner);
+				if (!n) break;
+				auto r = find_unit_placement(n, n->sprite->position, false);
+				if (!r.first) {
+					destroy_unit(n);
+					break;
+				}
+				move_unit(n, r.second);
+				if (u_can_turn(n)) {
+					size_t index = lcg_rand(32, 0, 32);
+					set_sprite_images_heading_by_index(n->sprite, index);
+					set_unit_heading(n, direction_from_index(8 * index));
+				}
+				show_unit(n);
+			}
+			u->energy -= fp8::integer(tech->energy_cost);
+			// todo: callback for sound
+			create_image(get_image_type(ImageTypes::IMAGEID_Hallucination_Hit), (target->subunit ? target->subunit : target)->sprite, {}, image_order_top);
+			order_done(u);
+		}
+	}
 
 	void execute_main_order(unit_t* u) {
 		switch (u->order_type->id) {
@@ -7846,6 +7960,9 @@ struct state_functions {
 		case Orders::CastStasisField:
 			order_Spell(u);
 			break;
+		case Orders::CastHallucination:
+			order_CastHallucination(u);
+			break;
 		case Orders::Patrol:
 			order_Patrol(u);
 			break;
@@ -7910,13 +8027,13 @@ struct state_functions {
 			order_Spell(u);
 			break;
 		case Orders::CastDisruptionWeb:
-			xcept("CastDisruptionWeb");
+			order_Spell(u);
 			break;
 		case Orders::CastMindControl:
 			order_CastMindControl(u);
 			break;
 		case Orders::CastFeedback:
-			xcept("CastFeedback");
+			order_Feedback(u);
 			break;
 		case Orders::CastOpticalFlare:
 			order_Spell(u);
@@ -12587,6 +12704,37 @@ struct state_functions {
 			bw_insert_list(st.free_units, *u);
 		}
 	}
+	
+	void update_disruption_web() {
+		for (unit_t* u : ptr(st.visible_units)) {
+			if (!u_flying(u) || u_cannot_attack(u)) {
+				u_unset_status_flag(u, unit_t::status_flag_cannot_attack);
+				if (unit_provides_space(u)) {
+					for (unit_t* nu : loaded_units(u)) {
+						u_unset_status_flag(nu, unit_t::status_flag_cannot_attack);
+					}
+				} else if (u->subunit) {
+					u_unset_status_flag(u->subunit, unit_t::status_flag_cannot_attack);
+				}
+			}
+		}
+		if (st.completed_unit_counts[11][UnitTypes::Spell_Disruption_Web]) {
+			for (unit_t* u : ptr(st.player_units[11])) {
+				if (!unit_is(u, UnitTypes::Spell_Disruption_Web)) continue;
+				for (unit_t* target : find_units_noexpand(unit_sprite_inner_bounding_box(u))) {
+					if (u_flying(target)) continue;
+					u_set_status_flag(target, unit_t::status_flag_cannot_attack);
+					if (unit_provides_space(target)) {
+						for (unit_t* n : loaded_units(target)) {
+							u_set_status_flag(n, unit_t::status_flag_cannot_attack);
+						}
+					} else if (target->subunit) {
+						u_set_status_flag(target->subunit, unit_t::status_flag_cannot_attack);
+					}
+				}
+			}
+		}
+	}
 
 	void update_units() {
 		--st.order_timer_counter;
@@ -12610,22 +12758,7 @@ struct state_functions {
 			}
 		}
 
-		for (unit_t* u : ptr(st.visible_units)) {
-			if (!u_flying(u) || u_status_flag(u, (unit_t::status_flags_t)0x80)) {
-				u_unset_status_flag(u, unit_t::status_flag_cannot_attack);
-				if (unit_provides_space(u)) {
-					for (unit_t* nu : loaded_units(u)) {
-						u_unset_status_flag(nu, unit_t::status_flag_cannot_attack);
-					}
-				} else if (u->subunit) {
-					u_unset_status_flag(u->subunit, unit_t::status_flag_cannot_attack);
-				}
-			}
-		}
-		if (st.completed_unit_counts[11][UnitTypes::Spell_Disruption_Web]) {
-			xcept("disruption web stuff");
-		}
-
+		update_disruption_web();
 
 		for (auto i = st.dead_units.begin(); i != st.dead_units.end();) {
 			unit_t* u = &*i++;
@@ -13265,6 +13398,13 @@ struct state_functions {
 			}
 		}
 	}
+	
+	void create_shield_damage_effect(unit_t* target, direction_t heading) {
+		size_t index = (direction_index(heading) - 124) / 8 % 32;
+		xy offset = get_image_lo_offset(target->sprite->main_image, 5, index, true);
+		auto* image = create_image(get_image_type(ImageTypes::IMAGEID_Shield_Overlay), target->sprite, offset, image_order_above);
+		if (image) set_image_heading_by_index(image, index);
+	}
 
 	void weapon_deal_damage(const weapon_type_t* weapon, fp8 damage, int damage_divisor, unit_t* target, direction_t heading, unit_t* source_unit, int source_owner) {
 		if (target->hp == 0_fp8) return;
@@ -13321,19 +13461,31 @@ struct state_functions {
 		if (shield_damage != 0_fp8) {
 			target->shield_points -= shield_damage;
 			if (weapon->damage_type != weapon_type_t::damage_type_none && target->shield_points != 0_fp8) {
-				size_t index = (direction_index(heading) - 124) / 8 % 32;
-				xy offset = get_image_lo_offset(target->sprite->main_image, 5, index, true);
-				auto* image = create_image(get_image_type(ImageTypes::IMAGEID_Shield_Overlay), target->sprite, offset, image_order_above);
-				if (image) set_image_heading_by_index(image, index);
+				create_shield_damage_effect(target, heading);
 			}
 		}
 		target->air_strength = get_unit_strength(target, false);
 		target->ground_strength = get_unit_strength(target, true);
 	}
+	
+	void hallucinated_weapon_hit(const weapon_type_t* weapon, unit_t* target, direction_t heading, unit_t* source_unit) {
+		if (target->hp == 0_fp8 || u_invincible(target)) return;
+		if (source_unit) {
+			on_unit_damage(target, source_unit, weapon->id != WeaponTypes::Irradiate);
+			if (weapon->id != WeaponTypes::Irradiate && target->owner != source_unit->owner) {
+				// todo: callback for notifications?
+			}
+			if (weapon->damage_type != weapon_type_t::damage_type_none) {
+				if (target->unit_type->has_shield && target->shield_points >= fp8::integer(1)) {
+					create_shield_damage_effect(target, heading);
+				}
+			}
+		}
+	}
 
 	void bullet_deal_damage(const bullet_t* b, unit_t* target, int damage_divisor) {
 		if (b->hit_flags & 2) {
-			xcept("bullet_deal_damage: some hallucination fixme");
+			hallucinated_weapon_hit(b->weapon_type, target, b->heading, b->bullet_owner_unit);
 		} else {
 			weapon_deal_damage(b->weapon_type, bullet_damage_amount(b, target), damage_divisor, target, b->heading, b->bullet_owner_unit, b->owner);
 		}
@@ -13346,8 +13498,8 @@ struct state_functions {
 		unit_t* target = u->order_target.unit;
 		if (!target) return;
 		auto* w = unit_ground_weapon(u);
-		if (u_hallucination(target)) {
-			xcept("melee_deal_damage: some hallucination fixme");
+		if (u_hallucination(u)) {
+			hallucinated_weapon_hit(w, target, u->heading, u);
 		} else {
 			weapon_deal_damage(w, weapon_damage_amount(w, u->owner), 1, target, u->heading, u, u->owner);
 		}
@@ -13638,6 +13790,49 @@ struct state_functions {
 			maelstrom_unit(target);
 		}
 	}
+	
+	void disruption_web(xy pos, int owner) {
+		const unit_type_t* unit_type = get_unit_type(UnitTypes::Spell_Disruption_Web);
+		pos = restrict_move_target_to_valid_bounds(unit_type, pos);
+		unit_t* u = create_unit(unit_type, pos, 11);
+		if (u) {
+			u_set_status_flag(u, unit_t::status_flag_no_collide);
+			u->sprite->elevation_level = 11;
+			finish_building_unit(u);
+			complete_unit(u);
+			set_remove_timer(u, 360);
+		} else display_last_error_for_player(owner);
+	}
+	
+	ImageTypes acid_spore_image(const unit_t* u) const {
+		size_t n = std::min((size_t)(u->acid_spore_count / 2), (size_t)3);
+		return (ImageTypes)((int)ImageTypes::IMAGEID_Acid_Spores_1_Overlay_Small + 4 * unit_sprite_size(u) + n);
+	}
+	
+	void update_acid_spore_image(unit_t* u) {
+		ImageTypes image_id = acid_spore_image(u);
+		if (!find_image(u, image_id, image_id)) {
+			destroy_image_from_to(u, ImageTypes::IMAGEID_Acid_Spores_1_Overlay_Small, ImageTypes::IMAGEID_Acid_Spores_6_9_Overlay_Large);
+			create_image(get_image_type(image_id), (u->subunit ? u->subunit : u)->sprite, {}, image_order_top);
+		}
+	}
+	
+	void add_acid_spore(unit_t* u) {
+		if (u->acid_spore_count < 9) ++u->acid_spore_count;
+		update_acid_spore_image(u);
+		*get_best_score(u->acid_spore_time, identity()) = 150;
+	}
+	
+	void add_acid_spore(xy pos, int owner) {
+		for (unit_t* target : find_units_noexpand(square_at(pos, 64))) {
+			if (target->owner == owner) continue;
+			if (ut_building(target)) continue;
+			if (!u_flying(target)) continue;
+			if (u_invincible(target)) continue;
+			if (unit_is_undetected(target, owner)) continue;
+			add_acid_spore(target);
+		}
+	}
 
 	void bullet_hit(bullet_t* b) {
 		switch (b->weapon_type->hit_type) {
@@ -13734,6 +13929,17 @@ struct state_functions {
 			break;
 		case weapon_type_t::hit_type_consume:
 			if (b->bullet_target && b->bullet_owner_unit && !unit_dying(b->bullet_target)) consume_unit(b->bullet_target, b->bullet_owner_unit);
+			break;
+		case weapon_type_t::hit_type_disruption_web:
+			disruption_web(b->bullet_target_pos, b->owner);
+			break;
+		case weapon_type_t::hit_type_corrosive_acid:
+			if (b->bullet_target && ~b->hit_flags & 1) {
+				bullet_deal_damage(b, b->bullet_target);
+				if (~b->hit_flags & 2) {
+					add_acid_spore(b->sprite->position, b->owner);
+				}
+			}
 			break;
 		case weapon_type_t::hit_type_maelstrom:
 			if (b->bullet_target_pos != xy()) maelstrom(b->bullet_target_pos, b->bullet_owner_unit);
@@ -15553,21 +15759,26 @@ struct state_functions {
 	}
 
 	virtual void on_unit_deselect(unit_t* u) {}
+	
+	void kill_interceptors(unit_t* u) {
+		if (!unit_is_carrier(u)) return;
+		for (auto i = u->carrier.inside_units.begin(); i != u->carrier.inside_units.end();) {
+			unit_t* n = &*i++;
+			kill_unit(n);
+		}
+		for (auto i = u->carrier.outside_units.begin(); i != u->carrier.outside_units.end();) {
+			unit_t* n = &*i++;
+			n->fighter.parent = nullptr;
+			set_remove_timer(n, lcg_rand(39, 15, 45));
+			u->carrier.outside_units.remove(*n);
+			--u->carrier.outside_count;
+			n->fighter.fighter_link = {};
+		}
+	}
 
 	void destroy_unit_impl(unit_t* u) {
 		if (unit_is_carrier(u)) {
-			for (auto i = u->carrier.inside_units.begin(); i != u->carrier.inside_units.end();) {
-				unit_t* n = &*i++;
-				kill_unit(n);
-			}
-			for (auto i = u->carrier.outside_units.begin(); i != u->carrier.outside_units.end();) {
-				unit_t* n = &*i++;
-				n->fighter.parent = nullptr;
-				set_remove_timer(n, lcg_rand(39, 15, 45));
-				u->carrier.outside_units.remove(*n);
-				--u->carrier.outside_count;
-				n->fighter.fighter_link = {};
-			}
+			kill_interceptors(u);
 		} else if (unit_is_reaver(u)) {
 			for (auto i = u->reaver.inside_units.begin(); i != u->reaver.inside_units.end();) {
 				unit_t* n = &*i++;
@@ -15806,9 +16017,8 @@ struct state_functions {
 		u->cycle_counter = 0;
 		u->blinded_by = 0;
 		u->maelstrom_timer = 0;
-		u->unused_0x125 = 0;
 		u->acid_spore_count = 0;
-		for (auto& v : u->acid_spore_time) v = 0;
+		u->acid_spore_time = {};
 		u->status_flags = 0;
 		u->user_action_flags = 0;
 		u->pathing_flags = 0;
@@ -15970,7 +16180,7 @@ struct state_functions {
 			u->plague_timer = timer;
 		}
 		if (u->acid_spore_count) {
-			xcept("apply acid spores");
+			create_image(get_image_type(acid_spore_image(u)), (u->subunit ? u->subunit : u)->sprite, {}, image_order_top);
 		}
 	}
 
@@ -18414,8 +18624,8 @@ struct state_functions {
 				}
 			} else xcept("unknown group_n %d", a.group_n);
 			break;
-		default:
-			xcept("unknown trigger action %d", a.type);
+//		default:
+//			xcept("unknown trigger action %d", a.type);
 		}
 	}
 

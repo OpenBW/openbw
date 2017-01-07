@@ -664,7 +664,6 @@ struct unit_t: flingy_t {
 	int cycle_counter;
 	int blinded_by;
 	int maelstrom_timer;
-	int unused_0x125;
 	int acid_spore_count;
 	std::array<int, 9> acid_spore_time;
 
