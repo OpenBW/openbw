@@ -977,6 +977,17 @@ struct action_functions: state_functions {
 		}
 		return retval;
 	}
+	
+	bool action_player_leave(int owner, int reason) {
+		if (st.players.at(owner).controller == player_t::controller_occupied) {
+			st.players[owner].controller = player_t::controller_user_left;
+		}
+		for (auto i = st.player_units[owner].begin(); i != st.player_units[owner].end();) {
+			unit_t* u = &*i++;
+			make_unit_neutral(u);
+		}
+		return true;
+	}
 
 	template<typename reader_T>
 	bool read_action_select(int owner, reader_T&& r) {
@@ -1034,9 +1045,9 @@ struct action_functions: state_functions {
 	template<typename reader_T>
 	bool read_action_player_leave(int owner, reader_T&& r) {
 		(void)owner;
-		int v = r.template get<int8_t>(); // ?
-		(void)v;
-		return true;
+		int reason = r.template get<int8_t>();
+		(void)reason;
+		return action_player_leave(owner, reason);
 	}
 
 	template<typename reader_T>
