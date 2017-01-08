@@ -117,7 +117,7 @@ struct unit_type_t {
 	type_id<unit_type_t> infestation_unit;
 	type_id<const image_type_t> construction_animation;
 	int unit_direction;
-	int has_shield;
+	bool has_shield;
 	int shield_points;
 	fp8 hitpoints;
 	int elevation_level;

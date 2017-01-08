@@ -206,7 +206,6 @@ struct replay_functions: action_functions {
 				st.players[i].controller = slot_controller[i];
 				st.players[i].race = (race)slot_race[i];
 				st.players[i].force = slot_force[i];
-				if (i < 8) st.players[i].color = player_color[i];
 				if (victory_condition == 0 && tournament_mode == 0) {
 					if (i >= 8) game_load_funcs.setup_info.create_melee_units_for_player[i] = false;
 					else game_load_funcs.setup_info.create_melee_units_for_player[i] = player_force[i] != 0;
@@ -214,6 +213,14 @@ struct replay_functions: action_functions {
 			}
 			st.lcg_rand_state = random_seed;
 		});
+		
+		std::array<int, 8> source_colors;
+		for (size_t i = 0; i != 8; ++i) {
+			source_colors[i] = st.players[i].color;
+		}
+		for (size_t i = 0; i != 8; ++i) {
+			st.players[i].color = source_colors.at(player_color[i]);
+		}
 		
 		if (initial_processing) {
 			process_frame();

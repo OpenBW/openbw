@@ -57,6 +57,7 @@ struct tileset_image_data {
 	pcx_image dark_pcx;
 	std::array<pcx_image, 7> light_pcx;
 	grp_t creep_grp;
+	int resource_minimap_color;
 };
 
 struct image_data {
@@ -280,6 +281,24 @@ void load_tileset_image_data(tileset_image_data& img, size_t tileset_index, load
 	for (size_t i = 0; i != 7; ++i) {
 		img.light_pcx[i] = load_pcx_file(format("Tileset/%s/%s.pcx", tileset_name, light_names[i]));
 	}
+	
+	auto get_nearest_color = [&](int r, int g, int b) {
+		if (img.wpe.size() != 256 * 4) xcept("wpe size invalid (%d)", img.wpe.size());
+		size_t best_index = -1;
+		int best_score;
+		for (size_t i = 0; i != 256; ++i) {
+			int dr = r - img.wpe[4 * i + 0];
+			int dg = g - img.wpe[4 * i + 1];
+			int db = b - img.wpe[4 * i + 2];
+			int score = dr * dr + dg * dg + db * db;
+			if (best_index == -1 || score < best_score) {
+				best_index = i;
+				best_score = score;
+			}
+		}
+		return best_index;
+	};
+	img.resource_minimap_color = get_nearest_color(0, 255, 255);
 }
 
 template<bool bounds_check>
@@ -330,15 +349,17 @@ void draw_tile(tileset_image_data& img, size_t megatile_index, uint8_t* dst, siz
 	}
 }
 
-template<bool bounds_check, bool flipped, typename remap_F>
-void draw_frame(const grp_t::frame_t& frame, uint8_t* dst, size_t pitch, size_t offset_x, size_t offset_y, size_t width, size_t height, remap_F&& remap_f) {
+template<bool bounds_check, bool flipped, bool textured, typename remap_F>
+void draw_frame(const grp_t::frame_t& frame, const uint8_t* texture, uint8_t* dst, size_t pitch, size_t offset_x, size_t offset_y, size_t width, size_t height, remap_F&& remap_f) {
 	for (size_t y = 0; y != offset_y; ++y) {
 		dst += pitch;
+		if (textured) texture += frame.size.x;
 	}
 
 	for (size_t y = offset_y; y != height; ++y) {
 
 		if (flipped) dst += frame.size.x - 1;
+		if (textured && flipped) texture += frame.size.x - 1;
 
 		const uint8_t* d = frame.data_container.data() + frame.line_data_offset.at(y);
 		for (size_t x = flipped ? frame.size.x - 1 : 0; x != (flipped ? (size_t)0 - 1 : frame.size.x);) {
@@ -347,24 +368,27 @@ void draw_frame(const grp_t::frame_t& frame, uint8_t* dst, size_t pitch, size_t 
 				v &= 0x7f;
 				x += flipped ? -v : v;
 				dst += flipped ? -v : v;
+				if (textured) texture += flipped ? -v : v;
 			} else if (v & 0x40) {
 				v &= 0x3f;
 				int c = *d++;
 				for (;v; --v) {
 					if (!bounds_check || (x >= offset_x && x < width)) {
-						*dst = remap_f(c, *dst);
+						*dst = remap_f(textured ? *texture : c, *dst);
 					}
 					dst += flipped ? -1 : 1;
 					x += flipped ? -1 : 1;
+					if (textured) texture += flipped ? -1 : 1;
 				}
 			} else {
 				for (;v; --v) {
 					int c = *d++;
 					if (!bounds_check || (x >= offset_x && x < width)) {
-						*dst = remap_f(c, *dst);
+						*dst = remap_f(textured ? *texture : c, *dst);
 					}
 					dst += flipped ? -1 : 1;
 					x += flipped ? -1 : 1;
+					if (textured) texture += flipped ? -1 : 1;
 				}
 			}
 		}
@@ -372,6 +396,11 @@ void draw_frame(const grp_t::frame_t& frame, uint8_t* dst, size_t pitch, size_t 
 		if (!flipped) dst -= frame.size.x;
 		else ++dst;
 		dst += pitch;
+		if (textured) {
+			if (!flipped) texture -= frame.size.x;
+			else ++texture;
+			texture += frame.size.x;
+		}
 
 	}
 }
@@ -384,15 +413,24 @@ struct no_remap {
 
 template<typename remap_F = no_remap>
 void draw_frame(const grp_t::frame_t& frame, bool flipped, uint8_t* dst, size_t pitch, size_t offset_x, size_t offset_y, size_t width, size_t height, remap_F&& remap_f = remap_F()) {
-
 	if (offset_x == 0 && offset_y == 0 && width == frame.size.x && height == frame.size.y) {
-		if (flipped) draw_frame<false, true>(frame, dst, pitch, offset_x, offset_y, width, height, std::forward<remap_F>(remap_f));
-		else draw_frame<false, false>(frame, dst, pitch, offset_x, offset_y, width, height, std::forward<remap_F>(remap_f));
+		if (flipped) draw_frame<false, true, false>(frame, nullptr, dst, pitch, offset_x, offset_y, width, height, std::forward<remap_F>(remap_f));
+		else draw_frame<false, false, false>(frame, nullptr, dst, pitch, offset_x, offset_y, width, height, std::forward<remap_F>(remap_f));
 	} else {
-		if (flipped) draw_frame<true, true>(frame, dst, pitch, offset_x, offset_y, width, height, std::forward<remap_F>(remap_f));
-		else draw_frame<true, false>(frame, dst, pitch, offset_x, offset_y, width, height, std::forward<remap_F>(remap_f));
+		if (flipped) draw_frame<true, true, false>(frame, nullptr, dst, pitch, offset_x, offset_y, width, height, std::forward<remap_F>(remap_f));
+		else draw_frame<true, false, false>(frame, nullptr, dst, pitch, offset_x, offset_y, width, height, std::forward<remap_F>(remap_f));
 	}
+}
 
+template<typename remap_F = no_remap>
+void draw_frame_textured(const grp_t::frame_t& frame, const uint8_t* texture, bool flipped, uint8_t* dst, size_t pitch, size_t offset_x, size_t offset_y, size_t width, size_t height, remap_F&& remap_f = remap_F()) {
+	if (offset_x == 0 && offset_y == 0 && width == frame.size.x && height == frame.size.y) {
+		if (flipped) draw_frame<false, true, true>(frame, texture, dst, pitch, offset_x, offset_y, width, height, std::forward<remap_F>(remap_f));
+		else draw_frame<false, false, true>(frame, texture, dst, pitch, offset_x, offset_y, width, height, std::forward<remap_F>(remap_f));
+	} else {
+		if (flipped) draw_frame<true, true, true>(frame, texture, dst, pitch, offset_x, offset_y, width, height, std::forward<remap_F>(remap_f));
+		else draw_frame<true, false, true>(frame, texture, dst, pitch, offset_x, offset_y, width, height, std::forward<remap_F>(remap_f));
+	}
 }
 
 struct apm_t {
@@ -695,6 +733,8 @@ struct ui_functions: ui_util_functions {
 			tile += game_st.map_tile_width;
 		}
 	}
+	
+	a_vector<uint8_t> temporary_warp_texture_buffer;
 
 	void draw_image(const image_t* image, uint8_t* data, size_t data_pitch, size_t color_index) {
 		
@@ -731,7 +771,7 @@ struct ui_functions: ui_util_functions {
 		width = std::min(width, screen_width - screen_x);
 		height = std::min(height, screen_height - screen_y);
 
-		if (image->modifier == 0 || image->modifier == 1 || image->modifier == 2 || image->modifier == 3 || image->modifier == 4) {
+		if (image->modifier == 0 || image->modifier == 1 || image->modifier == 2 || image->modifier == 4) {
 			uint8_t* ptr = img.player_unit_colors.at(color_index).data();
 			auto player_color = [ptr](uint8_t new_value, uint8_t) {
 				if (new_value >= 8 && new_value < 16) return ptr[new_value - 8];
@@ -744,14 +784,30 @@ struct ui_functions: ui_util_functions {
 				return ptr[old_value];
 			};
 			draw_frame(frame, i_flag(image, image_t::flag_horizontally_flipped), dst, data_pitch, offset_x, offset_y, width, height, shadow);
-		} else if (image->modifier == 9) {
-			size_t index = image->image_type->color_shift;
-			auto& data = tileset_img.light_pcx.at(index - 1).data;
+		} else if (image->modifier == 3 || image->modifier == 9) {
+			size_t index = image->image_type->color_shift - 1;
+			if (image->modifier == 3) index = 4;
+			auto& data = tileset_img.light_pcx.at(index).data;
 			uint8_t* ptr = data.data();
 			size_t size = data.size() / 256;
 			auto glow = [ptr, size](uint8_t new_value, uint8_t old_value) {
+				--new_value;
 				if (new_value >= size) return (uint8_t)0;
 				return ptr[256u * new_value + old_value];
+			};
+			draw_frame(frame, i_flag(image, image_t::flag_horizontally_flipped), dst, data_pitch, offset_x, offset_y, width, height, glow);
+		} else if (image->modifier == 12) {
+			if (temporary_warp_texture_buffer.size() < width * height) temporary_warp_texture_buffer.resize(width * height);
+			auto& texture_frame = global_st.image_grp[(size_t)ImageTypes::IMAGEID_Warp_Texture]->frames.at(image->modifier_data1);
+			draw_frame(texture_frame, false, temporary_warp_texture_buffer.data(), frame.size.x, 0, 0, frame.size.x, frame.size.y);
+			draw_frame_textured(frame, temporary_warp_texture_buffer.data(), i_flag(image, image_t::flag_horizontally_flipped), dst, data_pitch, offset_x, offset_y, width, height);
+		} else if (image->modifier == 17) {
+			auto& data = tileset_img.light_pcx.at(0).data;
+			uint8_t* ptr = &data.at(256u * (image->modifier_data1 - 1));
+			size_t size = data.data() + data.size() - ptr;
+			auto glow = [ptr, size](uint8_t, uint8_t old_value) {
+				if (old_value >= size) return (uint8_t)0;
+				return ptr[old_value];
 			};
 			draw_frame(frame, i_flag(image, image_t::flag_horizontally_flipped), dst, data_pitch, offset_x, offset_y, width, height, glow);
 		} else xcept("don't know how to draw image modifier %d", image->modifier);
@@ -816,13 +872,15 @@ struct ui_functions: ui_util_functions {
 		
 		int offsety = sprite->sprite_type->selection_circle_vpos + selection_circle_frame.size.y / 2 + 8;
 		
+		bool has_shield = u->unit_type->has_shield;
+		
 		int width = sprite->sprite_type->health_bar_size;
 		width -= (width - 1) % 3;
 		if (width < 19) width = 19;
 		int orig_width = width;
 		int height = 5;
-		if (u->unit_type->has_shield) height += 2;
-		if (ut_has_energy(u) || u_hallucination(u) || unit_is(u, UnitTypes::Zerg_Broodling)) height += 6;
+		if (has_shield) height += 2;
+		//if (ut_has_energy(u) || u_hallucination(u) || unit_is(u, UnitTypes::Zerg_Broodling)) height += 6;
 		
 		xy map_pos = sprite->position + xy(0, offsety);
 		
@@ -843,16 +901,38 @@ struct ui_functions: ui_util_functions {
 			else dw -= dw % 3;
 		}
 		
-		int colors_66[] = {18, 0, 1, 2, 18};
-		int colors_33[] = {18, 3, 4, 5, 18};
-		int colors_0[] = {18, 6, 7, 8, 18};
-		int colors_bg[] = {18, 15, 16, 17, 18};
+		int shield_dw = 0;
+		if (has_shield) {
+			int shield_percent = (int)u->shield_points.integer_part() * 100 / std::max(u->unit_type->shield_points, 1);
+			shield_dw = shield_percent * width / 100;
+			if (shield_dw < 3) shield_dw = 3;
+			else if (shield_dw % 3) {
+				if (shield_dw % 3 > 1) shield_dw += 3 - (shield_dw % 3);
+				else shield_dw -= shield_dw % 3;
+			}
+		}
+		
+		int no_shield_colors_66[] = {18, 0, 1, 2, 18};
+		int no_shield_colors_33[] = {18, 3, 4, 5, 18};
+		int no_shield_colors_0[] = {18, 6, 7, 8, 18};
+		int no_shield_colors_bg[] = {18, 15, 16, 17, 18};
+		
+		int with_shield_colors_66[] = {18, 0, 0, 1, 1, 2, 18};
+		int with_shield_colors_33[] = {18, 3, 3, 4, 4, 5, 18};
+		int with_shield_colors_0[] = {18, 6, 6, 7, 7, 8, 18};
+		int with_shield_colors_bg[] = {18, 15, 15, 16, 16, 17, 18};
+		
+		int* colors_66 = has_shield ? with_shield_colors_66 : no_shield_colors_66;
+		int* colors_33 = has_shield ? with_shield_colors_33 : no_shield_colors_33;
+		int* colors_0 = has_shield ? with_shield_colors_0 : no_shield_colors_0;
+		int* colors_bg = has_shield ? with_shield_colors_bg : no_shield_colors_bg;
 		
 		int offset_x = 0;
 		int offset_y = 0;
 		if (screen_x < 0) {
 			offset_x = -screen_x;
 			dw += screen_x;
+			shield_dw += screen_x;
 			width += screen_x;
 			screen_x = 0;
 		}
@@ -868,25 +948,44 @@ struct ui_functions: ui_util_functions {
 		height = std::min(height, (int)screen_height - screen_y);
 		
 		if (dw > width) dw = width;
+		if (shield_dw > width) shield_dw = width;
 		
-		for (int i = 0; i != 5; ++i) {
-			if (i < offset_y || i >= height) continue;
+		for (int i = offset_y; i < height; ++i) {
 			int ci = hp_percent >= 66 ? colors_66[i] : hp_percent >= 33 ? colors_33[i] : colors_0[i];
 			int c = img.hp_bar_colors.at(ci);
 			
-			memset(dst, c, dw);
-			if (width - dw) {
+			if (dw > 0) memset(dst, c, dw);
+			if (width - dw > 0) {
 				c = img.hp_bar_colors.at(colors_bg[i]);
 				memset(dst + dw, c, width - dw);
 			}
 			dst += data_pitch;
 		}
 		
+		if (has_shield) {
+			int shield_colors[] = {18, 10, 11, 18};
+			int shield_colors_bg[] = {18, 16, 17, 18};
+			
+			dst = data + screen_y * data_pitch + screen_x;
+			
+			for (int i = offset_y; i < std::min(4, height); ++i) {
+				int c = img.hp_bar_colors.at(shield_colors[i]);
+				
+				if (shield_dw > 0) memset(dst, c, shield_dw);
+				if (width - shield_dw > 0) {
+					c = img.hp_bar_colors.at(shield_colors_bg[i]);
+					memset(dst + shield_dw, c, width - shield_dw);
+				}
+				dst += data_pitch;
+			}
+		}
+		
 		dst = data + screen_y * data_pitch + screen_x;
+		if (offset_x % 3) dst += 3 - offset_x % 3;
 		
 		int c = img.hp_bar_colors.at(18);
 		for (int x = 0; x < orig_width; x += 3) {
-			if (x < offset_x || x >= width) continue;
+			if (x < offset_x || x >= offset_x + width) continue;
 			for (int y = 0; y != height; ++y) {
 				*dst = c;
 				dst += data_pitch;
@@ -1045,7 +1144,10 @@ struct ui_functions: ui_util_functions {
 		size_t pitch = data_pitch - game_st.map_tile_width;
 		for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 			for (size_t x = 0; x != game_st.map_tile_width; ++x) {
-				auto* images = &tileset_img.vx4.at(st.tiles_mega_tile_index[y * game_st.map_tile_width + x]).images[0];
+				size_t index;
+				if (~st.tiles[y * game_st.map_tile_width + x].flags & tile_t::flag_has_creep) index = st.tiles_mega_tile_index[y * game_st.map_tile_width + x];
+				else index = game_st.cv5.at(1).mega_tile_index[creep_random_tile_indices[y * game_st.map_tile_width + x]];
+				auto* images = &tileset_img.vx4.at(index).images[0];
 				auto* bitmap = &tileset_img.vr4.at(*images / 2).bitmap[0];
 				auto val = bitmap[55 / sizeof(vr4_entry::bitmap_t)];
 				size_t shift = 8 * (55 % sizeof(vr4_entry::bitmap_t));
@@ -1062,13 +1164,15 @@ struct ui_functions: ui_util_functions {
 				int color = img.player_minimap_colors.at(st.players[u->owner].color);
 				size_t w = u->unit_type->placement_size.x / 32u;
 				size_t h = u->unit_type->placement_size.y / 32u;
-				if (ut_building(u)) {
-					if (w > 2) w = 4;
-					if (h > 2) h = 4;
-				} else {
-					if (w < 2) w = 2;
-					if (h < 2) h = 2;
+				if (unit_is_mineral_field(u) || unit_is(u, UnitTypes::Resource_Vespene_Geyser)) {
+					color = tileset_img.resource_minimap_color;
 				}
+				if (ut_building(u)) {
+					if (w > 4) w = 4;
+					if (h > 4) h = 4;
+				}
+				if (w < 2) w = 2;
+				if (h < 2) h = 2;
 				rect unit_area;
 				unit_area.from = area.from + (u->sprite->position - u->unit_type->placement_size / 2) / 32u;
 				unit_area.to = unit_area.from + xy(w, h);
@@ -1216,7 +1320,7 @@ struct ui_functions: ui_util_functions {
 		auto now = clock.now();
 		
 		if (now - last_fps >= std::chrono::seconds(1)) {
-			//log("draw fps: %g\n", fps_counter / std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1>>>(now - last_fps).count());
+			log("draw fps: %g\n", fps_counter / std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1>>>(now - last_fps).count());
 			last_fps = now;
 			fps_counter = 0;
 		}
@@ -1504,7 +1608,7 @@ struct main_t {
 		auto tick_speed = std::chrono::milliseconds((fp8::integer(42) / ui.game_speed).integer_part());
 		
 		if (now - last_fps >= std::chrono::seconds(1)) {
-			//log("game fps: %g\n", fps_counter / std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1>>>(now - last_fps).count());
+			log("game fps: %g\n", fps_counter / std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1>>>(now - last_fps).count());
 			last_fps = now;
 			fps_counter = 0;
 		}
@@ -1764,6 +1868,67 @@ struct util_functions: state_functions {
 		return r;
 	}
 	
+	auto get_completed_upgrades(int owner) {
+		val r = val::array();
+		size_t n = 0;
+		for (size_t i = 0; i != 61; ++i) {
+			int level = player_upgrade_level(owner, (UpgradeTypes)i);
+			if (level == 0) continue;
+			val o = val::object();
+			o.set("id", val((int)i));
+			o.set("icon", val(get_upgrade_type((UpgradeTypes)i)->icon));
+			o.set("level", val(level));
+			r.set(n++, o);
+		}
+		return r;
+	}
+	
+	auto get_completed_research(int owner) {
+		val r = val::array();
+		size_t n = 0;
+		for (size_t i = 0; i != 44; ++i) {
+			if (!player_has_researched(owner, (TechTypes)i)) continue;
+			val o = val::object();
+			o.set("id", val((int)i));
+			o.set("icon", val(get_tech_type((TechTypes)i)->icon));
+			r.set(n++, o);
+		}
+		return r;
+	}
+	
+	auto get_incomplete_upgrades(int owner) {
+		val r = val::array();
+		size_t i = 0;
+		for (unit_t* u : ptr(st.player_units[owner])) {
+			if (u->order_type->id == Orders::Upgrade && u->building.upgrading_type) {
+				val o = val::object();
+				o.set("id", val((int)u->building.upgrading_type->id));
+				o.set("icon", val((int)u->building.upgrading_type->icon));
+				o.set("level", val(u->building.upgrading_level));
+				o.set("remaining_time", val(u->building.upgrade_research_time));
+				o.set("total_time", val(upgrade_time_cost(owner, u->building.upgrading_type)));
+				r.set(i++, o);
+			}
+		}
+		return r;
+	}
+	
+	auto get_incomplete_research(int owner) {
+		val r = val::array();
+		size_t i = 0;
+		for (unit_t* u : ptr(st.player_units[owner])) {
+			if (u->order_type->id == Orders::ResearchTech && u->building.researching_type) {
+				val o = val::object();
+				o.set("id", val((int)u->building.researching_type->id));
+				o.set("icon", val((int)u->building.researching_type->icon));
+				o.set("remaining_time", val(u->building.upgrade_research_time));
+				o.set("total_time", val(u->building.researching_type->research_time));
+				r.set(i++, o);
+			}
+		}
+		return r;
+	}
+	
 };
 
 optional<util_functions> m_util_funcs;
@@ -1793,6 +1958,10 @@ EMSCRIPTEN_BINDINGS(openbw) {
 		.function("get_all_incomplete_units", &util_functions::get_all_incomplete_units, allow_raw_pointers())
 		.function("get_all_completed_units", &util_functions::get_all_completed_units, allow_raw_pointers())
 		.function("get_all_units", &util_functions::get_all_units, allow_raw_pointers())
+		.function("get_completed_upgrades", &util_functions::get_completed_upgrades)
+		.function("get_completed_research", &util_functions::get_completed_research)
+		.function("get_incomplete_upgrades", &util_functions::get_incomplete_upgrades)
+		.function("get_incomplete_research", &util_functions::get_incomplete_research)
 		;
 	function("get_util_funcs", &get_util_funcs);
 	
@@ -1862,7 +2031,7 @@ int main() {
 
 	using namespace bwgame;
 	
-	log("v11\n");
+	log("v13\n");
 
 	size_t screen_width = 1280;
 	size_t screen_height = 800;
@@ -1888,9 +2057,7 @@ int main() {
 	m.load_all_image_data(load_data_file);
 
 #ifndef EMSCRIPTEN
-	ui.load_replay_file("maps/zz24.rep");
-//	game_load_functions funcs(m.ui.st);
-//	funcs.reset();
+	ui.load_replay_file("maps/testcloak.rep");
 #endif
 
 	auto& wnd = ui.wnd;
