@@ -27,7 +27,7 @@ struct unit_id {
 	}
 };
 
-enum struct race {
+enum struct race_t {
 	zerg,
 	terran,
 	protoss,
@@ -51,7 +51,7 @@ struct player_t {
 		controller_computer_defeated
 	};
 	int controller = controller_inactive;
-	race race{};
+	race_t race{};
 	int force = 0;
 	int color = 0;
 };

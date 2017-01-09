@@ -1209,7 +1209,7 @@ struct state_functions {
 			if (u->remove_timer != 0 && --u->remove_timer == 0) {
 				kill_unit(u);
 			} else {
-				if (unit_race(u) == race::terran) {
+				if (unit_race(u) == race_t::terran) {
 					if (u_grounded_building(u) || ut_flying_building(u)) {
 						if (unit_hp_percent(u) <= 33) {
 							unit_deal_damage(u, 20_fp8, nullptr, u->last_attacking_player);
@@ -1729,11 +1729,11 @@ struct state_functions {
 		return nullptr;
 	}
 
-	race unit_race(unit_type_autocast ut) const {
-		if (ut->group_flags & GroupFlags::Zerg) return race::zerg;
-		if (ut->group_flags & GroupFlags::Terran) return race::terran;
-		if (ut->group_flags & GroupFlags::Protoss) return race::protoss;
-		return race::none;
+	race_t unit_race(unit_type_autocast ut) const {
+		if (ut->group_flags & GroupFlags::Zerg) return race_t::zerg;
+		if (ut->group_flags & GroupFlags::Terran) return race_t::terran;
+		if (ut->group_flags & GroupFlags::Protoss) return race_t::protoss;
+		return race_t::none;
 	}
 
 	bool unit_provides_space(const unit_t* u) const {
@@ -1757,7 +1757,7 @@ struct state_functions {
 		if (u_burrowed(target)) return false;
 		if (u->owner != target->owner) return false;
 		if (ut_building(u)) {
-			if (unit_race(target) != race::terran) return false;
+			if (unit_race(target) != race_t::terran) return false;
 			if (target->unit_type->space_required > 1) return false;
 		}
 		return unit_space_left(u) >= target->unit_type->space_required;
@@ -2188,7 +2188,7 @@ struct state_functions {
 			supply_required -= get_unit_type(UnitTypes::Zerg_Hydralisk)->supply_required;
 		}
 		auto race = unit_race(unit_type);
-		if (race == race::none) return false;
+		if (race == race_t::none) return false;
 		size_t index = (size_t)race;
 		if (st.supply_used[owner][index] + supply_required > fp1::integer(200)) {
 			// todo: callback for error message/sound?
@@ -2344,7 +2344,7 @@ struct state_functions {
 		if (unit_is(u, UnitTypes::Zerg_Hydralisk)) return false;
 		if (unit_is_nydus(u) && !u->building.nydus.exit) return false;
 		if (u_grounded_building(u)) {
-			if (unit_race(u) == race::zerg) {
+			if (unit_race(u) == race_t::zerg) {
 				cancel_morphing_building(u);
 				return true;
 			}
@@ -2517,7 +2517,7 @@ struct state_functions {
 			bool check_unk4 = !unit_is_non_flag_beacon(unit_type);
 			bool is_resource_depot = ut_resource_depot(unit_type);
 			int flags_mask = tile_t::flag_partially_walkable | tile_t::flag_unbuildable;
-			if (unit_race(unit_type) != race::zerg) flags_mask |= tile_t::flag_has_creep;
+			if (unit_race(unit_type) != race_t::zerg) flags_mask |= tile_t::flag_has_creep;
 
 			for (size_t y = tile_pos.y; y != tile_pos.y + tile_size.y; ++y) {
 				for (size_t x = tile_pos.x; x != tile_pos.x + tile_size.x; ++x) {
@@ -2596,7 +2596,7 @@ struct state_functions {
 		if (!target->building.nydus.exit || !u_completed(target->building.nydus.exit)) return false;
 		if (u->owner != target->owner) return false;
 		if (u_flying(u)) return false;
-		if (unit_race(u) != race::zerg) return false;
+		if (unit_race(u) != race_t::zerg) return false;
 		return true;
 	}
 
@@ -2608,7 +2608,7 @@ struct state_functions {
 		if (!u_can_move(u)) return false;
 		if (u_grounded_building(u)) return false;
 		if (u->owner != target->owner) return false;
-		if (unit_race(u) != race::protoss) return false;
+		if (unit_race(u) != race_t::protoss) return false;
 		if (u->shield_points >= fp8::integer(u->unit_type->shield_points)) return false;
 		if (target->energy == 0_fp8) return false;
 		if (unit_is_disabled(target)) return false;
@@ -2868,7 +2868,7 @@ struct state_functions {
 				n->order_target.unit = nullptr;
 			}
 		}
-		if (unit_race(u) == race::protoss && u_grounded_building(u)) st.update_psionic_matrix = true;
+		if (unit_race(u) == race_t::protoss && u_grounded_building(u)) st.update_psionic_matrix = true;
 		if (u->subunit) set_unit_owner(u->subunit, owner, increment_score);
 		update_unit_speed_upgrades(u);
 		if (ut_worker(u) && u->worker.gather_target && unit_is(u->worker.gather_target, UnitTypes::Powerup_Flag)) {
@@ -2948,7 +2948,7 @@ struct state_functions {
 		increment_unit_counts(u, 1);
 		if (u_completed(u)) add_completed_unit(u, 1, true);
 		if (requires_detector || cloaked) {
-			set_sprite_cloak_modifier(u->sprite, requires_detector, cloaked, data1, data2);
+			set_sprite_cloak_modifier(u->sprite, requires_detector, cloaked, u_burrowed(u), data1, data2);
 		}
 		set_sprite_visibility(u->sprite, visibility);
 		if (ut_building(u) && (requires_detector || cloaked)) {
@@ -2970,8 +2970,8 @@ struct state_functions {
 
 			requires_detector = u_requires_detector(u->subunit);
 			cloaked = u_cloaked(u->subunit);
-			int data1;
-			int data2;
+			int data1{};
+			int data2{};
 			if (requires_detector || cloaked) {
 				data1 = u->subunit->sprite->main_image->modifier_data1;
 				data2 = u->subunit->sprite->main_image->modifier_data2;
@@ -2981,7 +2981,7 @@ struct state_functions {
 			reinitialize_unit_type(u->subunit, unit_type->turret_unit_type);
 			u->subunit->sprite->flags |= sprite_t::flag_turret;
 			if (requires_detector || cloaked) {
-				set_sprite_cloak_modifier(u->subunit->sprite, requires_detector, cloaked, data1, data2);
+				set_sprite_cloak_modifier(u->subunit->sprite, requires_detector, cloaked, u_burrowed(u), data1, data2);
 			}
 			set_image_offset(u->subunit->sprite->main_image, get_image_lo_offset(u->sprite->main_image, 2, 0));
 			set_sprite_visibility(u->subunit->sprite, u->sprite->visibility_flags);
@@ -3599,7 +3599,7 @@ struct state_functions {
 			order = get_default_gather_order(u, target);
 			if (order) return order;
 			if (u_grounded_building(target) && !u_completed(target)) {
-				if (target->owner == u->owner && unit_race(target) == race::terran) {
+				if (target->owner == u->owner && unit_race(target) == race_t::terran) {
 					if (!ut_addon(target)) {
 						if (!target->connected_unit || target->connected_unit->order_target.unit != target) {
 							return get_order_type(Orders::ConstructingBuilding);
@@ -3608,7 +3608,7 @@ struct state_functions {
 				}
 			} else if (st.alliances[u->owner][target->owner]) {
 				bool can_enter = unit_provides_space(target) && unit_can_load_target(target, u);
-				if ((ut_building(target) || !can_enter) && unit_race(target) == race::terran && ut_mechanical(target) && u_completed(target) && target->hp < target->unit_type->hitpoints) {
+				if ((ut_building(target) || !can_enter) && unit_race(target) == race_t::terran && ut_mechanical(target) && u_completed(target) && target->hp < target->unit_type->hitpoints) {
 					return get_order_type(Orders::Repair);
 				} else if (can_enter) {
 					return get_order_type(Orders::EnterTransport);
@@ -3803,7 +3803,7 @@ struct state_functions {
 		to->lockdown_timer = std::max(to->lockdown_timer, from->lockdown_timer);
 		to->stasis_timer = std::max(to->stasis_timer, from->stasis_timer);
 		to->plague_timer = std::max(to->plague_timer, from->plague_timer);
-		if (from->irradiate_timer > from->irradiate_timer) {
+		if (from->irradiate_timer > to->irradiate_timer) {
 			to->irradiate_timer = from->irradiate_timer;
 			to->irradiated_by = from->irradiated_by;
 			to->irradiate_owner = from->irradiate_owner;
@@ -3827,7 +3827,7 @@ struct state_functions {
 		for (const unit_t* u : find_units_noexpand(area)) {
 			if (!u_grounded_building(u)) continue;
 			if (!ut_building(u)) continue;
-			if (unit_race(u) != race::zerg) continue;
+			if (unit_race(u) != race_t::zerg) continue;
 			auto bb = get_max_creep_bb(u, u->sprite->position, u_completed(u));
 			if (tile_pos.x < bb.from.x) continue;
 			if (tile_pos.y < bb.from.y) continue;
@@ -4887,7 +4887,7 @@ struct state_functions {
 			if (target && !u_loaded(target)) target->connected_unit = nullptr;
 			return;
 		}
-		if (unit_race(target) != race::terran) {
+		if (unit_race(target) != race_t::terran) {
 			sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
 			order_done(u);
 			return;
@@ -5561,7 +5561,7 @@ struct state_functions {
 				if (!u_hallucination(u)) {
 					set_unit_burrowed(u);
 					set_unit_cloaked(u);
-					set_sprite_cloak_modifier(u->sprite, true, true, 0, 0);
+					set_sprite_cloak_modifier(u->sprite, true, true, true, 0, 0);
 					u_set_status_flag(u, unit_t::status_flag_cloaked);
 					u_set_status_flag(u, unit_t::status_flag_requires_detector);
 					u->detected_flags = 0x80000000;
@@ -5826,12 +5826,12 @@ struct state_functions {
 		auto* tech = get_tech_type(TechTypes::Defensive_Matrix);
 		if (spell_cast_target_movement(u, tech, unit_sight_range(u, true))) {
 			u->energy -= fp8::integer(tech->energy_cost);
-			create_defensive_matrix_image(u);
 			unit_t* target = u->order_target.unit;
 			target->defensive_matrix_hp = fp8::integer(250);
 			target->defensive_matrix_timer = 168;
+			create_defensive_matrix_image(target);
 			// todo: callback for sound
-			create_image(get_image_type(ImageTypes::IMAGEID_Science_Vessel_Overlay_Part2), target->sprite, {}, image_order_above);
+			create_image(get_image_type(ImageTypes::IMAGEID_Science_Vessel_Overlay_Part2), u->sprite, {}, image_order_above);
 			order_done(u);
 		}
 	}
@@ -8072,7 +8072,7 @@ struct state_functions {
 		}
 		complete_unit(u);
 		if (u_grounded_building(u)) {
-			if (unit_race(u) == race::terran) find_and_connect_addon(u);
+			if (unit_race(u) == race_t::terran) find_and_connect_addon(u);
 		} else {
 			// todo: callback for sound (morph)
 		}
@@ -8094,7 +8094,7 @@ struct state_functions {
 
 	void secondary_order_Train(unit_t* u) {
 		if (unit_is_disabled(u)) return;
-		if (unit_race(u) == race::zerg && !unit_is(u, UnitTypes::Zerg_Infested_Command_Center)) return;
+		if (unit_race(u) == race_t::zerg && !unit_is(u, UnitTypes::Zerg_Infested_Command_Center)) return;
 		if (u->secondary_order_state == 0 || u->secondary_order_state == 1) {
 			if (u->build_queue.empty()) {
 				set_secondary_order(u, get_order_type(Orders::Nothing));
@@ -12672,7 +12672,7 @@ struct state_functions {
 		st.update_psionic_matrix = false;
 		for (unit_t* u : ptr(st.visible_units)) {
 			if (!u_grounded_building(u)) continue;
-			if (unit_race(u) != race::protoss) continue;
+			if (unit_race(u) != race_t::protoss) continue;
 			if (st.players[u->owner].controller == player_t::controller_rescue_passive) continue;
 			if (!ut_requires_psionic_matrix(u)) continue;
 			bool was_disabled = u_disabled(u);
@@ -13268,14 +13268,15 @@ struct state_functions {
 		return 0;
 	}
 
-	image_t* create_sized_image(unit_t* u, ImageTypes small_image, bool on_subunit = true) {
+	image_t* create_sized_image(unit_t* u, ImageTypes small_image, bool on_subunit = true, int image_order = image_order_top) {
 		ImageTypes image = (ImageTypes)((int)small_image + unit_sprite_size(u));
-		return create_image(get_image_type(image), (on_subunit ? u->subunit ? u->subunit : u : u)->sprite, {}, image_order_top);
+		return create_image(get_image_type(image), (on_subunit ? u->subunit ? u->subunit : u : u)->sprite, {}, image_order);
 	}
 
 	void create_defensive_matrix_image(unit_t* u) {
 		if (u->defensive_matrix_timer && !u_burrowed(u)) {
-			create_sized_image(u, ImageTypes::IMAGEID_Defensive_Matrix_Back_Small);
+			create_sized_image(u, ImageTypes::IMAGEID_Defensive_Matrix_Front_Small);
+			create_sized_image(u, ImageTypes::IMAGEID_Defensive_Matrix_Back_Small, image_order_below);
 		}
 	}
 
@@ -13288,7 +13289,9 @@ struct state_functions {
 			destroy_image_from_to(u, ImageTypes::IMAGEID_Defensive_Matrix_Front_Small, ImageTypes::IMAGEID_Defensive_Matrix_Front_Large);
 			destroy_image_from_to(u->sprite, ImageTypes::IMAGEID_Defensive_Matrix_Back_Small, ImageTypes::IMAGEID_Defensive_Matrix_Back_Large);
 		}
-		create_defensive_matrix_image(u);
+		if (u->defensive_matrix_timer && !u_burrowed(u)) {
+			create_sized_image(u, ImageTypes::IMAGEID_Defensive_Matrix_Hit_Small);
+		}
 	}
 
 	fp8 unit_armor(const unit_t* u) const {
@@ -14395,7 +14398,7 @@ struct state_functions {
 		case TechTypes::Consume:
 			if (ut_building(target)) return false;
 			if (target->owner != u->owner) return false;
-			if (unit_race(target) == race::terran) return false;
+			if (unit_race(target) == race_t::terran) return false;
 			if (unit_is(target, UnitTypes::Zerg_Larva)) return false;
 			return true;
 		default:
@@ -15253,7 +15256,7 @@ struct state_functions {
 		st.unit_counts[u->owner][u->unit_type->id] += count;
 		auto supply_required = u->unit_type->supply_required;
 		auto race = unit_race(u);
-		if (race == race::zerg) {
+		if (race == race_t::zerg) {
 			if (unit_is_egg(u)) {
 				if (!u->build_queue.empty()) {
 					const unit_type_t* ut = u->build_queue.front();
@@ -15264,9 +15267,9 @@ struct state_functions {
 				if (ut_two_units_in_one_egg(u) && !u_completed(u)) supply_required *= 2;
 			}
 			st.supply_used[u->owner][0] += supply_required * count;
-		} else if (race == race::terran) {
+		} else if (race == race_t::terran) {
 			st.supply_used[u->owner][1] += supply_required * count;
-		} else if (race == race::protoss) {
+		} else if (race == race_t::protoss) {
 			st.supply_used[u->owner][2] += supply_required * count;
 		}
 		if (st.unit_counts[u->owner][u->unit_type->id] < 0) st.unit_counts[u->owner][u->unit_type->id] = 0;
@@ -15973,7 +15976,7 @@ struct state_functions {
 					if (u->building.addon) building_abandon_addon(u);
 					if (u->building.researching_type) cancel_research(u, true);
 					if (u->building.upgrading_type) cancel_upgrade(u, true);
-					if (unit_race(u) == race::zerg) {
+					if (unit_race(u) == race_t::zerg) {
 						if (unit_is_morphing_building(u)) u_set_status_flag(u, unit_t::status_flag_completed);
 						if (!remove_creep_provider(u)) u_set_status_flag(u, unit_t::status_flag_4000);
 					}
@@ -16242,7 +16245,7 @@ struct state_functions {
 		replace_sprite_images(u->sprite, construction_image, u->heading);
 
 		if (requires_detector_or_cloaked) {
-			set_sprite_cloak_modifier(u->sprite, u_requires_detector(u), u_cloaked(u), modifier_data1, modifier_data2);
+			set_sprite_cloak_modifier(u->sprite, u_requires_detector(u), u_cloaked(u), u_burrowed(u), modifier_data1, modifier_data2);
 		}
 
 		apply_unit_effects(u);
@@ -16521,7 +16524,7 @@ struct state_functions {
 
 		st.completed_unit_counts[u->owner][u->unit_type->id] += count;
 		auto race = unit_race(u);
-		if (race != race::none) {
+		if (race != race_t::none) {
 			st.supply_available[u->owner][(size_t)race] += u->unit_type->supply_provided * count;
 		}
 
@@ -16848,18 +16851,21 @@ struct state_functions {
 		}
 	}
 
-	void set_sprite_cloak_modifier(sprite_t* sprite, bool requires_detector, bool cloaked, int data1, int data2) {
+	void set_sprite_cloak_modifier(sprite_t* sprite, bool requires_detector, bool cloaked, bool burrowed, int data1, int data2) {
 		for (image_t* image : ptr(sprite->images)) {
 			if (image->image_type->always_visible) continue;
 			hide_image(image);
 		}
-		if (requires_detector && !cloaked) {
+		if (burrowed) {
+			for (image_t* image : ptr(sprite->images)) {
+				if (image->modifier >= 2 && image->modifier <= 7) set_image_modifier(image, 0);
+			}
+		} else if (requires_detector && !cloaked) {
 			for (image_t* image : ptr(sprite->images)) {
 				if (image->modifier == 0) {
 					image->modifier = 2;
 					image->modifier_data1 = data1;
 					image->modifier_data2 = data2;
-					image->flags |= image_t::flag_redraw;
 				}
 			}
 		} else if (!requires_detector && cloaked) {
@@ -16868,14 +16874,12 @@ struct state_functions {
 					image->modifier = 4;
 					image->modifier_data1 = data1;
 					image->modifier_data2 = data2;
-					image->flags |= image_t::flag_redraw;
 				}
 			}
 		} else {
 			for (image_t* image : ptr(sprite->images)) {
 				if (image->modifier == 0 || image->modifier == 2 || image->modifier == 4) {
 					image->modifier = 3;
-					image->flags |= image_t::flag_redraw;
 				}
 			}
 		}
@@ -16887,7 +16891,7 @@ struct state_functions {
 				set_unit_cloaked(u);
 				u_set_status_flag(u, unit_t::status_flag_requires_detector);
 				u_set_status_flag(u, unit_t::status_flag_cloaked);
-				set_sprite_cloak_modifier(u->sprite, true, true, 0, 0);
+				set_sprite_cloak_modifier(u->sprite, true, true, true, 0, 0);
 				set_secondary_order(u, get_order_type(Orders::Cloak));
 				u->detected_flags = 0x80000000;
 			}
@@ -20471,11 +20475,11 @@ struct game_load_functions : state_functions {
 		set_mega_tile_flags();
 	}
 
-	void create_starting_units(int owner, xy position, race race) {
+	void create_starting_units(int owner, xy position, race_t race) {
 
 		const unit_type_t* resource_depot_type;
-		if (race == race::zerg) resource_depot_type = get_unit_type(UnitTypes::Zerg_Hatchery);
-		else if (race == race::terran) resource_depot_type = get_unit_type(UnitTypes::Terran_Command_Center);
+		if (race == race_t::zerg) resource_depot_type = get_unit_type(UnitTypes::Zerg_Hatchery);
+		else if (race == race_t::terran) resource_depot_type = get_unit_type(UnitTypes::Terran_Command_Center);
 		else resource_depot_type = get_unit_type(UnitTypes::Protoss_Nexus);
 
 		xy resource_depot_pos = (position - resource_depot_type->placement_size / 2) / 32u * 32u + resource_depot_type->placement_size / 2;
@@ -20494,7 +20498,7 @@ struct game_load_functions : state_functions {
 				spawn_larva(resource_depot);
 			}
 		}
-		if (race == race::zerg) {
+		if (race == race_t::zerg) {
 			xy overlord_pos = position;
 			xy add = resource_depot_type->dimensions.from + resource_depot_type->dimensions.to + xy(1, 1);
 			if (overlord_pos.x >= int(game_st.map_width / 2)) overlord_pos.x -= add.x;
@@ -20505,8 +20509,8 @@ struct game_load_functions : state_functions {
 		}
 
 		const unit_type_t* worker_type;
-		if (race == race::zerg) worker_type = get_unit_type(UnitTypes::Zerg_Drone);
-		else if (race == race::terran) worker_type = get_unit_type(UnitTypes::Terran_SCV);
+		if (race == race_t::zerg) worker_type = get_unit_type(UnitTypes::Zerg_Drone);
+		else if (race == race_t::terran) worker_type = get_unit_type(UnitTypes::Terran_SCV);
 		else worker_type = get_unit_type(UnitTypes::Protoss_Probe);
 
 		for (size_t i = 0; i != 4; ++i) {
@@ -20598,7 +20602,7 @@ struct game_load_functions : state_functions {
 		};
 		tag_funcs["SIDE"] = [&](data_reader_le r) {
 			for (size_t i = 0; i != 12; ++i) {
-				st.players[i].race = (race)r.get<int8_t>();
+				st.players[i].race = (race_t)r.get<int8_t>();
 			}
 		};
 		tag_funcs["STR "] = [&](data_reader_le r) {

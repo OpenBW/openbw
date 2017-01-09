@@ -9,9 +9,9 @@ namespace bwgame {
 
 namespace data_loading {
 
-struct crc32 {
+struct crc32_t {
 	std::array<uint32_t, 256> table;
-	crc32() {
+	crc32_t() {
 		for (uint32_t i = 0; i != 256; ++i) {
 			uint32_t v = i;
 			for (size_t b = 0; b != 8; ++b) {
@@ -32,7 +32,7 @@ struct crc32 {
 
 template<typename base_reader_T, bool default_little_endian = true>
 struct replay_file_reader {
-	crc32 crc32;
+	crc32_t crc32;
 	base_reader_T& r;
 	replay_file_reader(base_reader_T& r) : r(r) {
 	}
@@ -204,7 +204,7 @@ struct replay_functions: action_functions {
 			game_load_funcs.setup_info.starting_minerals = starting_minerals;
 			for (size_t i = 0; i != 12; ++i) {
 				st.players[i].controller = slot_controller[i];
-				st.players[i].race = (race)slot_race[i];
+				st.players[i].race = (race_t)slot_race[i];
 				st.players[i].force = slot_force[i];
 				if (victory_condition == 0 && tournament_mode == 0) {
 					if (i >= 8) game_load_funcs.setup_info.create_melee_units_for_player[i] = false;
