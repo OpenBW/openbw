@@ -80,6 +80,7 @@ struct window_impl {
 				e.button = sdl_e.button.button;
 				e.mouse_x = sdl_e.button.x;
 				e.mouse_y = sdl_e.button.y;
+				e.clicks = sdl_e.button.clicks;
 				if ((size_t)e.button < mouse_button_state.size()) mouse_button_state[e.button] = true;
 				return true;
 			case SDL_MOUSEBUTTONUP:
@@ -87,6 +88,7 @@ struct window_impl {
 				e.button = sdl_e.button.button;
 				e.mouse_x = sdl_e.button.x;
 				e.mouse_y = sdl_e.button.y;
+				e.clicks = sdl_e.button.clicks;
 				if ((size_t)e.button < mouse_button_state.size()) mouse_button_state[e.button] = false;
 				return true;
 			case SDL_KEYDOWN:
