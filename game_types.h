@@ -337,6 +337,7 @@ struct image_t: link_base {
 	int modifier_data1;
 	int modifier_data2;
 	sprite_t* sprite;
+	int frozen_y_value;
 
 };
 
@@ -472,7 +473,7 @@ struct unit_t: flingy_t {
 		status_flag_requires_detector = 0x100,
 		status_flag_cloaked = 0x200,
 		status_flag_disabled = 0x400,
-		status_flag_800 = 0x800,
+		status_flag_passively_cloaked = 0x800,
 		status_flag_order_not_interruptible = 0x1000,
 		status_flag_iscript_nobrk = 0x2000,
 		status_flag_4000 = 0x4000,

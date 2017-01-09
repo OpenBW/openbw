@@ -261,6 +261,7 @@ struct state_base_copyable {
 
 	creep_life_t creep_life;
 	bool update_psionic_matrix;
+	int disruption_webbed_units;
 };
 
 struct psionic_matrix_link_f {
@@ -489,8 +490,8 @@ struct state_functions {
 	bool u_ready_to_attack(const unit_t* u) const {
 		return u_status_flag(u, unit_t::status_flag_ready_to_attack);
 	}
-	bool u_flag_800(const unit_t* u) const {
-		return u_status_flag(u, unit_t::status_flag_800);
+	bool u_passively_cloaked(const unit_t* u) const {
+		return u_status_flag(u, unit_t::status_flag_passively_cloaked);
 	}
 
 	bool ut_turret(unit_type_autocast ut) const {
@@ -1152,7 +1153,7 @@ struct state_functions {
 		if (!ut_has_energy(u)) return;
 		if (u_hallucination(u)) return;
 		if (!u_completed(u)) return;
-		if ((u_cloaked(u) || u_requires_detector(u)) && !u_flag_800(u)) {
+		if ((u_cloaked(u) || u_requires_detector(u)) && !u_passively_cloaked(u)) {
 			fp8 cost = unit_cloak_energy_cost(u);
 			if (u->energy < cost) {
 				if (u->secondary_order_type->id == Orders::Cloak) set_secondary_order(u, get_order_type(Orders::Nothing));
@@ -3074,11 +3075,6 @@ struct state_functions {
 		}
 	}
 
-	std::pair<bool, xy> find_unload_pos(unit_t* u, xy pos) {
-		move_unit(u, pos);
-		return find_unit_placement(u, pos, false);
-	}
-
 	void unit_unload_impl(unit_t* u, bool container_destroyed) {
 		if (!u_loaded(u)) return;
 		unit_t* container = u->connected_unit;
@@ -3119,7 +3115,8 @@ struct state_functions {
 		if (!u_grounded_building(container) && container->main_order_timer) return false;
 		xy pos = container->sprite->position;
 		bool r;
-		std::tie(r, pos) = find_unload_pos(u, pos);
+		move_unit(u, pos);
+		std::tie(r, pos) = find_unit_placement(u, pos, false);
 		if (!r) return false;
 		container->main_order_timer = 15;
 		move_unit(u, pos);
@@ -3497,7 +3494,7 @@ struct state_functions {
 	void set_unit_burrowed(unit_t* u) {
 		reset_movement_state(u);
 		u_set_status_flag(u, unit_t::status_flag_burrowed);
-		u_set_status_flag(u, unit_t::status_flag_800);
+		u_set_status_flag(u, unit_t::status_flag_passively_cloaked);
 		u->sprite->flags |= sprite_t::flag_burrowed;
 		u->sprite->elevation_level = 1;
 		if (unit_is(u, UnitTypes::Zerg_Lurker)) {
@@ -3681,9 +3678,15 @@ struct state_functions {
 	void set_remove_timer(unit_t* u, int timer) {
 		if (u->remove_timer == 0 || timer < u->remove_timer) u->remove_timer = timer;
 	}
+	
+	int default_remove_timer(const unit_t* u) const {
+		if (u_hallucination(u)) return 1350;
+		if (unit_is(u, UnitTypes::Zerg_Broodling)) return 1800;
+		return 0;
+	}
 
 	void set_remove_timer(unit_t* u) {
-		set_remove_timer(u, u_hallucination(u) ? 1350 : 1800);
+		set_remove_timer(u, default_remove_timer(u));
 	}
 
 	void make_unit_hallucination(unit_t* u) {
@@ -5058,7 +5061,10 @@ struct state_functions {
 		check_unit_collision(u);
 		unit_finder_remove(u);
 		unit_finder_insert(u);
-		if (u->sprite->images.back().modifier == 10) u->sprite->images.back().flags |= 4;
+		if (u->sprite->images.back().modifier == 10) {
+			u->sprite->images.back().frozen_y_value = get_image_map_position(&u->sprite->images.back()).y;
+			u->sprite->images.back().flags |= image_t::flag_y_frozen;
+		}
 		set_next_target_waypoint(u, u->sprite->position - xy(0, 42));
 		if (unit_is(u, UnitTypes::Zerg_Infested_Command_Center)) remove_creep_provider(u);
 		u->order_type = get_order_type(Orders::LiftingOff);
@@ -5093,7 +5099,7 @@ struct state_functions {
 					if (!ut_building(u)) u->flingy_top_speed = get_modified_unit_speed(u, u->flingy_type->top_speed);
 					if (u->sprite->images.back().modifier == 10) {
 						u->sprite->images.back().offset.y = (ut_worker(u) ? 7 : 42);
-						u->sprite->images.back().flags &= ~4;
+						u->sprite->images.back().flags &= ~image_t::flag_y_frozen;
 					}
 					u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
 					order_done(u);
@@ -5169,7 +5175,10 @@ struct state_functions {
 						u->building.is_landing = true;
 						set_unit_move_target(u, u->order_target.pos);
 						set_next_target_waypoint(u, u->order_target.pos);
-						if (u->sprite->images.back().modifier == 10) u->sprite->images.back().flags |= 4;
+						if (u->sprite->images.back().modifier == 10) {
+							u->sprite->images.back().frozen_y_value = get_image_map_position(&u->sprite->images.back()).y;
+							u->sprite->images.back().flags |= image_t::flag_y_frozen;
+						}
 						u_set_status_flag(u, unit_t::status_flag_order_not_interruptible);
 						u->flingy_top_speed = fp8::integer(1);
 						set_next_speed(u, fp8::integer(1));
@@ -5197,7 +5206,7 @@ struct state_functions {
 					unit_finder_insert(u);
 					check_unit_collision(u);
 					u->sprite->images.back().offset.y = 0;
-					if (u->sprite->images.back().modifier == 10) u->sprite->images.back().flags &= ~4;
+					if (u->sprite->images.back().modifier == 10) u->sprite->images.back().flags &= ~image_t::flag_y_frozen;
 					if (u->sprite->main_image->image_type->landing_dust_filename_index) {
 						create_dust_sprite(u->sprite, SpriteTypes::SPRITEID_Building_Landing_Dust_Type1, 3, 0, 8, false);
 						create_dust_sprite(u->sprite, SpriteTypes::SPRITEID_Building_Landing_Dust_Type1, 3, 16, 24, true);
@@ -5598,7 +5607,7 @@ struct state_functions {
 			}
 		} else if (u->order_state == 5) {
 			reset_movement_state(u);
-			u_unset_status_flag(u, unit_t::status_flag_800);
+			u_unset_status_flag(u, unit_t::status_flag_passively_cloaked);
 			u_unset_status_flag(u, unit_t::status_flag_burrowed);
 			u->sprite->sprite_type = u->unit_type->flingy->sprite;
 			if (target && unit_target_in_range(u, target, 576)) {
@@ -6170,7 +6179,9 @@ struct state_functions {
 		if (!unit_is_ghost(u)) xcept("order_NukeTrack: unit is not a ghost");
 		if (u->order_state == 0) {
 			sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
-			thingy_t* t = create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Nuke_Target_Dot), u->order_target.pos, u->owner);
+			xy pos;
+			if (u->connected_unit) pos = u->connected_unit->order_target.pos;
+			thingy_t* t = create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Nuke_Target_Dot), pos, u->owner);
 			u->ghost.nuke_dot = t;
 			if (t) {
 				t->sprite->elevation_level = u->sprite->elevation_level + 1;
@@ -6355,7 +6366,10 @@ struct state_functions {
 				}
 				if (success) {
 					if (xy_length(to_xy_fp8(u->order_target.pos) - u->exact_position).integer_part() <= 128) {
-						if (u->sprite->images.back().modifier == 10) u->sprite->images.back().flags |= 4;
+						if (u->sprite->images.back().modifier == 10) {
+							u->sprite->images.back().frozen_y_value = get_image_map_position(&u->sprite->images.back()).y;
+							u->sprite->images.back().flags |= image_t::flag_y_frozen;
+						}
 						set_unit_move_target(u, u->order_target.pos);
 						set_next_target_waypoint(u, u->order_target.pos);
 						u_set_status_flag(u, unit_t::status_flag_order_not_interruptible);
@@ -6372,7 +6386,7 @@ struct state_functions {
 			if (unit_is_at_move_target(u)) {
 				if (u->sprite->images.back().modifier == 10) {
 					u->sprite->images.back().offset.y = 0;
-					u->sprite->images.back().flags &= ~4;
+					u->sprite->images.back().flags &= ~image_t::flag_y_frozen;
 				}
 				if (!u_immovable(u)) {
 					if (!u->order_queue.empty() && u->order_queue.front().order_type->id == Orders::DroneBuild) {
@@ -6609,7 +6623,7 @@ struct state_functions {
 			if (u->order_signal & 4) {
 				u->order_signal &= ~4;
 				reset_movement_state(u);
-				u_unset_status_flag(u, unit_t::status_flag_800);
+				u_unset_status_flag(u, unit_t::status_flag_passively_cloaked);
 				u_unset_status_flag(u, unit_t::status_flag_burrowed);
 				u->sprite->sprite_type = u->unit_type->flingy->sprite;
 				apply_unit_effects(u);
@@ -8209,7 +8223,7 @@ struct state_functions {
 			if (target->order_type->id == Orders::WarpIn) continue;
 			if (!unit_target_in_range(u, target, range)) continue;
 			set_unit_cloaked(target);
-			if (!u_flag_800(target)) u_set_status_flag(target, unit_t::status_flag_800);
+			if (!u_passively_cloaked(target)) u_set_status_flag(target, unit_t::status_flag_passively_cloaked);
 		}
 	}
 	
@@ -12706,15 +12720,26 @@ struct state_functions {
 	}
 	
 	void update_disruption_web() {
-		for (unit_t* u : ptr(st.visible_units)) {
-			if (!u_flying(u) || u_cannot_attack(u)) {
-				u_unset_status_flag(u, unit_t::status_flag_cannot_attack);
-				if (unit_provides_space(u)) {
-					for (unit_t* nu : loaded_units(u)) {
-						u_unset_status_flag(nu, unit_t::status_flag_cannot_attack);
+		if (st.disruption_webbed_units) {
+			for (unit_t* u : ptr(st.visible_units)) {
+				if (!u_flying(u) || u_cannot_attack(u)) {
+					if (u_cannot_attack(u)) {
+						u_unset_status_flag(u, unit_t::status_flag_cannot_attack);
+						--st.disruption_webbed_units;
 					}
-				} else if (u->subunit) {
-					u_unset_status_flag(u->subunit, unit_t::status_flag_cannot_attack);
+					if (unit_provides_space(u)) {
+						for (unit_t* nu : loaded_units(u)) {
+							if (u_cannot_attack(nu)) {
+								u_unset_status_flag(nu, unit_t::status_flag_cannot_attack);
+								--st.disruption_webbed_units;
+							}
+						}
+					} else if (u->subunit) {
+						if (u_cannot_attack(u->subunit)) {
+							u_unset_status_flag(u->subunit, unit_t::status_flag_cannot_attack);
+							--st.disruption_webbed_units;
+						}
+					}
 				}
 			}
 		}
@@ -12723,13 +12748,22 @@ struct state_functions {
 				if (!unit_is(u, UnitTypes::Spell_Disruption_Web)) continue;
 				for (unit_t* target : find_units_noexpand(unit_sprite_inner_bounding_box(u))) {
 					if (u_flying(target)) continue;
-					u_set_status_flag(target, unit_t::status_flag_cannot_attack);
+					if (!u_cannot_attack(target)) {
+						u_set_status_flag(target, unit_t::status_flag_cannot_attack);
+						++st.disruption_webbed_units;
+					}
 					if (unit_provides_space(target)) {
 						for (unit_t* n : loaded_units(target)) {
-							u_set_status_flag(n, unit_t::status_flag_cannot_attack);
+							if (!u_cannot_attack(n)) {
+								u_set_status_flag(n, unit_t::status_flag_cannot_attack);
+								++st.disruption_webbed_units;
+							}
 						}
 					} else if (target->subunit) {
-						u_set_status_flag(target->subunit, unit_t::status_flag_cannot_attack);
+						if (!u_cannot_attack(target->subunit)) {
+							u_set_status_flag(target->subunit, unit_t::status_flag_cannot_attack);
+							++st.disruption_webbed_units;
+						}
 					}
 				}
 			}
@@ -12811,11 +12845,11 @@ struct state_functions {
 			if (u->cloak_counter == 0) {
 				st.cloaked_units.remove(*u);
 				u->cloaked_unit_link = {};
-				u_unset_status_flag(u, unit_t::status_flag_800);
+				u_unset_status_flag(u, unit_t::status_flag_passively_cloaked);
 				decloak_unit(u);
 			} else {
-				if (!u_burrowed(u) && u->secondary_order_type->id == Orders::Cloak && u->cloak_counter == 1 && u_flag_800(u)) {
-					u_unset_status_flag(u, unit_t::status_flag_800);
+				if (!u_burrowed(u) && u->secondary_order_type->id == Orders::Cloak && u->cloak_counter == 1 && u_passively_cloaked(u)) {
+					u_unset_status_flag(u, unit_t::status_flag_passively_cloaked);
 				}
 				if (!u_requires_detector(u)) cloak_unit(u);
 			}
@@ -13093,7 +13127,7 @@ struct state_functions {
 		} else {
 			map_pos.x += int(frame.offset.x - image->grp->width / 2);
 		}
-		if (image->flags & image_t::flag_y_frozen) map_pos.y = map_pos.y;
+		if (image->flags & image_t::flag_y_frozen) map_pos.y = image->frozen_y_value;
 		else map_pos.y += int(frame.offset.y - image->grp->height / 2);
 		return map_pos;
 	}
@@ -13529,7 +13563,7 @@ struct state_functions {
 			a_vector<unit_t*> targets;
 			for (unit_t* target : find_units(bb)) {
 				if (target == b->bullet_owner_unit) continue;
-				if (target->owner == b->owner) continue;
+				if (target->owner == b->owner && target != b->bullet_target) continue;
 				if (!weapon_can_target_unit(b->weapon_type, target)) continue;
 				int distance = unit_distance_to(target, b->sprite->position);
 				if (distance > b->weapon_type->outer_splash_radius) continue;
@@ -14503,7 +14537,7 @@ struct state_functions {
 			case opc_setvertpos:
 				a = *p++;
 				if (noop) break;
-				if (!iscript_unit || (!u_completed(iscript_unit) && !u_grounded_building(iscript_unit))) {
+				if (!iscript_unit || (!u_requires_detector(iscript_unit) && !u_cloaked(iscript_unit))) {
 					if (image->offset.y != a) {
 						image->offset.y = a;
 						image->flags |= image_t::flag_redraw;
@@ -14545,7 +14579,7 @@ struct state_functions {
 				if (image_t* new_image = add_image((ImageTypes)a, xy(), opc == opc_imgolorig ? image_order_above : image_order_below)) {
 					if (!i_flag(new_image, image_t::flag_uses_special_offset)) {
 						i_set_flag(new_image, image_t::flag_uses_special_offset);
-						update_image_special_offset(image);
+						update_image_special_offset(new_image);
 					}
 				}
 				break;
@@ -15925,7 +15959,7 @@ struct state_functions {
 						st.cloaked_units.remove(*u);
 						u->cloaked_unit_link = {};
 					}
-					if (u_flag_800(u)) u_unset_status_flag(u, unit_t::status_flag_800);
+					if (u_passively_cloaked(u)) u_unset_status_flag(u, unit_t::status_flag_passively_cloaked);
 					if (u_requires_detector(u)) {
 						// todo: callback for sound
 					}
@@ -16282,7 +16316,7 @@ struct state_functions {
 			return u_flying(u) == u_flying(target);
 		};
 		const unit_t* blocking_unit = find_unit(unit_inner_bounding_box(u, pos), blocking_unit_pred);
-		if (!blocking_unit && is_in_map_bounds(unit_sprite_bounding_box(u))) {
+		if (!blocking_unit && is_in_bounds(unit_inner_bounding_box(u, pos), {{0, 0}, {(int)game_st.map_width, (int)game_st.map_height - 32}})) {
 			if (u_flying(u) || unit_type_can_fit_at(u->unit_type, pos)) return {true, pos};
 			if (!terrain_displaces_unit) {
 				st.last_error = 60;
@@ -18917,6 +18951,8 @@ struct state_copier {
 					remap_unit(u->building.nydus.exit);
 				} else if (funcs.unit_is(u, UnitTypes::Terran_Nuclear_Silo)) {
 					remap_unit(u->building.silo.nuke);
+				} else if (funcs.unit_is(u, UnitTypes::Protoss_Pylon)) {
+					remap_sprite(u->building.pylon.psi_field_sprite);
 				}
 			}
 			remap_unit(u->current_build_unit);
@@ -19042,6 +19078,7 @@ struct state_copier {
 		assemble(r.active_bullets, st.active_bullets, &state_copier::bullet);
 
 		assemble(r.cloaked_units, st.cloaked_units, &state_copier::unit);
+		assemble(r.psionic_matrix_units, st.psionic_matrix_units, &state_copier::unit);
 		for (size_t i = 0; i != 12; ++i) {
 			assemble(r.player_units[i], st.player_units[i], &state_copier::unit);
 		}
@@ -19315,6 +19352,7 @@ struct game_load_functions : state_functions {
 
 		st.creep_life = {};
 		st.update_psionic_matrix = false;
+		st.disruption_webbed_units = 0;
 	}
 
 	regions_t::region* get_new_region() {
