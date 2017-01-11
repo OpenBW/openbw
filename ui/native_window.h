@@ -27,6 +27,7 @@ namespace native_window {
 		int button_state = 0;
 		int mouse_xrel = -1;
 		int mouse_yrel = -1;
+		int clicks = -1;
 	};
 
 	struct window {
