@@ -27,6 +27,80 @@ struct unit_id {
 	}
 };
 
+struct default_link_f {
+	template<typename T>
+	auto* operator()(T* ptr) {
+		return (std::pair<T*, T*>*)&ptr->link;
+	}
+};
+
+template<typename cont_T, typename T>
+static void bw_insert_list(cont_T& cont, T& v) {
+	if (cont.empty()) cont.push_front(v);
+	else cont.insert(std::next(cont.begin()), v);
+}
+
+template<typename T, size_t max_size, size_t allocation_granularity>
+struct object_container {
+	a_deque<std::array<T, allocation_granularity>> list;
+	intrusive_list<T, default_link_f> free_list;
+	size_t size = 0;
+	
+	T* get(size_t index, bool add_new_to_free = true) {
+		if (index) index = max_size - index;
+		while (size <= index) grow(add_new_to_free);
+		return &list[index / allocation_granularity][index % allocation_granularity];
+	}
+	
+	T* try_get(size_t index) {
+		if (index) index = max_size - index;
+		if (size <= index) return nullptr;
+		return &list[index / allocation_granularity][index % allocation_granularity];
+	}
+	
+	T* at(size_t index) {
+		if (index) index = max_size - index;
+		if (size <= index) xcept("object_container::get const: invalid index %u", index);
+		return &list[index / allocation_granularity][index % allocation_granularity];
+	}
+	
+	const T* at(size_t index) const {
+		if (index) index = max_size - index;
+		if (size <= index) xcept("object_container::get const: invalid index %u", index);
+		return &list[index / allocation_granularity][index % allocation_granularity];
+	}
+	
+	void grow(bool add_new_to_free) {
+		if (size == max_size) xcept("object_container: attempt to grow beyond max_size");
+		list.emplace_back();
+		size_t n = std::min(allocation_granularity, max_size - size);
+		for (size_t i = 0; i != n; ++i) {
+			T* obj = &list.back()[i];
+			obj->index = size == 0 ? 0 : max_size - size;
+			if (add_new_to_free) free_list.push_back(*obj);
+			++size;
+		}
+	}
+	
+	T* top() {
+		if (free_list.empty()) {
+			if (size == max_size) return nullptr;
+			grow(true);
+		} else if (size != max_size && std::next(free_list.begin()) == free_list.end()) {
+			grow(true);
+		}
+		auto* r = &free_list.front();
+		if (r != get(r->index)) xcept("index mismatch for %d\n", r->index);
+		return r;
+	}
+	void pop() {
+		free_list.pop_front();
+	}
+	void push(T* obj) {
+		bw_insert_list(free_list, *obj);
+	}
+};
+
 enum struct race_t {
 	zerg,
 	terran,
@@ -292,13 +366,6 @@ struct link_base {
 	std::pair<link_base*, link_base*> link;
 };
 
-struct default_link_f {
-	template<typename T>
-	auto* operator()(T* ptr) {
-		return (std::pair<T*, T*>*)&ptr->link;
-	}
-};
-
 
 struct iscript_state_t {
 	const iscript_t::script* current_script;
@@ -320,11 +387,8 @@ struct image_t: link_base {
 		flag_hidden = 0x40,
 		flag_uses_special_offset = 0x80
 	};
-	enum {
-		modifier_cloaked = 2,
-		modifier_hallucination = 16
-	};
-
+	
+	size_t index;
 	const image_type_t* image_type;
 	int modifier;
 	size_t frame_index_offset;
@@ -351,6 +415,7 @@ struct sprite_t: link_base {
 		flag_iscript_nobrk = 0x80,
 	};
 
+	size_t index;
 	const sprite_type_t* sprite_type;
 	int owner;
 	int selection_index;
@@ -358,7 +423,6 @@ struct sprite_t: link_base {
 	int elevation_level;
 	int flags;
 	int selection_timer;
-	size_t index;
 	size_t width;
 	size_t height;
 	xy position;
@@ -374,6 +438,7 @@ struct thingy_t: link_base {
 
 struct flingy_t: thingy_t {
 
+	size_t index;
 	target_t move_target;
 	xy next_movement_waypoint;
 	xy next_target_waypoint;
@@ -406,6 +471,7 @@ struct bullet_t: flingy_t {
 		state_dying,
 		state_hit_near_target
 	};
+	size_t index;
 	int bullet_state;
 	unit_t* bullet_target;
 	xy bullet_target_pos;
@@ -430,6 +496,7 @@ struct order_target_t {
 };
 
 struct order_t: link_base {
+	size_t index;
 	const order_type_t* order_type;
 	order_target_t target;
 };
@@ -497,6 +564,7 @@ struct unit_t: flingy_t {
 		status_flag_lifetime_expired = 0x80000000,
 	};
 
+	size_t index;
 	int owner;
 	const order_type_t* order_type;
 	int order_state;

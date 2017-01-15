@@ -77,13 +77,6 @@ static const bool psi_field_mask[5][8] = {
 	{ 1, 1, 1, 0, 0, 0, 0, 0 }
 };
 
-// Broodwar linked lists insert new elements between the first and second entry.
-template<typename cont_T, typename T>
-static void bw_insert_list(cont_T& cont, T& v) {
-	if (cont.empty()) cont.push_front(v);
-	else cont.insert(std::next(cont.begin()), v);
-}
-
 template<typename T>
 struct autocast {
 	T val;
@@ -285,27 +278,22 @@ struct state_base_non_copyable {
 	intrusive_list<unit_t, default_link_f> hidden_units;
 	intrusive_list<unit_t, default_link_f> map_revealer_units;
 	intrusive_list<unit_t, default_link_f> dead_units;
-	intrusive_list<unit_t, default_link_f> free_units;
 
 	std::array<intrusive_list<unit_t, void, &unit_t::player_units_link>, 12> player_units;
 	intrusive_list<unit_t, void, &unit_t::cloaked_unit_link> cloaked_units;
 	intrusive_list<unit_t, psionic_matrix_link_f> psionic_matrix_units;
 
-	a_vector<unit_t> units = a_vector<unit_t>(1700);
+	object_container<unit_t, 1700, 17> units_container;
 
 	intrusive_list<bullet_t, default_link_f> active_bullets;
-	intrusive_list<bullet_t, default_link_f> free_bullets;
-	a_vector<bullet_t> bullets = a_vector<bullet_t>(100);
+	object_container<bullet_t, 100, 10> bullets_container;
 
 	a_vector<intrusive_list<sprite_t, default_link_f>> sprites_on_tile_line;
-	intrusive_list<sprite_t, default_link_f> free_sprites;
-	a_vector<sprite_t> sprites = a_vector<sprite_t>(2500);
+	object_container<sprite_t, 2500, 25> sprites_container;
 
-	intrusive_list<image_t, default_link_f> free_images;
-	a_vector<image_t> images = a_vector<image_t>(5000);
+	object_container<image_t, 5000, 50> images_container;
 
-	intrusive_list<order_t, default_link_f> free_orders;
-	a_vector<order_t> orders = a_vector<order_t>(2000);
+	object_container<order_t, 2000, 20> orders_container;
 
 	intrusive_list<path_t, default_link_f> free_paths;
 	a_list<path_t> paths;
@@ -607,8 +595,9 @@ struct state_functions {
 		size_t idx = id.index();
 		if (!idx) return nullptr;
 		size_t actual_index = idx - 1;
-		if (actual_index >= st.units.size()) xcept("attempt to dereference invalid unit id %d (actual index %d)", idx, actual_index);
-		unit_t* u = &st.units[actual_index];
+		if (actual_index >= 1700) xcept("attempt to dereference invalid unit id %#x (actual index %d)", id.raw_value, actual_index);
+		unit_t* u = st.units_container.try_get(actual_index);
+		if (!u) return nullptr;
 		if (u->unit_id_generation != id.generation()) return nullptr;
 		if (unit_dead(u)) return nullptr;
 		return u;
@@ -616,7 +605,7 @@ struct state_functions {
 
 	unit_id get_unit_id(const unit_t* u) const {
 		if (!u) return unit_id{};
-		return unit_id(u - st.units.data() + 1, u->unit_id_generation);
+		return unit_id(u->index + 1, u->unit_id_generation);
 	}
 
 	bool is_in_map_bounds(const unit_type_t* unit_type, xy pos) const {
@@ -800,8 +789,8 @@ struct state_functions {
 	}
 
 	auto loaded_units(const unit_t* u) const {
-		return make_filter_range(make_transform_range(u->loaded_units, [this](auto index) {
-			return this->get_unit(index);
+		return make_filter_range(make_transform_range(u->loaded_units, [this](auto uid) {
+			return this->get_unit(uid);
 		}), [](unit_t* u) {
 			return u != nullptr;
 		});
@@ -8210,9 +8199,9 @@ struct state_functions {
 		int range = weapon_max_range(u, w);
 		auto area = square_at(u->sprite->position, range);
 		if (area.from.x < 0) area.from.x = 0;
-		else if (area.from.x > (int)game_st.map_width) area.from.x = (int)game_st.map_width;
-		if (area.to.x < 0) area.to.x = 0;
-		else if (area.to.x > (int)game_st.map_height) area.to.x = (int)game_st.map_height;
+		else if (area.to.x > (int)game_st.map_width) area.from.x = (int)game_st.map_width;
+		if (area.from.y < 0) area.to.y = 0;
+		else if (area.to.y > (int)game_st.map_height) area.to.y = (int)game_st.map_height;
 		for (unit_t* target : find_units_noexpand(area)) {
 			if (target->owner != u->owner) continue;
 			if (ut_building(target)) continue;
@@ -12715,7 +12704,7 @@ struct state_functions {
 				remove_queued_order(u, &u->order_queue.front());
 			}
 			st.dead_units.remove(*u);
-			bw_insert_list(st.free_units, *u);
+			st.units_container.push(u);
 		}
 	}
 	
@@ -13263,8 +13252,8 @@ struct state_functions {
 	}
 
 	int unit_sprite_size(unit_type_autocast ut) const {
-		if (ut_flag(ut, (unit_type_t::flags_t)0x2000000)) return 1;
-		if (ut_flag(ut, (unit_type_t::flags_t)0x4000000)) return 2;
+		if (ut_flag(ut, unit_type_t::flag_sprite_size_medium)) return 1;
+		if (ut_flag(ut, unit_type_t::flag_sprite_size_large)) return 2;
 		return 0;
 	}
 
@@ -13276,7 +13265,7 @@ struct state_functions {
 	void create_defensive_matrix_image(unit_t* u) {
 		if (u->defensive_matrix_timer && !u_burrowed(u)) {
 			create_sized_image(u, ImageTypes::IMAGEID_Defensive_Matrix_Front_Small);
-			create_sized_image(u, ImageTypes::IMAGEID_Defensive_Matrix_Back_Small, image_order_below);
+			create_sized_image(u, ImageTypes::IMAGEID_Defensive_Matrix_Back_Small, true, image_order_below);
 		}
 	}
 
@@ -14047,7 +14036,7 @@ struct state_functions {
 		if (b->sprite) return false;
 		--st.active_bullets_size;
 		st.active_bullets.remove(*b);
-		bw_insert_list(st.free_bullets, *b);
+		st.bullets_container.push(b);
 		return false;
 	}
 
@@ -14279,25 +14268,15 @@ struct state_functions {
 		return true;
 	}
 
-	bullet_t* new_bullet() {
-		if (!st.free_bullets.empty()) {
-			bullet_t* r = &st.free_bullets.front();
-			st.free_bullets.pop_front();
-			return r;
-		}
-		if (st.bullets.size() >= 100) return nullptr;
-		return &*st.bullets.emplace(st.bullets.end());
-	}
-
 	bullet_t* create_bullet(const weapon_type_t* weapon_type, unit_t* source_unit, xy pos, int owner, direction_t heading) {
 		if (weapon_type->id == WeaponTypes::Halo_Rockets && st.active_bullets_size >= 80) return nullptr;
 		if (u_cannot_attack(source_unit) && !is_spell(weapon_type)) return nullptr;
-		bullet_t* b = new_bullet();
+		bullet_t* b = st.bullets_container.top();
 		if (!b) return nullptr;
 		if (!initialize_bullet(b, weapon_type, source_unit, pos, owner, heading)) {
-			st.free_bullets.push_front(*b);
 			return nullptr;
 		}
+		st.bullets_container.pop();
 		++st.active_bullets_size;
 		bw_insert_list(st.active_bullets, *b);
 		return b;
@@ -15013,7 +14992,7 @@ struct state_functions {
 		if (!sprite->images.empty()) return true;
 
 		remove_sprite_from_tile_line(sprite);
-		bw_insert_list(st.free_sprites, *sprite);
+		st.sprites_container.push(sprite);
 
 		return false;
 	}
@@ -15058,7 +15037,7 @@ struct state_functions {
 	void destroy_image(image_t* image) {
 		image->grp = nullptr;
 		image->sprite->images.remove(*image);
-		bw_insert_list(st.free_images, *image);
+		st.images_container.push(image);
 	}
 
 	enum {
@@ -15070,9 +15049,9 @@ struct state_functions {
 	image_t* create_image(const image_type_t* image_type, sprite_t* sprite, xy offset, int order, image_t* relimg = nullptr) {
 		if (!image_type)  xcept("attempt to create image of null type");
 
-		if (st.free_images.empty()) return nullptr;
-		image_t* image = &st.free_images.front();
-		st.free_images.pop_front();
+		image_t* image = st.images_container.top();
+		if (!image) return nullptr;
+		st.images_container.pop();
 
 		if (sprite->images.empty()) {
 			sprite->main_image = image;
@@ -15100,15 +15079,15 @@ struct state_functions {
 			destroy_image(image);
 		}
 		remove_sprite_from_tile_line(sprite);
-		bw_insert_list(st.free_sprites, *sprite);
+		st.sprites_container.push(sprite);
 	}
 
 	sprite_t* create_sprite(const sprite_type_t* sprite_type, xy pos, int owner) {
 		if (!sprite_type)  xcept("attempt to create sprite of null type");
 
-		if (st.free_sprites.empty()) return nullptr;
-		sprite_t* sprite = &st.free_sprites.front();
-		st.free_sprites.pop_front();
+		sprite_t* sprite = st.sprites_container.top();
+		if (!sprite) return nullptr;
+		st.sprites_container.pop();
 
 		auto initialize_sprite = [&]() {
 			if ((size_t)pos.x >= game_st.map_width || (size_t)pos.y >= game_st.map_height) return false;
@@ -15131,7 +15110,7 @@ struct state_functions {
 		};
 
 		if (!initialize_sprite()) {
-			bw_insert_list(st.free_sprites, *sprite);
+			st.sprites_container.push(sprite);
 			return nullptr;
 		}
 		add_sprite_to_tile_line(sprite);
@@ -16109,7 +16088,8 @@ struct state_functions {
 
 		lcg_rand(14);
 		auto get_new = [&](const unit_type_t* unit_type) {
-			if (st.free_units.empty()) {
+			unit_t* u = st.units_container.top();
+			if (!u) {
 				st.last_error = 61; // Cannot create more units
 				return (unit_t*)nullptr;
 			}
@@ -16117,12 +16097,11 @@ struct state_functions {
 				st.last_error = 0;
 				return (unit_t*)nullptr;
 			}
-			unit_t* u = &st.free_units.front();
 			if (!initialize_unit(u, unit_type, pos, owner)) {
 				st.last_error = 62; // Unable to create unit
 				return (unit_t*)nullptr;
 			}
-			st.free_units.pop_front();
+			st.units_container.pop();
 			return u;
 		};
 		unit_t* u = get_new(unit_type);
@@ -16553,14 +16532,14 @@ struct state_functions {
 		if (o->order_type->highlight != -1) --u->order_queue_count;
 		if (u->order_queue_count == -1) u->order_queue_count = 0;
 		u->order_queue.remove(*o);
-		bw_insert_list(st.free_orders, *o);
+		st.orders_container.push(o);
 		--st.active_orders_size;
 	}
 
 	order_t* create_order(const order_type_t* order_type, order_target_t target) {
-		if (st.free_orders.empty()) return (order_t*)nullptr;
-		order_t* o = &st.free_orders.front();
-		st.free_orders.pop_front();
+		order_t* o = st.orders_container.top();
+		if (!o) return nullptr;
+		st.orders_container.pop();
 		++st.active_orders_size;
 		o->order_type = order_type;
 		o->target = target;
@@ -18917,8 +18896,8 @@ struct state_copier {
 	std::array<bool, 5000> image_copied{};
 	std::array<bool, 2000> order_copied{};
 	unit_t* unit(const unit_t* v) {
-		size_t index = v - st.units.data();
-		auto* u = &r.units[index];
+		size_t index = v->index;
+		auto* u = r.units_container.get(index, false);
 		if (!unit_copied[index]) {
 			unit_copied[index] = true;
 			memcpy(u, v, sizeof(*v));
@@ -18972,8 +18951,8 @@ struct state_copier {
 	}
 	bullet_t* bullet(const bullet_t* v) {
 		if (!v) return nullptr;
-		size_t index = v - st.bullets.data();
-		auto* rv = &r.bullets[index];
+		size_t index = v->index;
+		auto* rv = r.bullets_container.get(index, false);
 		if (!bullet_copied[index]) {
 			bullet_copied[index] = true;
 			memcpy(rv, v, sizeof(*v));
@@ -18987,8 +18966,8 @@ struct state_copier {
 	}
 	sprite_t* sprite(const sprite_t* v) {
 		if (!v) return nullptr;
-		size_t index = v - st.sprites.data();
-		auto* rv = &r.sprites[index];
+		size_t index = v->index;
+		auto* rv = r.sprites_container.get(index, false);
 		if (!sprite_copied[index]) {
 			sprite_copied[index] = true;
 			memcpy(rv, v, sizeof(*v));
@@ -19003,8 +18982,8 @@ struct state_copier {
 	}
 	image_t* image(const image_t* v) {
 		if (!v) return nullptr;
-		size_t index = v - st.images.data();
-		auto* rv = &r.images[index];
+		size_t index = v->index;
+		auto* rv = r.images_container.get(index, false);
 		if (!image_copied[index]) {
 			image_copied[index] = true;
 			*rv = *v;
@@ -19018,8 +18997,8 @@ struct state_copier {
 	}
 	order_t* order(const order_t* v) {
 		if (!v) return nullptr;
-		size_t index = v - st.orders.data();
-		auto* rv = &r.orders[index];
+		size_t index = v->index;
+		auto* rv = r.orders_container.get(index, false);
 		if (!order_copied[index]) {
 			order_copied[index] = true;
 			*rv = *v;
@@ -19054,10 +19033,11 @@ struct state_copier {
 	}
 	template<typename list_T, typename F>
 	void assemble(list_T& dst_list, const list_T& src_list, F&& func) {
-		dst_list.clear();
+		list_T new_list;
 		for (auto* v : ptr(src_list)) {
-			dst_list.push_back(*(this->*func)(v));
+			new_list.push_back(*(this->*func)(v));
 		}
+		dst_list = std::move(new_list);
 	}
 
 	void operator()() {
@@ -19068,17 +19048,17 @@ struct state_copier {
 
 		assemble(r.free_paths, st.free_paths, &state_copier::path);
 
-		assemble(r.free_orders, st.free_orders, &state_copier::order);
+		assemble(r.orders_container.free_list, st.orders_container.free_list, &state_copier::order);
 
-		assemble(r.free_images, st.free_images, &state_copier::image);
+		assemble(r.images_container.free_list, st.images_container.free_list, &state_copier::image);
 
-		assemble(r.free_sprites, st.free_sprites, &state_copier::sprite);
+		assemble(r.sprites_container.free_list, st.sprites_container.free_list, &state_copier::sprite);
 		r.sprites_on_tile_line.resize(st.sprites_on_tile_line.size());
 		for (size_t i = 0; i != r.sprites_on_tile_line.size(); ++i) {
 			assemble(r.sprites_on_tile_line[i], st.sprites_on_tile_line[i], &state_copier::sprite);
 		}
 
-		assemble(r.free_bullets, st.free_bullets, &state_copier::bullet);
+		assemble(r.bullets_container.free_list, st.bullets_container.free_list, &state_copier::bullet);
 		assemble(r.active_bullets, st.active_bullets, &state_copier::bullet);
 
 		assemble(r.cloaked_units, st.cloaked_units, &state_copier::unit);
@@ -19086,7 +19066,7 @@ struct state_copier {
 		for (size_t i = 0; i != 12; ++i) {
 			assemble(r.player_units[i], st.player_units[i], &state_copier::unit);
 		}
-		assemble(r.free_units, st.free_units, &state_copier::unit);
+		assemble(r.units_container.free_list, st.units_container.free_list, &state_copier::unit);
 		assemble(r.dead_units, st.dead_units, &state_copier::unit);
 		assemble(r.map_revealer_units, st.map_revealer_units, &state_copier::unit);
 		assemble(r.hidden_units, st.hidden_units, &state_copier::unit);
@@ -19299,23 +19279,20 @@ struct game_load_functions : state_functions {
 			}
 		};
 
-		clear_and_make_free(st.units, st.free_units);
+		st.units_container = {};
 
 		st.active_bullets_size = 0;
 		st.active_bullets.clear();
-//		st.free_bullets.clear();
-//		st.bullets.clear();
-		clear_and_make_free(st.bullets, st.free_bullets);
+		st.bullets_container = {};
 
-		clear_and_make_free(st.sprites, st.free_sprites);
-		for (size_t i = 0; i != 2500; ++i) st.sprites[i].index = i;
+		st.sprites_container = {};
 		st.sprites_on_tile_line.clear();
 		st.sprites_on_tile_line.resize(game_st.map_tile_height);
 
-		clear_and_make_free(st.images, st.free_images);
+		st.images_container = {};
 
 		st.active_orders_size = 0;
-		clear_and_make_free(st.orders, st.free_orders);
+		st.orders_container = {};
 
 		st.active_thingies_size = 0;
 		st.active_thingies.clear();
@@ -20942,6 +20919,8 @@ struct game_load_functions : state_functions {
 				}
 
 				unit_t* u = create_initial_unit(unit_type, {x, y}, owner);
+				
+				if (!u) continue;
 
 				if (valid_properties & 0x2) {
 					using tmp_t = fixed_point<32, 8, true>;

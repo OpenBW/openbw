@@ -102,6 +102,8 @@ struct unit_type_t {
 		flag_can_burrow = 0x100000,
 		flag_has_energy = 0x200000,
 		flag_initially_cloaked = 0x400000,
+		flag_sprite_size_medium = 0x2000000,
+		flag_sprite_size_large = 0x4000000,
 		flag_can_move = 0x8000000,
 		flag_can_turn = 0x10000000,
 		flag_invincible = 0x20000000,

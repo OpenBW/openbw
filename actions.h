@@ -29,8 +29,7 @@ action_state copy_state(const action_state& action_st, const state& source_st, c
 	r.selection = action_st.selection;
 	for (auto& v : r.selection) {
 		for (auto& v2 : v) {
-			size_t index = v2 - source_st.units.data();
-			v2 = const_cast<unit_t*>(dest_st.units.data() + index);
+			v2 = const_cast<unit_t*>(dest_st.units_container.at(v2->index));
 		}
 	}
 	r.control_groups = action_st.control_groups;
