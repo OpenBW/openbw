@@ -358,6 +358,18 @@ struct order_type_t {
 
 using order_types_t = type_container<order_type_t>;
 
+struct sound_type_t {
+	Sounds id;
+
+	int filename_index;
+	int type;
+	int flags;
+	int race;
+	int volume;
+};
+
+using sound_types_t = type_container<sound_type_t>;
+
 namespace iscript_opcodes {
 	enum {
 		opc_playfram,
