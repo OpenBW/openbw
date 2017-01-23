@@ -1,5 +1,5 @@
-#ifndef DDRAW_H
-#define DDRAW_H
+#ifndef NATIVE_WINDOW_DRAWING_H
+#define NATIVE_WINDOW_DRAWING_H
 
 #include <stdint.h>
 #include <memory>

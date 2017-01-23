@@ -362,10 +362,10 @@ struct sound_type_t {
 	Sounds id;
 
 	int filename_index;
-	int type;
+	int priority;
 	int flags;
 	int race;
-	int volume;
+	int min_volume;
 };
 
 using sound_types_t = type_container<sound_type_t>;

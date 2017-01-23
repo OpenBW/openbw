@@ -844,7 +844,7 @@ struct action_functions: state_functions {
 			if (u->owner != owner) continue;
 			if (!unit_can_use_tech(u, get_tech_type(TechTypes::Stim_Packs))) continue;
 			if (u->hp <= fp8::integer(10)) continue;
-			lcg_rand(31, 0, 1); // todo: callback for sound
+			play_sound(lcg_rand(31, 278, 279), u);
 			unit_deal_damage(u, fp8::integer(10), nullptr, ~0);
 			if (u->stim_timer < 37) {
 				u->stim_timer = 37;

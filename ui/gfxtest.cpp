@@ -4,6 +4,7 @@
 
 #include "native_window.h"
 #include "native_window_drawing.h"
+#include "native_sound.h"
 
 #include <chrono>
 #include <thread>
@@ -11,6 +12,8 @@
 #ifdef EMSCRIPTEN
 #include <emscripten.h>
 #endif
+
+constexpr bool use_new_valkyrie_test = false;
 
 using namespace bwgame;
 
@@ -212,12 +215,14 @@ void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
 		}
 	};
 	
-	img.valkyrie_test.resize(17);
-	for (size_t i = 0; i != img.valkyrie_test.size(); ++i) {
-		auto fn = format("data/images/bw_hd_valk/%d.png", i);
-		img.valkyrie_test[i] = native_window_drawing::load_image(fn.c_str());
+	if (use_new_valkyrie_test) {
+		img.valkyrie_test.resize(17);
+		for (size_t i = 0; i != img.valkyrie_test.size(); ++i) {
+			auto fn = format("data/images/bw_hd_valk/%d.png", i);
+			img.valkyrie_test[i] = native_window_drawing::load_image(fn.c_str());
+		}
+		flip(img.valkyrie_test_flipped, img.valkyrie_test);
 	}
-	flip(img.valkyrie_test_flipped, img.valkyrie_test);
 	
 }
 
@@ -604,7 +609,133 @@ struct ui_functions: ui_util_functions {
 	action_state current_action_state;
 	std::array<apm_t, 12> apm;
 	ui_functions(game_player player) : ui_util_functions(player.st(), current_action_state, current_replay_state), player(std::move(player)) {
-		init();
+	}
+	
+	std::function<void(a_vector<uint8_t>&, a_string)> load_data_file;
+	
+	sound_types_t sound_types;
+	a_vector<a_string> sound_filenames;
+	
+	const sound_type_t* get_sound_type(Sounds id) const {
+		if ((size_t)id >= (size_t)Sounds::None) xcept("invalid sound id %d", (size_t)id);
+		return &sound_types.vec[(size_t)id];
+	}
+	
+	a_vector<bool> has_loaded_sound;
+	a_vector<std::unique_ptr<native_sound::sound>> loaded_sounds;
+	a_vector<std::chrono::high_resolution_clock::time_point> last_played_sound;
+	
+	int global_volume = 50;
+	
+	struct sound_channel {
+		bool playing = false;
+		const sound_type_t* sound_type = nullptr;
+		int priority = 0;
+		int flags = 0;
+		const unit_type_t* unit_type = nullptr;
+	};
+	a_vector<sound_channel> sound_channels;
+	
+	sound_channel* get_sound_channel(int priority) {
+		sound_channel* r = nullptr;
+		for (auto& c : sound_channels) {
+			if (c.playing) {
+				if (!native_sound::is_playing(&c - sound_channels.data())) {
+					c.playing = false;
+					r = &c;
+				}
+			} else r = &c;
+		}
+		if (r) return r;
+		int best_prio = priority;
+		for (auto& c : sound_channels) {
+			if (c.flags & 0x20) continue;
+			if (c.priority < best_prio) {
+				best_prio = c.priority;
+				r = &c;
+			}
+		}
+		return r;
+	}
+	
+	virtual void play_sound(int id, xy position, const unit_t* source_unit, bool add_race_index) override {
+		if (global_volume == 0) return;
+		if (add_race_index) id += 1;
+		if ((size_t)id >= has_loaded_sound.size()) return;
+		if (!has_loaded_sound[id]) {
+			has_loaded_sound[id] = true;
+			a_vector<uint8_t> data;
+			load_data_file(data, "sound/" + sound_filenames[id]);
+			loaded_sounds[id] = native_sound::load_wav(data.data(), data.size());
+		}
+		auto& s = loaded_sounds[id];
+		if (!s) return;
+		
+		auto now = clock.now();
+		if (now - last_played_sound[id] <= std::chrono::milliseconds(80)) return;
+		last_played_sound[id] = now;
+		
+		const sound_type_t* sound_type = get_sound_type((Sounds)id);
+		
+		int volume = sound_type->min_volume;
+		
+		if (position != xy()) {
+			int distance = 0;
+			if (position.x < screen_pos.x) distance += screen_pos.x - position.x;
+			else if (position.x > screen_pos.x + (int)screen_width) distance += position.x - (screen_pos.x + (int)screen_width);
+			if (position.y < screen_pos.y) distance += screen_pos.y - position.y;
+			else if (position.y > screen_pos.y + (int)screen_height) distance += position.y - (screen_pos.y + (int)screen_height);
+			
+			int distance_volume = 99 - 99 * distance / 512;
+			
+			if (distance_volume > volume) volume = distance_volume;
+		}
+		
+		if (volume > 10) {
+			int pan = 0;
+//			if (position != xy()) {
+//				int pan_x = (position.x - (screen_pos.x + (int)screen_width / 2)) / 32;
+//				bool left = pan_x < 0;
+//				if (left) pan_x = -pan_x;
+//				if (pan_x <= 2) pan = 0;
+//				else if (pan_x <= 5) pan = 52;
+//				else if (pan_x <= 10) pan = 127;
+//				else if (pan_x <= 20) pan = 191;
+//				else if (pan_x <= 40) pan = 230;
+//				else pan = 255;
+//				if (left) pan = -pan;
+//			}
+			
+			volume = volume * global_volume / 100;
+			
+			const unit_type_t* unit_type = source_unit ? source_unit->unit_type : nullptr;
+			
+			if (sound_type->flags & 0x10) {
+				for (auto& c : sound_channels) {
+					if (c.playing && c.sound_type == sound_type) {
+						if (native_sound::is_playing(&c - sound_channels.data())) return;
+						c.playing = false;
+					}
+				}
+			} else if (sound_type->flags & 2 && unit_type) {
+				for (auto& c : sound_channels) {
+					if (c.playing && c.unit_type == unit_type && c.flags & 2) {
+						if (native_sound::is_playing(&c - sound_channels.data())) return;
+						c.playing = false;
+					}
+				}
+			}
+			
+			auto* c = get_sound_channel(sound_type->priority);
+			if (c) {
+				native_sound::play(c - sound_channels.data(), &*s, (128 - 4) * volume / 100, pan);
+				c->playing = true;
+				c->sound_type = sound_type;
+				c->flags = sound_type->flags;
+				c->priority = sound_type->priority;
+				c->unit_type = unit_type;
+			}
+		}
 	}
 	
 	a_vector<const image_t*> image_draw_queue;
@@ -614,7 +745,7 @@ struct ui_functions: ui_util_functions {
 	bool is_new_image(const image_t* image) {
 		if (!use_new_images) return false;
 		switch (image->image_type->id) {
-		case ImageTypes::IMAGEID_Valkyrie: return true;
+		case ImageTypes::IMAGEID_Valkyrie: return use_new_valkyrie_test;
 		default:
 			return false;
 		}
@@ -631,6 +762,31 @@ struct ui_functions: ui_util_functions {
 			if (rand() % 100 < 4) v = 6 + rand() % 7;
 			else v = rand() % 6;
 		}
+		
+		a_vector<uint8_t> data;
+		load_data_file(data, "arr/sfxdata.dat");
+		sound_types = data_loading::load_sfxdata_dat(data);
+		load_data_file(data, "arr/sfxdata.tbl");
+		data_loading::data_reader_le r(data.data(), data.data() + data.size());
+		sound_filenames.resize(sound_types.vec.size());
+		has_loaded_sound.resize(sound_filenames.size());
+		loaded_sounds.resize(has_loaded_sound.size());
+		last_played_sound.resize(loaded_sounds.size());
+		a_string str;
+		for (size_t i = 0; i != sound_types.vec.size(); ++i) {
+			size_t index = sound_types.vec[i].filename_index;
+			r.seek(2 + (index - 1) * 2);
+			size_t fn_offset = r.get<uint16_t>();
+			r.seek(fn_offset);
+			str.clear();
+			while (char c = r.get<char>()) str += c;
+			sound_filenames[i] = str;
+		}
+		native_sound::frequency = 44100;
+		native_sound::channels = 8;
+		native_sound::init();
+		
+		sound_channels.resize(8);
 	}
 	
 	virtual void on_action(int owner, int action) override {
@@ -821,6 +977,14 @@ struct ui_functions: ui_util_functions {
 				if (new_value >= 8 && new_value < 16) return color_ptr[new_value - 8];
 				return new_value;
 			});
+		} else if (image->modifier == 8) {
+			size_t data_size = data_pitch * screen_height;
+			auto distortion = [data_size, dst](uint8_t new_value, uint8_t& old_value) {
+				size_t offset = &old_value - dst;
+				if (offset >= new_value && data_size - offset > new_value) return *(&old_value + new_value);
+				return old_value;
+			};
+			draw_frame(frame, i_flag(image, image_t::flag_horizontally_flipped), dst, data_pitch, offset_x, offset_y, width, height, distortion);
 		} else if (image->modifier == 10) {
 			uint8_t* ptr = &tileset_img.dark_pcx.data[256 * 18];
 			auto shadow = [ptr](uint8_t, uint8_t old_value) {
@@ -1073,7 +1237,7 @@ struct ui_functions: ui_util_functions {
 	}
 
 	void draw_sprite(const sprite_t* sprite, uint8_t* data, size_t data_pitch) {
-		const unit_t* draw_selection_u = current_selection_sprites_set.at(sprite - st.sprites.data());
+		const unit_t* draw_selection_u = current_selection_sprites_set.at(sprite->index);
 		const unit_t* draw_health_bars_u = draw_selection_u;
 		for (auto* image : ptr(reverse(sprite->images))) {
 			if (i_flag(image, image_t::flag_hidden)) continue;
@@ -1114,7 +1278,7 @@ struct ui_functions: ui_util_functions {
 		for (auto uid : current_selection) {
 			auto* u = get_unit(uid);
 			if (!u) continue;
-			current_selection_sprites_set.at(u->sprite - st.sprites.data()) = u;
+			current_selection_sprites_set.at(u->sprite->index) = u;
 			current_selection_sprites.push_back(u->sprite);
 		}
 
@@ -1123,7 +1287,7 @@ struct ui_functions: ui_util_functions {
 		}
 
 		for (auto* s : current_selection_sprites) {
-			current_selection_sprites_set.at(s - st.sprites.data()) = nullptr;
+			current_selection_sprites_set.at(s->index) = nullptr;
 		}
 		current_selection_sprites.clear();
 	}
@@ -1573,8 +1737,6 @@ struct ui_functions: ui_util_functions {
 			indexed_surface = native_window_drawing::convert_to_8_bit_indexed(&*window_surface);
 			indexed_surface->set_palette(palette);
 			rgba_surface = native_window_drawing::create_rgba_surface(window_surface->w, window_surface->h);
-			
-			//screen_width = indexed_surface->pitch;
 		}
 		
 		auto input_poll_speed = std::chrono::milliseconds(12);
@@ -2053,6 +2215,16 @@ int unit_type_t_id(const unit_type_t& ut) {
 	return (int)ut.id;
 }
 
+void set_volume(double percent) {
+	if (percent > 1.0) percent = 1.0;
+	else if (percent < 0.0) percent = 0.0;
+	m->ui.global_volume = (int)(percent * 100);
+}
+
+double get_volume() {
+	return m->ui.global_volume / 100.0;
+}
+
 EMSCRIPTEN_BINDINGS(openbw) {
 	register_vector<js_unit>("vector_js_unit");
 	class_<util_functions>("util_functions")
@@ -2067,6 +2239,9 @@ EMSCRIPTEN_BINDINGS(openbw) {
 		.function("get_incomplete_research", &util_functions::get_incomplete_research)
 		;
 	function("get_util_funcs", &get_util_funcs);
+	
+	function("set_volume", &set_volume);
+	function("get_volume", &get_volume);
 	
 	class_<unit_type_t>("unit_type_t")
 		.property("id", &unit_type_t_id)
@@ -2134,7 +2309,7 @@ int main() {
 
 	using namespace bwgame;
 	
-	log("v15\n");
+	log("v19\n");
 
 	size_t screen_width = 1280;
 	size_t screen_height = 800;
@@ -2158,6 +2333,12 @@ int main() {
 	auto& ui = m.ui;
 	
 	m.load_all_image_data(load_data_file);
+	
+	ui.load_data_file = [&](a_vector<uint8_t>& data, a_string filename) {
+		load_data_file(data, std::move(filename));
+	};
+	
+	ui.init();
 
 #ifndef EMSCRIPTEN
 	ui.load_replay_file("maps/test.rep");
@@ -2179,7 +2360,7 @@ int main() {
 
 #ifdef EMSCRIPTEN
 	::m = &m;
-	EM_ASM({js_load_done();});
+	//EM_ASM({js_load_done();});
 	emscripten_set_main_loop_arg([](void* ptr) {
 		if (!any_replay_loaded) return;
 		EM_ASM({js_pre_main_loop();});

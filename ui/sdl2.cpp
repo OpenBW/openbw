@@ -1,9 +1,11 @@
 #include "native_window.h"
 #include "native_window_drawing.h"
+#include "native_sound.h"
 
 #include "common.h"
 #include "SDL.h"
 #include "SDL_image.h"
+#include "SDL_mixer.h"
 
 #include <mutex>
 #include <array>
@@ -295,6 +297,82 @@ std::unique_ptr<surface> load_image(const char* filename) {
 	auto r = std::make_unique<sdl_surface>();
 	r->set(surf);
 	return std::unique_ptr<surface>(r.release());
+}
+
+}
+
+namespace native_sound {
+
+bool initialized = false;
+
+int frequency = 0;
+int channels = 64;
+
+std::mutex init_mut;
+void init() {
+	std::lock_guard<std::mutex> l(init_mut);
+	if (initialized) return;
+	initialized = true;
+	Mix_Init(0);
+	int freq = frequency;
+	if (freq == 0) {
+//#ifdef EMSCRIPTEN
+#if 0
+		freq = EM_ASM_INT_V({
+			var context;
+			try {
+				context = new AudioContext();
+			} catch (e) {
+				context = new webkitAudioContext();
+			}
+			return context.sampleRate;
+		});
+#else
+		freq = MIX_DEFAULT_FREQUENCY;
+#endif
+	}
+	Mix_OpenAudio(freq, MIX_DEFAULT_FORMAT, 2, 1024);
+	Mix_AllocateChannels(channels);
+}
+
+struct sdl_sound: sound {
+	Mix_Chunk* c = nullptr;
+	virtual ~sdl_sound() override {
+		if (c) Mix_FreeChunk(c);
+	}
+};
+
+void play(int channel, sound* arg_s, int volume, int pan) {
+	if (!initialized) init();
+	sdl_sound* s = (sdl_sound*)arg_s;
+	if (!s || !s->c) return;
+	int c = Mix_PlayChannel(channel, s->c, 0);
+	if (c != -1) {
+		Mix_Volume(c, volume);
+		int left = 255;
+		int right = 255;
+		if (pan < 0) right += pan;
+		else left -= pan;
+		//log("left %d right %d\n", left, right);
+		Mix_SetPanning(c, left, right);
+	}
+}
+
+bool is_playing(int channel) {
+	return Mix_Playing(channel) != 0;
+}
+
+void stop(int channel) {
+	Mix_HaltChannel(channel);
+}
+
+std::unique_ptr<sound> load_wav(const void* data, size_t size) {
+	if (!initialized) init();
+	Mix_Chunk* c = Mix_LoadWAV_RW(SDL_RWFromConstMem(data, (int)size), 1);
+	if (!c) return {};
+	auto r = std::make_unique<sdl_sound>();
+	r->c = c;
+	return std::unique_ptr<sound>(r.release());
 }
 
 }

@@ -141,12 +141,6 @@ struct game_state {
 	a_string map_file_name;
 
 	a_vector<a_string> map_strings;
-	a_string get_string(size_t index) {
-		if (index == 0) return "<null string>";
-		--index;
-		if (index >= map_strings.size()) return "<invalid string index>";
-		return map_strings[index];
-	}
 
 	a_string scenario_name;
 	a_string scenario_description;
@@ -316,6 +310,9 @@ struct state : state_base_copyable, state_base_non_copyable {
 };
 
 struct state_functions {
+	
+	virtual void play_sound(int id, xy position, const unit_t* source_unit = nullptr, bool add_race_index = false) {}
+	virtual void on_unit_deselect(unit_t* u) {}
 
 	state& st;
 	const global_state& global_st = *st.global;
@@ -589,6 +586,14 @@ struct state_functions {
 	const flingy_type_t* get_flingy_type(FlingyTypes id) const {
 		if ((size_t)id >= 209) xcept("invalid flingy id %d", (size_t)id);
 		return &global_st.flingy_types.vec[(size_t)id];
+	}
+	
+	void play_sound(int id, const unit_t* source_unit, bool add_race_index = false) {
+		play_sound(id, source_unit ? source_unit->sprite->position : xy(), source_unit, add_race_index);
+	}
+	
+	void play_sound(int id, bool add_race_index = false) {
+		play_sound(id, xy(), nullptr, add_race_index);
 	}
 
 	unit_t* get_unit(unit_id id) const {
@@ -2287,7 +2292,7 @@ struct state_functions {
 			complete_unit(u);
 			set_unit_hp(u, hp);
 			sprite_run_anim(u->sprite, iscript_anims::AlmostBuilt);
-			// todo: callback for sound
+			play_sound(4, u);
 		} else {
 			partially_refund_unit_costs(u->owner, u);
 			st.unit_score[u->owner] -= u->unit_type->build_score;
@@ -2318,7 +2323,7 @@ struct state_functions {
 				set_queued_order(u, false, u->unit_type->return_to_idle, {});
 				set_unit_hp(u, prev_hp);
 				remove_creep_provider(build_type, u->sprite->position, false);
-				// todo: callback for sound
+				play_sound(4, u);
 			}
 		}
 	}
@@ -2858,7 +2863,8 @@ struct state_functions {
 			}
 		}
 		if (unit_race(u) == race_t::protoss && u_grounded_building(u)) st.update_psionic_matrix = true;
-		if (u->subunit) set_unit_owner(u->subunit, owner, increment_score);
+		unit_t* turret = unit_turret(u);
+		if (turret) set_unit_owner(u->subunit, owner, increment_score);
 		update_unit_speed_upgrades(u);
 		if (ut_worker(u) && u->worker.gather_target && unit_is(u->worker.gather_target, UnitTypes::Powerup_Flag)) {
 			if (owner >= 8 || owner == u->worker.gather_target->owner) drop_carried_items(u);
@@ -3044,7 +3050,7 @@ struct state_functions {
 				break;
 			}
 		}
-		// todo: callback for sound
+		play_sound(40 + (int)unit_race(u), u);
 		u->loaded_units.at(index) = get_unit_id(target);
 		target->connected_unit = u;
 		u_set_status_flag(target, unit_t::status_flag_loaded);
@@ -3084,7 +3090,7 @@ struct state_functions {
 				move_unit(u, container->sprite->position);
 			} else {
 				show_unit(u);
-				// todo: callback for sound
+				play_sound(43 + (int)unit_race(container), container);
 			}
 		}
 		u_unset_status_flag(u, unit_t::status_flag_in_bunker);
@@ -4480,7 +4486,7 @@ struct state_functions {
 			destroy_unit_impl(u);
 		} else {
 			if (u_hallucination(u)) {
-				// todo: callback for sound
+				play_sound(619, u);
 				thingy_t* t = create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Hallucination_Death1), u->sprite->position, 0);
 				if (t) {
 					t->sprite->elevation_level = u->sprite->elevation_level + 1;
@@ -5774,7 +5780,7 @@ struct state_functions {
 			complete_unit(scan);
 			order_done(u);
 			u->energy -= energy_cost;
-			// todo: callback for sound
+			play_sound(388, u);
 		} else {
 			display_last_error_for_player(u->owner);
 			order_done(u);
@@ -5819,7 +5825,7 @@ struct state_functions {
 			target->defensive_matrix_hp = fp8::integer(250);
 			target->defensive_matrix_timer = 168;
 			create_defensive_matrix_image(target);
-			// todo: callback for sound
+			play_sound(349, u);
 			create_image(get_image_type(ImageTypes::IMAGEID_Science_Vessel_Overlay_Part2), u->sprite, {}, image_order_above);
 			order_done(u);
 		}
@@ -6095,7 +6101,7 @@ struct state_functions {
 			order_done(u);
 			return;
 		}
-		// todo: callback for sound
+		play_sound(239, u);
 		unit_t* nuke = silo->building.silo.nuke;
 		silo->building.silo.nuke = nullptr;
 		silo->building.silo.ready = false;
@@ -6113,7 +6119,7 @@ struct state_functions {
 			return;
 		}
 		if (u->order_state == 0) {
-			// todo: callback for sound
+			play_sound(84, u);
 			xy target_pos{u->sprite->position.x, u->unit_type->dimensions.from.y};
 			set_unit_move_target(u, target_pos);
 			set_next_target_waypoint(u, target_pos);
@@ -6121,7 +6127,8 @@ struct state_functions {
 			u->order_state = 1;
 		} else if (u->order_state == 1) {
 			if (u->main_order_timer == 45 || unit_is_at_move_target(u)) {
-				// todo: callback for sound/message
+				play_sound(127, true);
+				// todo: callback for message
 				u->order_state = 2;
 			}
 		} else if (u->order_state == 2) {
@@ -6535,7 +6542,7 @@ struct state_functions {
 			if (is_facing_next_target_waypoint(u)) {
 				sprite_run_anim(u->sprite, iscript_anims::Burrow);
 				u->order_state = 3;
-				// todo: callback for sound
+				play_sound(16, u);
 			}
 		}
 		if (u->order_state == 3) {
@@ -6601,7 +6608,7 @@ struct state_functions {
 			u->sprite->flags &= sprite_t::flag_hidden;
 			set_secondary_order(u, get_order_type(Orders::Nothing));
 			sprite_run_anim(u->sprite, iscript_anims::UnBurrow);
-			// todo: callback for sound
+			play_sound(17, u);
 			u->order_state = 1;
 		} else if (u->order_state == 1) {
 			u->detected_flags = 0x80000000;
@@ -6678,10 +6685,11 @@ struct state_functions {
 			xy pos;
 			std::tie(res, pos) = find_unit_placement(u, exit->sprite->position, false);
 			if (res) {
+				play_sound(19, target);
 				move_unit(u, pos);
 				refresh_unit_position(u);
 				order_done(u);
-				// todo: callback for sound
+				play_sound(19, exit);
 			} else {
 				move_unit(u, prev_pos);
 				refresh_unit_position(u);
@@ -6895,7 +6903,7 @@ struct state_functions {
 							set_unit_order(build_unit, get_order_type(Orders::IncompleteWarping));
 							u->order_target.unit = build_unit;
 							u->order_state = 3;
-							// todo: callback for sound
+							play_sound(528, u);
 						} else {
 							display_last_error_for_player(u->owner);
 							order_done(u);
@@ -6924,7 +6932,7 @@ struct state_functions {
 		if (u->order_state == 0) {
 			if (u->remaining_build_time == 0) {
 				sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
-				// todo: callback for sound
+				play_sound(529, u);
 				u->order_state = 1;
 			}
 		} else if (u->order_state == 1) {
@@ -7074,8 +7082,7 @@ struct state_functions {
 				t->sprite->elevation_level = u->sprite->elevation_level + 1;
 				if (!us_hidden(t)) set_sprite_visibility(t->sprite, tile_visibility(t->sprite->position));
 			}
-			lcg_rand(17);
-			// todo: callback for sound
+			play_sound(550 + lcg_rand(17) % 2, u->order_target.pos);
 			u->main_order_timer = 22;
 			u->order_state = 1;
 		} else if (u->order_state == 1 && u->main_order_timer == 0) {
@@ -7131,8 +7138,7 @@ struct state_functions {
 				++n_recalled;
 			}
 			if (n_recalled) {
-				lcg_rand(18);
-				// todo: callback for sound
+				play_sound(552 + lcg_rand(18) % 2, u);
 			}
 			order_done(u);
 		}
@@ -7217,7 +7223,7 @@ struct state_functions {
 				kill_unit(u);
 				return;
 			}
-			// todo: callback for sound
+			play_sound(616, u);
 			set_interceptor_move_target(3);
 			u->main_order_timer = 15;
 			u->order_state = 1;
@@ -7301,10 +7307,12 @@ struct state_functions {
 				create_sized_image(target, ImageTypes::IMAGEID_Mind_Control_Hit_Small);
 				trigger_give_unit_to(target, u->owner);
 				if (unit_is(target, UnitTypes::Protoss_Dark_Archon)) target->energy = 0_fp8;
+				order_done(target);
 			}
 			u->energy -= fp8::integer(tech->energy_cost);
 			u->shield_points = 0_fp8;
 			order_done(u);
+			play_sound(1062, target);
 		}
 	}
 	
@@ -7479,7 +7487,7 @@ struct state_functions {
 				weapon_deal_damage(get_weapon_type(WeaponTypes::Feedback), target->energy, 1, target, 1_dir, u, u->owner);
 				target->energy = 0_fp8;
 				u->energy -= fp8::integer(tech->energy_cost);
-				// todo: callback for sound
+				play_sound(1061, target);
 				if (unit_dying(target)) {
 					SpriteTypes sprite_id = (SpriteTypes)((int)SpriteTypes::SPRITEID_Feedback_Hit_Small + unit_sprite_size(target));
 					thingy_t* t = create_thingy(get_sprite_type(sprite_id), u->sprite->position, 0);
@@ -7516,7 +7524,7 @@ struct state_functions {
 				show_unit(n);
 			}
 			u->energy -= fp8::integer(tech->energy_cost);
-			// todo: callback for sound
+			play_sound(618, u->order_target.unit);
 			create_image(get_image_type(ImageTypes::IMAGEID_Hallucination_Hit), (target->subunit ? target->subunit : target)->sprite, {}, image_order_top);
 			order_done(u);
 		}
@@ -8199,8 +8207,8 @@ struct state_functions {
 		int range = weapon_max_range(u, w);
 		auto area = square_at(u->sprite->position, range);
 		if (area.from.x < 0) area.from.x = 0;
-		else if (area.to.x > (int)game_st.map_width) area.from.x = (int)game_st.map_width;
-		if (area.from.y < 0) area.to.y = 0;
+		else if (area.to.x > (int)game_st.map_width) area.to.x = (int)game_st.map_width;
+		if (area.from.y < 0) area.from.y = 0;
 		else if (area.to.y > (int)game_st.map_height) area.to.y = (int)game_st.map_height;
 		for (unit_t* target : find_units_noexpand(area)) {
 			if (target->owner != u->owner) continue;
@@ -13641,7 +13649,7 @@ struct state_functions {
 			return;
 		}
 		u->blinded_by |= 1 << source_owner;
-		// todo: callback for sound
+		play_sound(1019, u);
 		create_sized_image(u, ImageTypes::IMAGEID_Optical_Flare_Hit_Small);
 		st.update_tiles_countdown = 1;
 	}
@@ -13802,7 +13810,7 @@ struct state_functions {
 			t->sprite->elevation_level = 17;
 			if (!us_hidden(t)) set_sprite_visibility(t->sprite, tile_visibility(t->sprite->position));
 		}
-		// todo: callback for sound
+		play_sound(1064, source_unit);
 		for (unit_t* target : find_units_noexpand(square_at(pos, 48))) {
 			if (u_hallucination(target)) {
 				kill_unit(target);
@@ -13910,7 +13918,7 @@ struct state_functions {
 			break;
 		case weapon_type_t::hit_type_parasite:
 			if (b->bullet_target && !unit_dying(b->bullet_target)) {
-				// todo: callback for sound
+				play_sound(921, b->bullet_target);
 				parasite_unit(b->bullet_target, b->owner);
 			}
 			break;
@@ -13922,7 +13930,7 @@ struct state_functions {
 			break;
 		case weapon_type_t::hit_type_irradiate:
 			if (b->bullet_target && !unit_dying(b->bullet_target)) {
-				// todo: callback for sound
+				play_sound(351, b->bullet_target);
 				irradiate_unit(b->bullet_target, b->bullet_owner_unit, b->owner);
 			}
 			break;
@@ -13943,7 +13951,7 @@ struct state_functions {
 			break;
 		case weapon_type_t::hit_type_restoration:
 			if (b->bullet_target) {
-				// todo: callback for sound
+				play_sound(998, b->bullet_target);
 				restore_unit(b->bullet_target);
 			}
 			break;
@@ -14485,8 +14493,7 @@ struct state_functions {
 			int n = *p++;
 			if (!noop) {
 				int index = lcg_rand(4) % n;
-				(void)index;
-				// todo: callback for sound
+				play_sound(p[index], image->sprite->position);
 			}
 			p += n;
 		};
@@ -14642,7 +14649,7 @@ struct state_functions {
 			case opc_playsnd:
 				a = *p++;
 				if (noop) break;
-				// todo: callback for sound?
+				play_sound(a, image->sprite->position);
 				break;
 			case opc_playsndrand:
 				playsndrand();
@@ -14651,8 +14658,7 @@ struct state_functions {
 				a = *p++;
 				b = *p++;
 				if (noop) break;
-				lcg_rand(5);
-				// todo: callback for sound?
+				play_sound(a + lcg_rand(5) % (b - a + 1), image->sprite->position);
 				break;
 			case opc_domissiledmg:
 			case opc_dogrddamage:
@@ -15773,8 +15779,6 @@ struct state_functions {
 
 		return true;
 	}
-
-	virtual void on_unit_deselect(unit_t* u) {}
 	
 	void kill_interceptors(unit_t* u) {
 		if (!unit_is_carrier(u)) return;
@@ -16877,7 +16881,7 @@ struct state_functions {
 			update_unit_detected_flags(u);
 			u->secondary_order_timer = 30;
 		} else {
-			// todo: callback for sound
+			play_sound(273, u);
 			auto cloak = [&](unit_t* u) {
 				u_unset_status_flag(u, unit_t::status_flag_cloaked);
 				u_set_status_flag(u, unit_t::status_flag_requires_detector);
@@ -16909,7 +16913,7 @@ struct state_functions {
 				}
 			}
 		} else {
-			// todo: callback for sound
+			play_sound(274, u);
 			auto decloak = [&](unit_t* u) {
 				u_unset_status_flag(u, unit_t::status_flag_requires_detector);
 				u_set_status_flag(u, unit_t::status_flag_cloaked);
@@ -19299,7 +19303,10 @@ struct game_load_functions : state_functions {
 		st.free_thingies.clear();
 		st.thingies.clear();
 
-		create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Cursor_Marker), {}, 0);
+		auto* cursor = create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Cursor_Marker), {}, 0);
+		if (cursor) {
+			cursor->sprite->flags |= sprite_t::flag_hidden;
+		}
 
 		st.last_error = 0;
 		st.recent_lurker_hit_current_index = 0;
@@ -20496,6 +20503,12 @@ struct game_load_functions : state_functions {
 
 	}
 
+	a_string get_map_string(size_t index) const {
+		if (index == 0) return "<null string>";
+		--index;
+		if (index >= game_st.map_strings.size()) return "<invalid string index>";
+		return game_st.map_strings[index];
+	}
 
 	struct tag_t {
 		tag_t() = default;
@@ -20602,8 +20615,8 @@ struct game_load_functions : state_functions {
 			}
 		};
 		tag_funcs["SPRP"] = [&](data_reader_le r) {
-			game_st.scenario_name = game_st.get_string(r.get<uint16_t>());
-			game_st.scenario_description = game_st.get_string(r.get<uint16_t>());
+			game_st.scenario_name = get_map_string(r.get<uint16_t>());
+			game_st.scenario_description = get_map_string(r.get<uint16_t>());
 		};
 		tag_funcs["FORC"] = [&](data_reader_le r) {
 			for (size_t i = 0; i != 12; ++i) st.players[i].force = 0;
@@ -20616,7 +20629,7 @@ struct game_load_functions : state_functions {
 					st.players[i].force = r.get<uint8_t>();
 				}
 				for (size_t i = 0; i != 4; ++i) {
-					game_st.forces[i].name = game_st.get_string(r.get<uint16_t>());
+					game_st.forces[i].name = get_map_string(r.get<uint16_t>());
 				}
 				for (size_t i = 0; i != 4; ++i) {
 					game_st.forces[i].flags = r.get<uint8_t>();
@@ -20980,7 +20993,7 @@ struct game_load_functions : state_functions {
 				int top = r.get<int32_t>();
 				int right = r.get<int32_t>();
 				int bottom = r.get<int32_t>();
-				a_string name = game_st.get_string(r.get<uint16_t>());
+				a_string name = get_map_string(r.get<uint16_t>());
 				int elevation_flags = r.get<uint16_t>();
 				(void)left;
 				(void)top;

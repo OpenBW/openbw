@@ -835,9 +835,11 @@ size_t decompress_huffman(uint8_t* input, size_t input_size, uint8_t* output, si
 	if (weights_index >= 9) xcept("decompress_huffman: invalid weights index %d", weights_index);
 	const uint8_t* weights = huffman_weight_tables[weights_index];
 	
+	struct tree_node;
+	using tree_node_iterator = typename a_list<tree_node>::iterator;
 	struct tree_node {
-		a_list<tree_node>::iterator left;
-		a_list<tree_node>::iterator parent;
+		tree_node_iterator left;
+		tree_node_iterator parent;
 		int weight;
 		int symbol;
 	};
@@ -872,7 +874,7 @@ size_t decompress_huffman(uint8_t* input, size_t input_size, uint8_t* output, si
 		a = std::next(b);
 	}
 	
-	auto increment_weight = [&](a_list<tree_node>::iterator n) {
+	auto increment_weight = [&](tree_node_iterator n) {
 		for (; n != end; n = n->parent) {
 			++n->weight;
 			int w = n->weight;
@@ -895,7 +897,7 @@ size_t decompress_huffman(uint8_t* input, size_t input_size, uint8_t* output, si
 	size_t out_pos = 0;
 	
 	while (out_pos < output_size) {
-		a_list<tree_node>::iterator n = std::prev(end);
+		tree_node_iterator n = std::prev(end);
 		while (n->symbol == -1) {
 			int bit = r.template get_bits<1>();
 			if (bit == 0) n = n->left;
@@ -1776,10 +1778,10 @@ sound_types_t load_sfxdata_dat(const data_T& data) {
 	auto& arr = sound_types.vec;
 
 	rawr(uint32_t, filename_index, count);
-	rawr(uint8_t, type, count);
+	rawr(uint8_t, priority, count);
 	rawr(uint8_t, flags, count);
 	rawr(uint16_t, race, count);
-	rawr(uint8_t, volume, count);
+	rawr(uint8_t, min_volume, count);
 
 	if (r.left()) log(" WARNING: %s: %d bytes left\n", "sfxdata.dat", r.left());
 

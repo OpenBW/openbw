@@ -2239,6 +2239,10 @@ enum struct ImageTypes : int {
 	None = 999
 };
 
+enum struct Sounds : int {
+	None = 1144
+};
+
 }
 
 #endif
