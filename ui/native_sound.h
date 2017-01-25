@@ -13,6 +13,7 @@ namespace native_sound {
 	void play(int channel, sound* s, int volume, int pan);
 	bool is_playing(int channel);
 	void stop(int channel);
+	void set_volume(int channel, int volume);
 	std::unique_ptr<sound> load_wav(const void* data, size_t size);
 
 }

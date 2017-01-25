@@ -349,12 +349,11 @@ void play(int channel, sound* arg_s, int volume, int pan) {
 	int c = Mix_PlayChannel(channel, s->c, 0);
 	if (c != -1) {
 		Mix_Volume(c, volume);
-		int left = 255;
-		int right = 255;
-		if (pan < 0) right += pan;
-		else left -= pan;
-		//log("left %d right %d\n", left, right);
-		Mix_SetPanning(c, left, right);
+		//int left = 254;
+		//int right = 254;
+		//if (pan < 0) right += pan;
+		//else left -= pan;
+		//Mix_SetPanning(c, left, right);
 	}
 }
 
@@ -364,6 +363,10 @@ bool is_playing(int channel) {
 
 void stop(int channel) {
 	Mix_HaltChannel(channel);
+}
+
+void set_volume(int channel, int volume) {
+	Mix_Volume(channel, volume);
 }
 
 std::unique_ptr<sound> load_wav(const void* data, size_t size) {

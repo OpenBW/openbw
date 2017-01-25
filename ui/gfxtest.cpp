@@ -135,6 +135,24 @@ pcx_image load_pcx_data(const data_T& data) {
 	return pcx;
 }
 
+auto flip_image = [](auto& dst, auto& src) {
+	dst.resize(src.size());
+	for (size_t i = 0; i != dst.size(); ++i) {
+		auto tmp = native_window_drawing::create_rgba_surface(src[i]->w, src[i]->h);
+		src[i]->blit(&*tmp, 0, 0);
+		void* ptr = tmp->lock();
+		uint32_t* pixels = (uint32_t*)ptr;
+		for (size_t y = 0; y != (size_t)tmp->h; ++y) {
+			for (size_t x = 0; x != (size_t)tmp->w / 2; ++x) {
+				std::swap(pixels[x], pixels[tmp->w - 1 - x]);
+			}
+			pixels += tmp->pitch / 4;
+		}
+		tmp->unlock();
+		dst[i] = std::move(tmp);
+	}
+};
+
 template<typename load_data_file_F>
 void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
 	
@@ -197,31 +215,13 @@ void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
 		img.hp_bar_colors[i] = thpbar_pcx.data[i];
 	}
 	
-	auto flip = [&](auto& dst, auto& src) {
-		dst.resize(src.size());
-		for (size_t i = 0; i != dst.size(); ++i) {
-			auto tmp = native_window_drawing::create_rgba_surface(src[i]->w, src[i]->h);
-			src[i]->blit(&*tmp, 0, 0);
-			void* ptr = tmp->lock();
-			uint32_t* pixels = (uint32_t*)ptr;
-			for (size_t y = 0; y != (size_t)tmp->h; ++y) {
-				for (size_t x = 0; x != (size_t)tmp->w / 2; ++x) {
-					std::swap(pixels[x], pixels[tmp->w - 1 - x]);
-				}
-				pixels += tmp->pitch / 4;
-			}
-			tmp->unlock();
-			dst[i] = std::move(tmp);
-		}
-	};
-	
 	if (use_new_valkyrie_test) {
 		img.valkyrie_test.resize(17);
 		for (size_t i = 0; i != img.valkyrie_test.size(); ++i) {
 			auto fn = format("data/images/bw_hd_valk/%d.png", i);
 			img.valkyrie_test[i] = native_window_drawing::load_image(fn.c_str());
 		}
-		flip(img.valkyrie_test_flipped, img.valkyrie_test);
+		flip_image(img.valkyrie_test_flipped, img.valkyrie_test);
 	}
 	
 }
@@ -549,7 +549,7 @@ struct ui_util_functions: replay_functions {
 			return image_has_data_at(u->sprite->main_image, pos);
 		}
 	}
-	
+
 	unit_t* select_get_unit_at(xy pos) const {
 		rect area = square_at(pos, 32);
 		area.to += xy(game_st.max_unit_width, game_st.max_unit_height);
@@ -633,8 +633,20 @@ struct ui_functions: ui_util_functions {
 		int priority = 0;
 		int flags = 0;
 		const unit_type_t* unit_type = nullptr;
+		int volume = 0;
 	};
 	a_vector<sound_channel> sound_channels;
+	
+	void set_volume(int volume) {
+		if (volume < 0) volume = 0;
+		else if (volume > 100) volume = 100;
+		global_volume = volume;
+		for (auto& c : sound_channels) {
+			if (c.playing) {
+				native_sound::set_volume(&c - sound_channels.data(), (128 - 4) * (c.volume * global_volume / 100) / 100);
+			}
+		}
+	}
 	
 	sound_channel* get_sound_channel(int priority) {
 		sound_channel* r = nullptr;
@@ -706,8 +718,6 @@ struct ui_functions: ui_util_functions {
 //				if (left) pan = -pan;
 //			}
 			
-			volume = volume * global_volume / 100;
-			
 			const unit_type_t* unit_type = source_unit ? source_unit->unit_type : nullptr;
 			
 			if (sound_type->flags & 0x10) {
@@ -728,12 +738,13 @@ struct ui_functions: ui_util_functions {
 			
 			auto* c = get_sound_channel(sound_type->priority);
 			if (c) {
-				native_sound::play(c - sound_channels.data(), &*s, (128 - 4) * volume / 100, pan);
+				native_sound::play(c - sound_channels.data(), &*s, (128 - 4) * (volume * global_volume / 100) / 100, pan);
 				c->playing = true;
 				c->sound_type = sound_type;
 				c->flags = sound_type->flags;
 				c->priority = sound_type->priority;
 				c->unit_type = unit_type;
+				c->volume = volume;
 			}
 		}
 	}
@@ -1346,6 +1357,7 @@ struct ui_functions: ui_util_functions {
 	}
 	
 	bool unit_visble_on_minimap(unit_t* u) {
+		if (u->owner < 8 && u->sprite->visibility_flags == 0) return false;
 		if (ut_turret(u)) return false;
 		if (unit_is_trap(u)) return false;
 		if (unit_is(u, UnitTypes::Spell_Dark_Swarm)) return false;
@@ -1879,7 +1891,7 @@ struct main_t {
 		}
 		
 		auto next = [&]() {
-			int save_interval = ui.replay_st.end_frame / 20;
+			int save_interval = 10 * 1000 / 42;
 			if (ui.st.current_frame == 0 || ui.st.current_frame % save_interval == 0) {
 				auto i = saved_states.find(ui.st.current_frame);
 				if (i == saved_states.end()) {
@@ -1904,11 +1916,14 @@ struct main_t {
 						ui.st = copy_state(v->st);
 						ui.action_st = copy_state(v->action_st, v->st, ui.st);
 						ui.apm = v->apm;
-					}
+					}	
 				}
 				if (ui.st.current_frame < ui.replay_frame) {
-					for (size_t i = 0; i != 128 && ui.st.current_frame != ui.replay_frame; ++i) {
-						next();
+					for (size_t i = 0; i != 32 && ui.st.current_frame != ui.replay_frame; ++i) {
+						for (size_t i2 = 0; i2 != 4 && ui.st.current_frame != ui.replay_frame; ++i2) {
+							next();
+						}
+						if (clock.now() - now >= std::chrono::milliseconds(50)) break;
 					}
 				}
 				last_tick = now;
@@ -1929,6 +1944,7 @@ struct main_t {
 						
 						if (!ui.is_done()) next();
 						else break;
+						if (i % 4 == 3 && clock.now() - now >= std::chrono::milliseconds(50)) break;
 					}
 					ui.replay_frame = ui.st.current_frame;
 				}
@@ -1938,6 +1954,88 @@ struct main_t {
 		ui.update();
 	}
 };
+
+main_t* g_m = nullptr;
+
+uint32_t freemem_rand_state = (uint32_t)std::chrono::high_resolution_clock::now().time_since_epoch().count();
+auto freemem_rand() {
+	freemem_rand_state = freemem_rand_state * 22695477 + 1;
+	return (freemem_rand_state >> 16) & 0x7fff;
+}
+
+void out_of_memory() {
+	printf("out of memory :(\n");
+#ifdef EMSCRIPTEN
+	const char* p = "out of memory :(";
+	EM_ASM_({js_fatal_error($0);}, p);
+#endif
+	throw std::bad_alloc();
+}
+
+size_t bytes_allocated = 0;
+
+void free_memory() {
+	if (!g_m) out_of_memory();
+	size_t n_states = g_m->saved_states.size();
+	if (n_states <= 2) out_of_memory();
+	size_t n;
+	if (n_states >= 300) n = 1 + freemem_rand() % (n_states - 2);
+	else {
+		auto begin = std::next(g_m->saved_states.begin());
+		auto end = std::prev(g_m->saved_states.end());
+		n = 1;
+		int best_score = std::numeric_limits<int>::max();
+		size_t i_n = 1;
+		for (auto i = begin; i != end; ++i, ++i_n) {
+			int score = 0;
+			for (auto i2 = begin; i2 != end; ++i2) {
+				if (i2 != i) {
+					int d = i2->first - i->first;
+					score += d*d;
+				}
+			}
+			if (score < best_score) {
+				best_score = score;
+				n = i_n;
+			}
+		}
+	}
+	g_m->saved_states.erase(std::next(g_m->saved_states.begin(), n));
+}
+
+struct malloc_chunk {
+	size_t prev_foot;
+	size_t head;
+	malloc_chunk* fd;
+	malloc_chunk* bk;
+};
+
+size_t alloc_size(void* ptr) {
+	malloc_chunk* c = (malloc_chunk*)((char*)ptr - sizeof(size_t) * 2);
+	return c->head & ~7;
+}
+
+extern "C" void* dlmalloc(size_t);
+extern "C" void dlfree(void*);
+
+size_t max_bytes_allocated = 160 * 1024 * 1024;
+
+extern "C" void* malloc(size_t n) {
+	void* r = dlmalloc(n);
+	while (!r) {
+		printf("failed to allocate %d bytes\n", n);
+		free_memory();
+		r = dlmalloc(n);
+	}
+	bytes_allocated += alloc_size(r);
+	while (bytes_allocated > max_bytes_allocated) free_memory();
+	return r;
+}
+
+extern "C" void free(void* ptr) {
+	bytes_allocated -= alloc_size(ptr);
+	dlfree(ptr);
+}
 
 #ifdef EMSCRIPTEN
 
@@ -2216,9 +2314,7 @@ int unit_type_t_id(const unit_type_t& ut) {
 }
 
 void set_volume(double percent) {
-	if (percent > 1.0) percent = 1.0;
-	else if (percent < 0.0) percent = 0.0;
-	m->ui.global_volume = (int)(percent * 100);
+	m->ui.set_volume((int)(percent * 100));
 }
 
 double get_volume() {
@@ -2309,7 +2405,7 @@ int main() {
 
 	using namespace bwgame;
 	
-	log("v19\n");
+	log("v22\n");
 
 	size_t screen_width = 1280;
 	size_t screen_height = 800;
@@ -2360,6 +2456,7 @@ int main() {
 
 #ifdef EMSCRIPTEN
 	::m = &m;
+	::g_m = &m;
 	//EM_ASM({js_load_done();});
 	emscripten_set_main_loop_arg([](void* ptr) {
 		if (!any_replay_loaded) return;
@@ -2368,11 +2465,13 @@ int main() {
 		EM_ASM({js_post_main_loop();});
 	}, &m, 0, 1);
 #else
+	::g_m = &m;
 	while (true) {
 		m.update();
 		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	}
 #endif
+	::g_m = nullptr;
 
 	return 0;
 }
