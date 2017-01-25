@@ -6229,7 +6229,7 @@ struct state_functions {
 						if (u->order_state == 0) target_pos = {bb.from.x - 10, hatchery->sprite->position.y};
 						else if (u->order_state == 1) target_pos = {hatchery->sprite->position.x, bb.from.y - 10};
 						else if (u->order_state == 2) target_pos = {bb.to.x + 10, hatchery->sprite->position.y};
-						else target_pos = {hatchery->sprite->position.y, bb.to.y + 10};
+						else target_pos = {hatchery->sprite->position.x, bb.to.y + 10};
 					}
 				}
 				set_unit_move_target(u, target_pos);
@@ -13118,7 +13118,7 @@ struct state_functions {
 
 	xy get_image_map_position(const image_t* image) const {
 		xy map_pos = image->sprite->position + image->offset;
-		auto& frame = image->grp->frames[image->frame_index];
+		auto& frame = image->grp->frames.at(image->frame_index);
 		if (image->flags & image_t::flag_horizontally_flipped) {
 			map_pos.x += int(image->grp->width / 2 - (frame.offset.x + frame.size.x));
 		} else {
@@ -13752,7 +13752,7 @@ struct state_functions {
 	}
 	
 	void plague_unit(unit_t* u) {
-		if (!u->ensnare_timer && !u_burrowed(u)) {
+		if (!u->plague_timer && !u_burrowed(u)) {
 			create_sized_image(u, ImageTypes::IMAGEID_Plague_Overlay_Small);
 		}
 		u->plague_timer = 75;
@@ -17484,7 +17484,7 @@ struct state_functions {
 		case UnitTypes::Protoss_Forge:
 			if (!unit_is(u, UnitTypes::Protoss_Probe)) return false;
 			if (!player_has_completed_unit(owner, UnitTypes::Protoss_Nexus)) return false;
-			return true;
+			return true;	
 		case UnitTypes::Protoss_Stargate:
 			if (!unit_is(u, UnitTypes::Protoss_Probe)) return false;
 			if (!player_has_completed_unit(owner, UnitTypes::Protoss_Cybernetics_Core)) return false;
@@ -17507,7 +17507,7 @@ struct state_functions {
 			if (!player_has_completed_unit(owner, UnitTypes::Protoss_Gateway)) return false;
 			return true;
 		default:
-			return true;
+			return false;
 		}
 	}
 
@@ -17930,8 +17930,7 @@ struct state_functions {
 			if (u_hallucination(u)) return false;
 			return true;
 		default:
-			if (u_hallucination(u)) return false;
-			return true;
+			return false;
 		}
 	}
 
