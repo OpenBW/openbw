@@ -245,6 +245,15 @@ struct sdl_surface: surface {
 	virtual void fill(int r, int g, int b, int a) override {
 		SDL_FillRect(surf, nullptr, SDL_MapRGBA(surf->format, r, g, b, a));
 	}
+	virtual void set_alpha(int a) override {
+		SDL_SetSurfaceAlphaMod(surf, a);
+	}
+	virtual void set_blend_mode(blend_mode blend) override {
+		if (blend == blend_mode::none) SDL_SetSurfaceBlendMode(surf, SDL_BLENDMODE_NONE);
+		else if (blend == blend_mode::alpha) SDL_SetSurfaceBlendMode(surf, SDL_BLENDMODE_BLEND);
+		else if (blend == blend_mode::add) SDL_SetSurfaceBlendMode(surf, SDL_BLENDMODE_ADD);
+		else if (blend == blend_mode::mod) SDL_SetSurfaceBlendMode(surf, SDL_BLENDMODE_MOD);
+	}
 };
 
 std::unique_ptr<surface> create_rgba_surface(int width, int height) {
@@ -294,6 +303,14 @@ void delete_palette(palette* pal) {
 std::unique_ptr<surface> load_image(const char* filename) {
 	auto* surf = IMG_Load(filename);
 	if (!surf) fatal_error("IMG_Load(%s) failed: %s", filename, IMG_GetError());
+	auto r = std::make_unique<sdl_surface>();
+	r->set(surf);
+	return std::unique_ptr<surface>(r.release());
+}
+
+std::unique_ptr<surface> load_image(const void* data, size_t size) {
+	auto* surf = IMG_Load_RW(SDL_RWFromConstMem(data, (int)size), 1);
+	if (!surf) fatal_error("IMG_Load_RW(mem) failed: %s", IMG_GetError());
 	auto r = std::make_unique<sdl_surface>();
 	r->set(surf);
 	return std::unique_ptr<surface>(r.release());

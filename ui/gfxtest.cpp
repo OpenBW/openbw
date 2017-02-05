@@ -13,8 +13,6 @@
 #include <emscripten.h>
 #endif
 
-constexpr bool use_new_valkyrie_test = false;
-
 using namespace bwgame;
 
 FILE* log_file = nullptr;
@@ -70,9 +68,6 @@ struct image_data {
 	std::array<uint8_t, 24> selection_colors;
 	std::array<uint8_t, 24> hp_bar_colors;
 	std::array<int, 0x100> creep_edge_frame_index{};
-	
-	a_vector<std::unique_ptr<native_window_drawing::surface>> valkyrie_test;
-	a_vector<std::unique_ptr<native_window_drawing::surface>> valkyrie_test_flipped;
 };
 
 template<typename data_T>
@@ -135,23 +130,20 @@ pcx_image load_pcx_data(const data_T& data) {
 	return pcx;
 }
 
-auto flip_image = [](auto& dst, auto& src) {
-	dst.resize(src.size());
-	for (size_t i = 0; i != dst.size(); ++i) {
-		auto tmp = native_window_drawing::create_rgba_surface(src[i]->w, src[i]->h);
-		src[i]->blit(&*tmp, 0, 0);
-		void* ptr = tmp->lock();
-		uint32_t* pixels = (uint32_t*)ptr;
-		for (size_t y = 0; y != (size_t)tmp->h; ++y) {
-			for (size_t x = 0; x != (size_t)tmp->w / 2; ++x) {
-				std::swap(pixels[x], pixels[tmp->w - 1 - x]);
-			}
-			pixels += tmp->pitch / 4;
+std::unique_ptr<native_window_drawing::surface> flip_image(native_window_drawing::surface* src) {
+	auto tmp = native_window_drawing::create_rgba_surface(src->w, src->h);
+	src->blit(&*tmp, 0, 0);
+	void* ptr = tmp->lock();
+	uint32_t* pixels = (uint32_t*)ptr;
+	for (size_t y = 0; y != (size_t)tmp->h; ++y) {
+		for (size_t x = 0; x != (size_t)tmp->w / 2; ++x) {
+			std::swap(pixels[x], pixels[tmp->w - 1 - x]);
 		}
-		tmp->unlock();
-		dst[i] = std::move(tmp);
+		pixels += tmp->pitch / 4;
 	}
-};
+	tmp->unlock();
+	return tmp;
+}
 
 template<typename load_data_file_F>
 void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
@@ -213,15 +205,6 @@ void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
 	if (thpbar_pcx.width != 19 || thpbar_pcx.height != 1) xcept("thpbar.pcx dimensions are %dx%d (19x1 required)", thpbar_pcx.width, thpbar_pcx.height);
 	for (size_t i = 0; i != 19; ++i) {
 		img.hp_bar_colors[i] = thpbar_pcx.data[i];
-	}
-	
-	if (use_new_valkyrie_test) {
-		img.valkyrie_test.resize(17);
-		for (size_t i = 0; i != img.valkyrie_test.size(); ++i) {
-			auto fn = format("data/images/bw_hd_valk/%d.png", i);
-			img.valkyrie_test[i] = native_window_drawing::load_image(fn.c_str());
-		}
-		flip_image(img.valkyrie_test_flipped, img.valkyrie_test);
 	}
 	
 }
@@ -314,6 +297,7 @@ void load_tileset_image_data(tileset_image_data& img, size_t tileset_index, load
 		int strength = (r * 28 + g * 77 + b * 151 + 4096) / 8192;
 		img.cloak_fade_selector[i] = strength;
 	}
+	
 }
 
 template<bool bounds_check>
@@ -749,19 +733,6 @@ struct ui_functions: ui_util_functions {
 		}
 	}
 	
-	a_vector<const image_t*> image_draw_queue;
-	
-	bool use_new_images = false;
-	
-	bool is_new_image(const image_t* image) {
-		if (!use_new_images) return false;
-		switch (image->image_type->id) {
-		case ImageTypes::IMAGEID_Valkyrie: return use_new_valkyrie_test;
-		default:
-			return false;
-		}
-	}
-	
 	a_vector<uint8_t> creep_random_tile_indices = a_vector<uint8_t>(256 * 256);
 	void init() {
 		uint32_t rand_state = (uint32_t)clock.now().time_since_epoch().count();
@@ -777,27 +748,25 @@ struct ui_functions: ui_util_functions {
 		a_vector<uint8_t> data;
 		load_data_file(data, "arr/sfxdata.dat");
 		sound_types = data_loading::load_sfxdata_dat(data);
-		load_data_file(data, "arr/sfxdata.tbl");
-		data_loading::data_reader_le r(data.data(), data.data() + data.size());
+		
 		sound_filenames.resize(sound_types.vec.size());
 		has_loaded_sound.resize(sound_filenames.size());
 		loaded_sounds.resize(has_loaded_sound.size());
 		last_played_sound.resize(loaded_sounds.size());
-		a_string str;
+		
+		string_table_data tbl;
+		load_data_file(tbl.data, "arr/sfxdata.tbl");
 		for (size_t i = 0; i != sound_types.vec.size(); ++i) {
 			size_t index = sound_types.vec[i].filename_index;
-			r.seek(2 + (index - 1) * 2);
-			size_t fn_offset = r.get<uint16_t>();
-			r.seek(fn_offset);
-			str.clear();
-			while (char c = r.get<char>()) str += c;
-			sound_filenames[i] = str;
+			sound_filenames[i] = tbl[index];
 		}
 		native_sound::frequency = 44100;
 		native_sound::channels = 8;
 		native_sound::init();
 		
 		sound_channels.resize(8);
+		
+		load_data_file(images_tbl.data, "arr/images.tbl");
 	}
 	
 	virtual void on_action(int owner, int action) override {
@@ -1262,12 +1231,14 @@ struct ui_functions: ui_util_functions {
 			draw_health_bars(sprite, draw_health_bars_u, data, data_pitch);
 		}
 	}
+	
+	a_vector<std::pair<uint32_t, const sprite_t*>> sorted_sprites;
 
 	void draw_sprites(uint8_t* data, size_t data_pitch) {
 		
 		image_draw_queue.clear();
-
-		a_vector<std::pair<uint32_t, const sprite_t*>> sorted_sprites;
+		
+		sorted_sprites.clear();
 		
 		auto screen_tile = screen_tile_bounds();
 
@@ -1477,39 +1448,196 @@ struct ui_functions: ui_util_functions {
 		
 	}
 	
+	a_vector<const image_t*> image_draw_queue;
+	
+	bool use_new_images = false;
+	
+	bool new_images_index_loaded = false;
+	
+	a_vector<char> grp_new_image_state = a_vector<char>((size_t)ImageTypes::None);
+	a_unordered_set<a_string> new_images_index;
+	string_table_data images_tbl;
+	
+	a_vector<a_vector<std::unique_ptr<native_window_drawing::surface>>> new_images;
+	a_vector<a_vector<std::unique_ptr<native_window_drawing::surface>>> new_images_flipped;
+	
+	bool is_new_image(const image_t* image) {
+		if (!use_new_images) return false;
+		if (!new_images_index_loaded) {
+			new_images_index_loaded = true;
+			async_read_file("index.txt", [this](const uint8_t* data, size_t len) {
+				if (!data) {
+					log("failed to load index.txt :(\n");
+					return;
+				}
+				char* c = (char*)data;
+				char* e = (char*)data + len;
+				while (c != e && (*c == '\r' || *c =='\n' || *c == ' ')) ++c;
+				while (c != e) {
+					char* s = c;
+					while (c != e && *c != '\r' && *c !='\n' && *c != ' ') ++c;
+					a_string fn(s, c - s);
+					while (c != e && (*c == '\r' || *c =='\n' || *c == ' ')) ++c;
+					for (char& c : fn) {
+						if (c == '\\') c = '/';
+					}
+					if (!fn.empty() && fn.front() == '/') fn.erase(fn.begin());
+					if (!fn.empty() && fn.back() == '/') fn.erase(std::prev(fn.end()));
+					log("index entry '%s'\n", fn);
+					new_images_index.insert(std::move(fn));
+				}
+			});
+		}
+		if (new_images_index.empty()) return false;
+		size_t index = image->grp - global_st.grps.data();
+		auto& state = grp_new_image_state.at(index);
+		if (state == 0) {
+			state = 2;
+			a_string fn = images_tbl.at(image->image_type->grp_filename_index);
+			for (char& c : fn) {
+				if (c == '\\') c = '/';
+			}
+			for (auto i = fn.rbegin(); i != fn.rend(); ++i) {
+				if (*i == '.') {
+					fn.erase(std::prev(i.base()), fn.end());
+				}
+				if (*i == '/') break;
+			}
+			if (!fn.empty() && fn.front() == '/') fn.erase(fn.begin());
+			fn = "unit/" + fn;
+			log("checking '%s' (image %d, grp %u)\n", fn, (int)image->image_type->id, index);
+			if (new_images_index.count(fn)) {
+				size_t frames = image->grp->frames.size();
+				if (new_images.size() <= index) new_images.resize(index + 1);
+				new_images[index].resize(frames);
+				if (new_images_flipped.size() <= index) new_images_flipped.resize(index + 1);
+				new_images_flipped[index].resize(frames);
+				log("loading %d frames...\n", frames);
+				auto frames_left = std::make_shared<size_t>(frames);
+				for (size_t i = 0; i != frames; ++i) {
+					a_string frame_fn = format("%s/%02u.png", fn, i);
+					async_read_file(frame_fn, [this, frame_fn, index, i, frames_left](const uint8_t* data, size_t len) {
+						if (!data) {
+							log("failed to load '%s'\n", frame_fn);
+							return;
+						}
+						new_images.at(index).at(i) = native_window_drawing::load_image(data, len);
+						--*frames_left;
+						if (*frames_left == 0) {
+							grp_new_image_state.at(index) = 1;
+							
+							log("grp %d successfully loaded %d frames\n", index, new_images.at(index).size());
+						}
+					});
+				}
+			}
+		}
+		//log("index %d state %d\n", index, state);
+		return state == 1;
+	}
+	
+	native_window_drawing::surface* get_new_image_surface(const image_t* image, bool flipped) {
+		size_t index = image->grp - global_st.grps.data();
+		size_t frame = image->frame_index;
+		if (flipped) {
+			auto& r = new_images_flipped.at(index).at(frame);
+			if (!r) {
+				auto* s = new_images.at(index).at(frame).get();
+				if (!s) return nullptr;
+				r = flip_image(s);
+			}
+			return r.get();
+		} else {
+			return new_images.at(index).at(frame).get();
+		}
+	}
+	
+	std::unique_ptr<native_window_drawing::surface> tmp_surface;
+	
 	void draw_new_image(const image_t* image) {
-		size_t frame_index = image->frame_index;
-		
-		xy map_pos = get_image_map_position(image);
+		xy map_pos = get_image_center_map_position(image);
 
 		int screen_x = map_pos.x - screen_pos.x;
 		int screen_y = map_pos.y - screen_pos.y;
 		
-		int w = 54;
-		int h = 45;
-//		int w = 65;
-//		int h = 54;
+		auto* surface = get_new_image_surface(image, i_flag(image, image_t::flag_horizontally_flipped));
+		if (!surface) {
+			log("ERROR: new image %d (grp %d) frame %d does not exist\n", (int)image->image_type->id, image->grp - global_st.grps.data(), image->frame_index);
+			return;
+		}
 		
-		auto& frame = image->grp->frames.at(image->frame_index);
-
-		int width = (int)frame.size.x;
-		int height = (int)frame.size.y;
+		auto scale = 114_fp8;
 		
-		screen_x -= (w - width) / 2;
-		screen_y -= (h - height) / 2;
+		size_t w = (fp8::integer(surface->w) * scale).integer_part();
+		size_t h = (fp8::integer(surface->w) * scale).integer_part();
+		
+		size_t orig_w = w;
+		size_t orig_h = h;
+		
+		screen_x -= w / 2;
+		screen_y -= w / 2;
 		
 		if (screen_x >= (int)screen_width || screen_y >= (int)screen_height) return;
 		if (screen_x + (int)w <= 0 || screen_y + (int)h <= 0) return;
 		
-		if (i_flag(image, image_t::flag_horizontally_flipped)) {
-			img.valkyrie_test_flipped[frame_index]->blit_scaled(&*window_surface, screen_x, screen_y, w, h);
+		size_t offset_x = 0;
+		size_t offset_y = 0;
+		if (screen_x < 0) {
+			offset_x = -screen_x;
+			w += screen_x;
+			screen_x = 0;
+		}
+		if (screen_y < 0) {
+			offset_y = -screen_y;
+			h += screen_y;
+			screen_y = 0;
+		}
+
+		w = std::min(w, screen_width - screen_x);
+		h = std::min(h, screen_height - screen_y);
+		
+		if (image->modifier == 10) {
+			if (!tmp_surface || (size_t)tmp_surface->w < orig_w || (size_t)tmp_surface->h < orig_h) {
+				tmp_surface = native_window_drawing::create_rgba_surface(orig_w, orig_h);
+			}
+			surface->set_blend_mode(native_window_drawing::blend_mode::none);
+			surface->blit_scaled(&*tmp_surface, 0, 0, orig_w, orig_h);
+			
+			size_t src_pitch = tmp_surface->pitch / 4;
+			size_t dst_pitch = rgba_surface->pitch / 4;
+			uint32_t* src = (uint32_t*)tmp_surface->lock();
+			uint32_t* dst = (uint32_t*)rgba_surface->lock();
+			
+			src += src_pitch * offset_y + offset_x;
+			dst += dst_pitch * screen_y + screen_x;
+			
+			size_t src_skip = src_pitch - w;
+			size_t dst_skip = dst_pitch - w;
+			
+			for (size_t y = h; y--;) {
+				
+				for (size_t x = w; x--;) {
+					uint32_t s = *src;
+					uint32_t d = *dst;
+					if (s >> 24 >= 16) *dst = (d & 0xfefefe) / 2 | 0xff000000;
+					++src;
+					++dst;
+				}
+				
+				src += src_skip;
+				dst += dst_skip;
+			}
+			
+			tmp_surface->unlock();
+			rgba_surface->unlock();
+			
 		} else {
-			img.valkyrie_test[frame_index]->blit_scaled(&*window_surface, screen_x, screen_y, w, h);
+			surface->set_blend_mode(native_window_drawing::blend_mode::alpha);
+			surface->blit_scaled(&*rgba_surface, screen_x - offset_x, screen_y - offset_y, orig_w, orig_h);
 		}
 	}
 	
 	void draw_image_queue() {
-		
 		for (auto* image : image_draw_queue) {
 			draw_new_image(image);
 		}
@@ -1746,9 +1874,12 @@ struct ui_functions: ui_util_functions {
 		
 		if (!window_surface) {
 			window_surface = native_window_drawing::get_window_surface(&wnd);
-			indexed_surface = native_window_drawing::convert_to_8_bit_indexed(&*window_surface);
-			indexed_surface->set_palette(palette);
 			rgba_surface = native_window_drawing::create_rgba_surface(window_surface->w, window_surface->h);
+			indexed_surface = native_window_drawing::convert_to_8_bit_indexed(&*rgba_surface);
+			indexed_surface->set_palette(palette);
+			
+			indexed_surface->set_blend_mode(native_window_drawing::blend_mode::none);
+			rgba_surface->set_blend_mode(native_window_drawing::blend_mode::none);
 		}
 		
 		auto input_poll_speed = std::chrono::milliseconds(12);
@@ -1799,12 +1930,12 @@ struct ui_functions: ui_util_functions {
 		draw_ui(data, indexed_surface->pitch);
 		indexed_surface->unlock();
 		
-		indexed_surface->blit(&*window_surface, 0, 0);
+		rgba_surface->fill(0, 0, 0, 255);
+		indexed_surface->blit(&*rgba_surface, 0, 0);
 		
 		draw_image_queue();
 		
 		if (is_drag_selecting) {
-			rgba_surface->fill(0, 0, 0, 0);
 			uint32_t* data = (uint32_t*)rgba_surface->lock();
 			if (is_drag_selecting) {
 				auto r = rect{{drag_select_from_x, drag_select_from_y}, {drag_select_to_x, drag_select_to_y}};
@@ -1814,11 +1945,41 @@ struct ui_functions: ui_util_functions {
 				line_rectangle_rgba(data, rgba_surface->pitch / 4, r, 0xff18fc10);
 			}
 			rgba_surface->unlock();
-			
-			rgba_surface->blit(&*window_surface, 0, 0);
 		}
 		
+		rgba_surface->blit(&*window_surface, 0, 0);
+		
 		wnd.update_surface();
+	}
+	
+	template<typename cb_F>
+	void async_read_file(a_string filename, cb_F cb) {
+#ifdef EMSCRIPTEN
+		auto uptr = std::make_unique<cb_F>(std::move(cb));
+		auto f = [](void* ptr, uint8_t* data, size_t size) {
+			cb_F* cb_p = (cb_F*)ptr;
+			std::unique_ptr<cb_F> uptr(cb_p);
+			(*cb_p)(data, size);
+		};
+		auto* a = filename.c_str();
+		auto* b = (void(*)(void*, uint8_t*, size_t))f;
+		auto* c = uptr.release();
+		EM_ASM_({js_download_file($0, $1, $2);}, a, b, c);
+#else
+		filename = "data/" + filename;
+		FILE* f = fopen(filename.c_str(), "rb");
+		if (!f) {
+			cb(nullptr, 0);
+		} else {
+			a_vector<uint8_t> data;
+			fseek(f, 0, SEEK_END);
+			data.resize(ftell(f));
+			fseek(f, 0, SEEK_SET);
+			fread(data.data(), 1, data.size(), f);
+			fclose(f);
+			cb(data.data(), data.size());
+		}
+#endif
 	}
 };
 
@@ -1899,7 +2060,16 @@ struct main_t {
 					v->st = copy_state(ui.st);
 					v->action_st = copy_state(ui.action_st, ui.st, v->st);
 					v->apm = ui.apm;
-					saved_states[ui.st.current_frame] = std::move(v);
+					
+					a_map<int, std::unique_ptr<saved_state>> new_saved_states;
+					new_saved_states[ui.st.current_frame] = std::move(v);
+					while (!saved_states.empty()) {
+						auto i = saved_states.begin();
+						auto v = std::move(*i);
+						saved_states.erase(i);
+						new_saved_states[v.first] = std::move(v.second);
+					}
+					std::swap(saved_states, new_saved_states);
 				}
 			}
 			ui.replay_functions::next_frame();
@@ -1977,6 +2147,7 @@ size_t bytes_allocated = 0;
 void free_memory() {
 	if (!g_m) out_of_memory();
 	size_t n_states = g_m->saved_states.size();
+	printf("n_states is %d\n", n_states);
 	if (n_states <= 2) out_of_memory();
 	size_t n;
 	if (n_states >= 300) n = 1 + freemem_rand() % (n_states - 2);
@@ -2003,15 +2174,22 @@ void free_memory() {
 	g_m->saved_states.erase(std::next(g_m->saved_states.begin(), n));
 }
 
-struct malloc_chunk {
+//extern "C" void set_malloc_fail_handler(bool(*)());
+
+//bool malloc_fail_handler() {
+//	free_memory();
+//	return true;
+//}
+
+struct dlmalloc_chunk {
 	size_t prev_foot;
 	size_t head;
-	malloc_chunk* fd;
-	malloc_chunk* bk;
+	dlmalloc_chunk* fd;
+	dlmalloc_chunk* bk;
 };
 
 size_t alloc_size(void* ptr) {
-	malloc_chunk* c = (malloc_chunk*)((char*)ptr - sizeof(size_t) * 2);
+	dlmalloc_chunk* c = (dlmalloc_chunk*)((char*)ptr - sizeof(size_t) * 2);
 	return c->head & ~7;
 }
 
@@ -2033,6 +2211,7 @@ extern "C" void* malloc(size_t n) {
 }
 
 extern "C" void free(void* ptr) {
+	if (!ptr) return;
 	bytes_allocated -= alloc_size(ptr);
 	dlfree(ptr);
 }
@@ -2405,7 +2584,7 @@ int main() {
 
 	using namespace bwgame;
 	
-	log("v22\n");
+	log("v24\n");
 
 	size_t screen_width = 1280;
 	size_t screen_height = 800;
@@ -2453,6 +2632,8 @@ int main() {
 	m.set_image_data();
 	
 	log("loaded in %dms\n", std::chrono::duration_cast<std::chrono::milliseconds>(clock.now() - start).count());
+	
+	//set_malloc_fail_handler(malloc_fail_handler);
 
 #ifdef EMSCRIPTEN
 	::m = &m;

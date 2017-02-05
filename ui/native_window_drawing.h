@@ -24,6 +24,13 @@ namespace native_window_drawing {
 	
 	palette* new_palette();
 	void delete_palette(palette*);
+	
+	enum struct blend_mode {
+		none,
+		alpha,
+		add,
+		mod
+	};
 
 	struct surface {
 		int w;
@@ -36,6 +43,8 @@ namespace native_window_drawing {
 		virtual void blit(surface* dst, int x, int y) = 0;
 		virtual void blit_scaled(surface* dst, int x, int y, int w, int h) = 0;
 		virtual void fill(int r, int g, int b, int a) = 0;
+		virtual void set_alpha(int a) = 0;
+		virtual void set_blend_mode(blend_mode blend) = 0;
 	};
 	
 	std::unique_ptr<surface> create_rgba_surface(int width, int height);
@@ -43,6 +52,7 @@ namespace native_window_drawing {
 	std::unique_ptr<surface> convert_to_8_bit_indexed(surface* s);
 	
 	std::unique_ptr<surface> load_image(const char* filename);
+	std::unique_ptr<surface> load_image(const void* data, size_t size);
 	
 	
 

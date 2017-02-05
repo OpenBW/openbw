@@ -196,13 +196,13 @@ struct tile_id {
 	tile_id() = default;
 	explicit tile_id(uint16_t raw_value) : raw_value(raw_value) {}
 	explicit tile_id(size_t group_index, size_t subtile_index) : raw_value((uint16_t)(group_index << 4 | subtile_index)) {}
-	bool has_creep() {
+	bool has_creep() const {
 		return ((raw_value >> 4) & 0x8000) != 0;
 	}
-	size_t group_index() {
+	size_t group_index() const {
 		return (raw_value >> 4) & 0x7ff;
 	}
-	size_t subtile_index() {
+	size_t subtile_index() const {
 		return raw_value & 0xf;
 	}
 	explicit operator bool() const {

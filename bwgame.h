@@ -13115,6 +13115,10 @@ struct state_functions {
 			set_image_heading_by_index(i, index);
 		}
 	}
+	
+	xy get_image_center_map_position(const image_t* image) const {
+		return image->sprite->position + image->offset;
+	}
 
 	xy get_image_map_position(const image_t* image) const {
 		xy map_pos = image->sprite->position + image->offset;
@@ -19273,15 +19277,6 @@ struct game_load_functions : state_functions {
 		st.dead_units.clear();
 		for (auto& v : st.player_units) v.clear();
 
-		auto clear_and_make_free = [&](auto& list, auto& free_list) {
-			free_list.clear();
-			memset(list.data(), 0, (char*)(list.data() + list.size()) - (char*)list.data());
-			for (auto& v: list) {
-				new (&v) typename std::remove_reference<decltype(v)>::type{};
-				bw_insert_list(free_list, v);
-			}
-		};
-
 		st.units_container = {};
 
 		st.active_bullets_size = 0;
@@ -21231,6 +21226,22 @@ grp_t read_grp(reader_T&& r) {
 	}
 	return grp;
 }
+
+struct string_table_data {
+	a_vector<uint8_t> data;
+	a_string operator[](size_t index) const {
+		data_loading::data_reader_le r(data.data(), data.data() + data.size());
+		r.seek(2 + (index - 1) * 2);
+		size_t offset = r.get<uint16_t>();
+		r.seek(offset);
+		a_string str;
+		while (char c = r.get<char>()) str += c;
+		return str;
+	}
+	a_string at(size_t index) const {
+		return (*this)[index];
+	}
+};
 
 template<typename load_data_file_F>
 void global_init(global_state& st, load_data_file_F&& load_data_file) {
