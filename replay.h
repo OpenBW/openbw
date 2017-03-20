@@ -50,7 +50,7 @@ struct replay_file_reader {
 			size_t segment_output_size = output_size - output_pos;
 			if (segment_output_size > 8192) segment_output_size = 8192;
 			
-			if (segment_input_size > segment_output_size) xcept("replay_file_reader: output buffer too small");
+			if (segment_input_size > segment_output_size) error("replay_file_reader: output buffer too small");
 			if (segment_input_size == segment_output_size) {
 				r.get_bytes(output + output_pos, segment_input_size);
 			} else {
@@ -61,10 +61,10 @@ struct replay_file_reader {
 			output_pos += segment_output_size;
 		}
 		
-		if (output_pos != output_size) xcept("replay_file_reader: read %d bytes, expected %d", output_pos, output_size);
+		if (output_pos != output_size) error("replay_file_reader: read %d bytes, expected %d", output_pos, output_size);
 		
 		uint32_t calculcated_crc32_sum = crc32(output, output_size);
-		if (calculcated_crc32_sum != crc32_sum) xcept("replay_file_reader: crc32 mismatch: got %08x, expected %08x", calculcated_crc32_sum, crc32_sum);
+		if (calculcated_crc32_sum != crc32_sum) error("replay_file_reader: crc32 mismatch: got %08x, expected %08x", calculcated_crc32_sum, crc32_sum);
 	}
 
 	template<typename T, bool little_endian = default_little_endian>
@@ -103,7 +103,7 @@ struct replay_functions: action_functions {
 	void load_replay(reader_T&& r, bool initial_processing = true) {
 		
 		uint32_t identifier = r.template get<uint32_t>();
-		if (identifier != 0x53526572) xcept("replay_player: invalid identifier %#x", identifier);
+		if (identifier != 0x53526572) error("load_replay: invalid identifier %#x", identifier);
 		
 		std::array<uint8_t, 633> game_info_buffer;
 		r.get_bytes(game_info_buffer.data(), game_info_buffer.size());
@@ -229,7 +229,7 @@ struct replay_functions: action_functions {
 	}
 	
 	void next_frame() {
-		if (st.current_frame == replay_st.end_frame) xcept("replay: attempt to play past end");
+		if (st.current_frame == replay_st.end_frame) error("replay: attempt to play past end");
 		execute_actions(replay_st.actions_data_buffer.data(), replay_st.actions_data_buffer.data() + replay_st.actions_data_buffer.size());
 		state_functions::next_frame();
 	}

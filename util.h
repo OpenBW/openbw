@@ -4,6 +4,10 @@
 #include <cstdint>
 #include <iterator>
 #include <limits>
+#include <array>
+
+#include "containers.h"
+#include "strf.h"
 
 namespace bwgame {
 
@@ -608,31 +612,6 @@ struct fixed_point {
 		return from_raw(raw_value - n.raw_value);
 	}
 
-// 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-// 	fixed_point& operator+=(T integer_value) {
-// 		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in addition");
-// 		*this += integer(integer_value);
-// 		wrap();
-// 		return *this;
-// 	}
-// 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-// 	fixed_point operator+(T integer_value) const {
-// 		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in addition");
-// 		return *this + integer(integer_value);
-// 	}
-// 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-// 	fixed_point& operator-=(T integer_value) {
-// 		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in subtraction");
-// 		*this -= integer(integer_value);
-// 		wrap();
-// 		return *this;
-// 	}
-// 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
-// 	fixed_point operator-(T integer_value) const {
-// 		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in subtraction");
-// 		return *this - integer(integer_value);
-// 	}
-
 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
 	fixed_point& operator/=(T integer_value) {
 		static_assert(std::is_signed<T>::value == is_signed, "fixed_point: cannot mix signed/unsigned in division");
@@ -709,6 +688,8 @@ struct fixed_point {
 using fp1 = fixed_point<31, 1, true>;
 using fp8 = fixed_point<24, 8, true>;
 using ufp8 = fixed_point<24, 8, false>;
+using fp16 = fixed_point<16, 16, true>;
+using ufp16 = fixed_point<16, 16, false>;
 using direction_t = fixed_point<0, 8, true, true>;
 
 using xy = xy_t<int>;
@@ -821,6 +802,22 @@ T isqrt(T n) {
 		p /= 4u;
 	}
 	return r;
+}
+
+template<typename...T>
+a_string format(const char*fmt, T&&... args) {
+	bwgame::a_string str;
+	bwgame::strf::format(str, fmt, std::forward<T>(args)...);
+	return str;
+}
+
+struct exception : std::runtime_error {
+	exception(const a_string& str) : std::runtime_error(str.c_str()) {}
+};
+
+template<typename...T>
+void error(const char* fmt, T&&... args) {
+	throw exception(format(fmt, std::forward<T>(args)...));
 }
 
 }

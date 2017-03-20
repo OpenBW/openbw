@@ -60,18 +60,18 @@ struct object_container {
 	
 	T* at(size_t index) {
 		if (index) index = max_size - index;
-		if (size <= index) xcept("object_container::get const: invalid index %u", index);
+		if (size <= index) error("object_container::get const: invalid index %u", index);
 		return &list[index / allocation_granularity][index % allocation_granularity];
 	}
 	
 	const T* at(size_t index) const {
 		if (index) index = max_size - index;
-		if (size <= index) xcept("object_container::get const: invalid index %u", index);
+		if (size <= index) error("object_container::get const: invalid index %u", index);
 		return &list[index / allocation_granularity][index % allocation_granularity];
 	}
 	
 	void grow(bool add_new_to_free) {
-		if (size == max_size) xcept("object_container: attempt to grow beyond max_size");
+		if (size == max_size) error("object_container: attempt to grow beyond max_size");
 		list.emplace_back();
 		size_t n = std::min(allocation_granularity, max_size - size);
 		for (size_t i = 0; i != n; ++i) {
@@ -90,7 +90,7 @@ struct object_container {
 			grow(true);
 		}
 		auto* r = &free_list.front();
-		if (r != get(r->index)) xcept("index mismatch for %d\n", r->index);
+		if (r != get(r->index)) error("index mismatch for %d\n", r->index);
 		return r;
 	}
 	void pop() {

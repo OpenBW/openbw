@@ -94,13 +94,13 @@ struct data_reader {
 	data_reader(const uint8_t* ptr, const uint8_t* end) : ptr(ptr), begin(ptr), end(end) {}
 	template<typename T, bool little_endian = default_little_endian>
 	T get() {
-		if (bounds_checking && left() < sizeof(T)) xcept("data_reader: attempt to read past end");
+		if (bounds_checking && left() < sizeof(T)) error("data_reader: attempt to read past end");
 		ptr += sizeof(T);
 		return value_at<T, little_endian>(ptr - sizeof(T));
 	}
 	const uint8_t* get_n(size_t n) {
 		const uint8_t* r = ptr;
-		if (bounds_checking && left() < n) xcept("data_reader: attempt to read past end");
+		if (bounds_checking && left() < n) error("data_reader: attempt to read past end");
 		ptr += n;
 		return r;
 	}
@@ -114,14 +114,14 @@ struct data_reader {
 		return r;
 	}
 	void skip(size_t n) {
-		if (bounds_checking && left() < n) xcept("data_reader: attempt to seek past end");
+		if (bounds_checking && left() < n) error("data_reader: attempt to seek past end");
 		ptr += n;
 	}
 	void get_bytes(uint8_t* dst, size_t n) {
 		memcpy(dst, get_n(n), n);
 	}
 	void seek(size_t offset) {
-		if (offset > size()) xcept("data_reader: attempt to seek past end");
+		if (offset > size()) error("data_reader: attempt to seek past end");
 		ptr = begin + offset;
 	}
 	size_t left() const {
@@ -150,7 +150,7 @@ struct paged_reader {
 		file_size = reader.size();
 	}
 	void get_bytes(uint8_t* dst, size_t n) {
-		if (left() < n) xcept("paged_reader: attempt to read past end");
+		if (left() < n) error("paged_reader: attempt to read past end");
 		if (n > page_size / 2) {
 			reader.seek(file_pointer);
 			reader.get_bytes(dst, n);
@@ -187,7 +187,7 @@ struct paged_reader {
 	}
 
 	void seek(size_t offset) {
-		if (offset > file_size) xcept("paged_reader: attempt to seek past end");
+		if (offset > file_size) error("paged_reader: attempt to seek past end");
 		file_pointer = offset;
 	}
 	
@@ -231,14 +231,14 @@ struct file_reader {
 	void open(a_string filename) {
 		if (f) fclose(f);
 		f = fopen(filename.c_str(), "rb");
-		if (!f) xcept("file_reader: failed to open %s for reading", filename.c_str());
+		if (!f) error("file_reader: failed to open %s for reading", filename.c_str());
 		this->filename = std::move(filename);
 	}
 
 	void get_bytes(uint8_t* dst, size_t n) {
 		if (!fread(dst, n, 1, f)) {
-			if (feof(f)) xcept("file_reader: %s: attempt to read past end", filename);
-			xcept("file_reader: %s: read error", filename);
+			if (feof(f)) error("file_reader: %s: attempt to read past end", filename);
+			error("file_reader: %s: read error", filename);
 		}
 	}
 
@@ -266,7 +266,7 @@ struct file_reader {
 	}
 
 	void seek(size_t offset) {
-		if ((size_t)(long)offset != offset || fseek(f, (long)offset, SEEK_SET)) xcept("file_reader: %s: failed to seek to offset %d", filename, offset);
+		if ((size_t)(long)offset != offset || fseek(f, (long)offset, SEEK_SET)) error("file_reader: %s: failed to seek to offset %d", filename, offset);
 	}
 
 	bool eof() {
@@ -331,7 +331,7 @@ struct encrypted_reader {
 	}
 
 	void get_bytes(uint8_t* dst, size_t n) {
-		if (left() < n) xcept("encrypted_reader: attempt to read past end");
+		if (left() < n) error("encrypted_reader: attempt to read past end");
 		size_t i = 0;
 		if (data_n) {
 			for (;i != std::min(n, data_n); ++i) {
@@ -455,7 +455,7 @@ void decompress(uint8_t* input, size_t input_size, uint8_t* output, size_t outpu
 	int type = r.template get<uint8_t>();
 	int distance_bits = r.template get<uint8_t>();
 
-	if (distance_bits != 4 && distance_bits != 5 && distance_bits != 6) xcept("decompress: invalid distance bits %d", distance_bits);
+	if (distance_bits != 4 && distance_bits != 5 && distance_bits != 6) error("decompress: invalid distance bits %d", distance_bits);
 
 	auto get_length = [&]() {
 		switch (r.template get_bits<2>()) {
@@ -636,7 +636,7 @@ void decompress(uint8_t* input, size_t input_size, uint8_t* output, size_t outpu
 				size_t len = 2 + get_length();
 				size_t distance = 0;
 
-				if (len == 519) xcept("decompress: eof marker found too early");
+				if (len == 519) error("decompress: eof marker found too early");
 
 				if (len == 2) {
 					distance = get_distance() << 2;
@@ -668,7 +668,7 @@ void decompress(uint8_t* input, size_t input_size, uint8_t* output, size_t outpu
 			}
 		}
 
-	} else xcept("decompress: type %d not supported", type);
+	} else error("decompress: type %d not supported", type);
 }
 
 static const uint8_t huffman_weight_tables[9][256 + 2] = {
@@ -832,7 +832,7 @@ size_t decompress_huffman(uint8_t* input, size_t input_size, uint8_t* output, si
 	data_reader<little_endian> source_r(input, input + input_size);
 	auto r = make_bit_reader(source_r);
 	size_t weights_index = r.template get<uint8_t>();
-	if (weights_index >= 9) xcept("decompress_huffman: invalid weights index %d", weights_index);
+	if (weights_index >= 9) error("decompress_huffman: invalid weights index %d", weights_index);
 	const uint8_t* weights = huffman_weight_tables[weights_index];
 	
 	struct tree_node;
@@ -964,7 +964,7 @@ size_t decompress_adpcm(uint8_t* input, size_t input_size, uint8_t* output, size
 	for (size_t i = 0; i != channels; ++i) {
 		auto sample = r.template get<int16_t>();
 		previous_sample[i] = sample;
-		if (out_pos - output_size < 2) xcept("decompress_adpcm: attempt to write past end");
+		if (out_pos - output_size < 2) error("decompress_adpcm: attempt to write past end");
 		set_value_at<little_endian, int16_t>(output + out_pos, sample);
 		out_pos += 2;
 	}
@@ -991,7 +991,7 @@ size_t decompress_adpcm(uint8_t* input, size_t input_size, uint8_t* output, size
 				}
 				
 				previous_sample[channel] = sample;
-				if (out_pos - output_size < 2) xcept("decompress_adpcm: attempt to write past end");
+				if (out_pos - output_size < 2) error("decompress_adpcm: attempt to write past end");
 				set_value_at<true, int16_t>(output + out_pos, sample);
 				out_pos += 2;
 				
@@ -1003,7 +1003,7 @@ size_t decompress_adpcm(uint8_t* input, size_t input_size, uint8_t* output, size
 				int n = in_value & 0x7f;
 				if (n == 0) {
 					if (step_index[channel] != 0) --step_index[channel];
-					if (out_pos - output_size < 2) xcept("decompress_adpcm: attempt to write past end");
+					if (out_pos - output_size < 2) error("decompress_adpcm: attempt to write past end");
 					set_value_at<little_endian, int16_t>(output + out_pos, previous_sample[channel]);
 					out_pos += 2;
 				} else if (n == 1) {
@@ -1050,7 +1050,7 @@ struct mpq_archive_file_reader {
 	mpq_archive_file_reader(a_string arg_filename, base_reader_T& r, size_t sector_size, block_table_entry be, uint32_t key, const crypt_table_t& crypt_table) : filename(std::move(arg_filename)), r(r), sector_size(sector_size), be(be), key(key), crypt_table(crypt_table) {
 
 		if (~be.flags & 0x200 && ~be.flags & 0x100) {
-			xcept("mpq: %s: file is not compressed", filename);
+			error("mpq: %s: file is not compressed", filename);
 		}
 
 		sector_data.resize(sector_size);
@@ -1061,7 +1061,7 @@ struct mpq_archive_file_reader {
 				size_t offset = sectors_r.template get<uint32_t>();
 				compressed_sectors.push_back(offset);
 				if (offset == be.compressed_size) break;
-				if (compressed_sectors.size() > (be.size + sector_size - 1) / sector_size) xcept("mpq: %s: too many compressed sectors in file", filename);
+				if (compressed_sectors.size() > (be.size + sector_size - 1) / sector_size) error("mpq: %s: too many compressed sectors in file", filename);
 			}
 		};
 
@@ -1073,7 +1073,7 @@ struct mpq_archive_file_reader {
 	}
 	void read_sector() {
 		current_sector = file_position / sector_size;
-		if (current_sector >= compressed_sectors.size() - 1) xcept("mpq: %s: attempt to read past end", filename);
+		if (current_sector >= compressed_sectors.size() - 1) error("mpq: %s: attempt to read past end", filename);
 
 		size_t sector_data_size = compressed_sectors[current_sector + 1] - compressed_sectors[current_sector];
 		r.seek(be.data_offset + compressed_sectors[current_sector]);
@@ -1125,14 +1125,14 @@ struct mpq_archive_file_reader {
 					size_t out_size = decompress_adpcm(compressed_data.data(), input_size, sector_data.data(), current_sector_size, 2);
 					if (compression_flags) swap_buffers(out_size);
 				}
-				if (compression_flags != 0) xcept("mpq: %s: unsupported compression flags %d", filename, compression_flags);
+				if (compression_flags != 0) error("mpq: %s: unsupported compression flags %d", filename, compression_flags);
 			}
 		}
 
 	}
 
 	void get_bytes(uint8_t* dst, size_t n) {
-		if (file_position + n > be.size) xcept("mpq: %s: attempt to read past end", filename);
+		if (file_position + n > be.size) error("mpq: %s: attempt to read past end", filename);
 		if (file_position / sector_size != current_sector) read_sector();
 		size_t sector_offset = file_position % sector_size;
 		while (sector_size - sector_offset < n) {
@@ -1170,7 +1170,7 @@ struct mpq_archive_reader {
 	a_vector<block_table_entry> block_table;
 	explicit mpq_archive_reader(base_reader_T& r) : r(r) {
 		auto mpq_signature = r.template get<uint32_t>();
-		if (mpq_signature != 0x1a51504d) xcept("signature mismatch; file is not an mpq archive");
+		if (mpq_signature != 0x1a51504d) error("signature mismatch; file is not an mpq archive");
 
 		r.template get<uint32_t>();
 		r.template get<uint32_t>();
@@ -1242,7 +1242,7 @@ struct mpq_archive_reader {
 
 	auto open(a_string filename) {
 		auto* he = find_hash_table_entry(filename);
-		if (!he) xcept("mpq: %s: no such file", filename);
+		if (!he) error("mpq: %s: no such file", filename);
 
 		const char* c = filename.data() + filename.size();
 		while (c != filename.data()) {
@@ -1311,7 +1311,7 @@ struct data_files_loader {
 				return;
 			}
 		}
-		xcept("data_files_loader: %s: file not found", filename);
+		error("data_files_loader: %s: file not found", filename);
 	}
 };
 
@@ -1330,7 +1330,7 @@ struct data_type_cast_helper {
 	to_T operator()(from_T v) {
 		static_assert(std::is_integral<from_T>::value, "from_T must be integral");
 		to_T r = (to_T)v;
-		if ((from_T)(intmax_t)r != v) xcept("value 0x%x of type %s does not fit in type %s", v, typeid(from_T).name(), typeid(to_T).name());
+		if ((from_T)(intmax_t)r != v) error("value 0x%x of type %s does not fit in type %s", v, typeid(from_T).name(), typeid(to_T).name());
 		return r;
 	}
 };
@@ -1342,7 +1342,7 @@ template<typename from_T>
 struct data_type_cast_helper<bool, from_T> {
 	bool operator()(from_T v) {
 		static_assert(std::is_integral<from_T>::value, "from_T must be integral");
-		if (v != 0 && v != 1) xcept("value 0x%x is not a boolean", v);
+		if (v != 0 && v != 1) error("value 0x%x is not a boolean", v);
 		return v != 0;
 	}
 };
@@ -1509,7 +1509,7 @@ unit_types_t load_units_dat(const data_T& data) {
 	rawr(uint8_t, is_broodwar, total_count);
 	rawr(uint16_t, staredit_availability_flags, total_count);
 
-	if (r.left()) log(" WARNING: %s: %d bytes left\n", "units.dat", r.left());
+	if (r.left()) error("%s: %d bytes left (incorrect version?)\n", "units.dat", r.left());
 
 	return unit_types;
 }
@@ -1555,7 +1555,7 @@ weapon_types_t load_weapons_dat(const data_T& data) {
 	rawr(uint16_t, target_error_message, count);
 	rawr(uint16_t, icon, count);
 
-	if (r.left()) log(" WARNING: %s: %d bytes left\n", "weapons.dat", r.left());
+	if (r.left()) error("%s: %d bytes left (incorrect version?)\n", "weapons.dat", r.left());
 
 	return weapon_types;
 }
@@ -1589,7 +1589,7 @@ upgrade_types_t load_upgrades_dat(const data_T& data) {
 	rawr(uint8_t, max_level, count);
 	rawr(uint8_t, is_broodwar, count);
 
-	if (r.left()) log(" WARNING: %s: %d bytes left\n", "upgrades.dat", r.left());
+	if (r.left()) error("%s: %d bytes left (incorrect version?)\n", "upgrades.dat", r.left());
 
 	return upgrade_types;
 }
@@ -1620,7 +1620,7 @@ tech_types_t load_techdata_dat(const data_T& data) {
 	rawr(uint8_t, race, count);
 	rawr(uint16_t, flags, count);
 
-	if (r.left()) log(" WARNING: %s: %d bytes left\n", "techdata.dat", r.left());
+	if (r.left()) error("%s: %d bytes left (incorrect version?)\n", "techdata.dat", r.left());
 
 	return tech_types;
 }
@@ -1649,7 +1649,7 @@ flingy_types_t load_flingy_dat(const data_T& data) {
 	rawr(uint8_t, unused, count);
 	rawr(uint8_t, movement_type, count);
 
-	if (r.left()) log(" WARNING: %s: %d bytes left\n", "flingy.dat", r.left());
+	if (r.left()) error("%s: %d bytes left (incorrect version?)\n", "flingy.dat", r.left());
 
 	return flingy_types;
 }
@@ -1679,7 +1679,7 @@ sprite_types_t load_sprites_dat(const data_T& data) {
 	rawro(uint8_t, selection_circle, selectable_count, non_selectable_count);
 	rawro(uint8_t, selection_circle_vpos, selectable_count, non_selectable_count);
 
-	if (r.left()) log(" WARNING: %s: %d bytes left\n", "sprites.dat", r.left());
+	if (r.left()) error("%s: %d bytes left (incorrect version?)\n", "sprites.dat", r.left());
 
 	return sprite_types;
 }
@@ -1715,7 +1715,7 @@ image_types_t load_images_dat(const data_T& data) {
 	rawr(uint32_t, landing_dust_filename_index, count);
 	rawr(uint32_t, lift_off_filename_index, count);
 
-	if (r.left()) log(" WARNING: %s: %d bytes left\n", "images.dat", r.left());
+	if (r.left()) error("%s: %d bytes left (incorrect version?)\n", "images.dat", r.left());
 
 	return image_types;
 }
@@ -1756,7 +1756,7 @@ order_types_t load_orders_dat(const data_T& data) {
 	rawr(uint16_t, dep_index, count);
 	rawr(uint8_t, target_order, count);
 
-	if (r.left()) log(" WARNING: %s: %d bytes left\n", "orders.dat", r.left());
+	if (r.left()) error("%s: %d bytes left (incorrect version?)\n", "orders.dat", r.left());
 
 	return order_types;
 }
@@ -1783,7 +1783,7 @@ sound_types_t load_sfxdata_dat(const data_T& data) {
 	rawr(uint16_t, race, count);
 	rawr(uint8_t, min_volume, count);
 
-	if (r.left()) log(" WARNING: %s: %d bytes left\n", "sfxdata.dat", r.left());
+	if (r.left()) error("%s: %d bytes left (incorrect version?)\n", "sfxdata.dat", r.left());
 
 	return sound_types;
 }

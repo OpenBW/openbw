@@ -273,7 +273,7 @@ struct action_functions: state_functions {
 			if (u && u->unit_type->id != UnitTypes::Terran_Nuclear_Missile) {
 				if (std::find(selection.begin(), selection.end(), u) == selection.end()) {
 					if (!us_hidden(u) && (selection.empty() || unit_can_be_multi_selected(u))) {
-						if (selection.size() == 12) xcept("action_select: attempt to select more than 12 units");
+						if (selection.size() == 12) error("action_select: attempt to select more than 12 units");
 						selection.push_back(u);
 						retval = true;
 					}
@@ -296,7 +296,7 @@ struct action_functions: state_functions {
 			if (u) {
 				if (std::find(selection.begin(), selection.end(), u) == selection.end()) {
 					if (!us_hidden(u) && (selection.empty() || unit_can_be_multi_selected(u))) {
-						if (selection.size() == 12) xcept("action_shift_select: attempt to select more than 12 units");
+						if (selection.size() == 12) error("action_shift_select: attempt to select more than 12 units");
 						selection.push_back(u);
 						retval = true;
 					}
@@ -604,7 +604,7 @@ struct action_functions: state_functions {
 				for (unit_t* u : selected_units(owner)) {
 					if (u->owner != owner) break;
 					auto uid = get_unit_id(u);
-					if (group.size() == 12) xcept("attempt to control group more than 12 units");
+					if (group.size() == 12) error("attempt to control group more than 12 units");
 					group.push_back(uid);
 					retval = true;
 				}
@@ -635,7 +635,7 @@ struct action_functions: state_functions {
 					}
 				}
 			}
-		} else xcept("action_control_group: unknown subaction %d", subaction);
+		} else error("action_control_group: unknown subaction %d", subaction);
 		return retval;
 	}
 
@@ -991,7 +991,7 @@ struct action_functions: state_functions {
 	template<typename reader_T>
 	bool read_action_select(int owner, reader_T&& r) {
 		size_t n = r.template get<uint8_t>();
-		if (n > 12) xcept("invalid selection of %d units", n);
+		if (n > 12) error("invalid selection of %d units", n);
 		static_vector<unit_t*, 12> units;
 		for (size_t i = 0; i != n; ++i) {
 			auto uid = unit_id(r.template get<uint16_t>());
@@ -1003,7 +1003,7 @@ struct action_functions: state_functions {
 	template<typename reader_T>
 	bool read_action_shift_select(int owner, reader_T&& r) {
 		size_t n = r.template get<uint8_t>();
-		if (n > 12) xcept("invalid selection of %d units", n);
+		if (n > 12) error("invalid selection of %d units", n);
 		static_vector<unit_t*, 12> units;
 		for (size_t i = 0; i != n; ++i) {
 			auto uid = unit_id(r.template get<uint16_t>());
@@ -1015,7 +1015,7 @@ struct action_functions: state_functions {
 	template<typename reader_T>
 	bool read_action_deselect(int owner, reader_T&& r) {
 		size_t n = r.template get<uint8_t>();
-		if (n > 12) xcept("invalid deselection of %d units", n);
+		if (n > 12) error("invalid deselection of %d units", n);
 		static_vector<unit_t*, 12> units;
 		for (size_t i = 0; i != n; ++i) {
 			auto uid = unit_id(r.template get<uint16_t>());
@@ -1286,7 +1286,7 @@ struct action_functions: state_functions {
 		int player_id = r.template get<uint8_t>();
 		int action_id = r.template get<uint8_t>();
 		auto i = std::find(action_st.player_id.begin(), action_st.player_id.end(), player_id);
-		if (i == action_st.player_id.end()) xcept("execute_action: player id %d not found", player_id);
+		if (i == action_st.player_id.end()) error("execute_action: player id %d not found", player_id);
 		int owner = (int)(i - action_st.player_id.begin());
 		on_action(owner, action_id);
 		switch (action_id) {
@@ -1375,7 +1375,7 @@ struct action_functions: state_functions {
 		case 92:
 			return read_action_chat(owner, r);
 		default:
-			xcept("execute_action: unknown action %d", action_id);
+			error("execute_action: unknown action %d", action_id);
 		}
 		return false;
 	}
