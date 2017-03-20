@@ -17003,7 +17003,7 @@ struct state_functions {
 		unit_t* u = create_unit(unit_type, pos, owner);
 		if (!u) return nullptr;
 		finish_building_unit(u);
-		if (place_completed_unit(u)) complete_unit(u);
+		complete_unit(u);
 		return u;
 	}
 
@@ -20453,6 +20453,14 @@ struct game_load_functions : state_functions {
 
 		set_mega_tile_flags();
 	}
+	
+	unit_t* create_starting_unit(const unit_type_t* unit_type, xy pos, int owner) {
+		unit_t* u = create_unit(unit_type, pos, owner);
+		if (!u) return nullptr;
+		finish_building_unit(u);
+		if (place_completed_unit(u)) complete_unit(u);
+		return u;
+	}
 
 	void create_starting_units(int owner, xy position, race_t race) {
 
@@ -20469,7 +20477,7 @@ struct game_load_functions : state_functions {
 			u->user_action_flags |= 4;
 			kill_unit(u);
 		}
-		unit_t* resource_depot = create_completed_unit(resource_depot_type, resource_depot_pos, owner);
+		unit_t* resource_depot = create_starting_unit(resource_depot_type, resource_depot_pos, owner);
 		if (resource_depot) {
 			if (unit_type_spreads_creep(resource_depot_type, true) || ut_requires_creep(resource_depot)) {
 				spread_creep_completely(resource_depot, resource_depot->sprite->position);
@@ -20484,7 +20492,7 @@ struct game_load_functions : state_functions {
 			else overlord_pos.x += add.x;
 			if (overlord_pos.y >= int(game_st.map_height / 2)) overlord_pos.y -= add.y;
 			else overlord_pos.y += add.y;
-			create_completed_unit(get_unit_type(UnitTypes::Zerg_Overlord), overlord_pos, owner);
+			create_starting_unit(get_unit_type(UnitTypes::Zerg_Overlord), overlord_pos, owner);
 		}
 
 		const unit_type_t* worker_type;
@@ -20493,7 +20501,7 @@ struct game_load_functions : state_functions {
 		else worker_type = get_unit_type(UnitTypes::Protoss_Probe);
 
 		for (size_t i = 0; i != 4; ++i) {
-			create_completed_unit(worker_type, position, owner);
+			create_starting_unit(worker_type, position, owner);
 		}
 
 	}
