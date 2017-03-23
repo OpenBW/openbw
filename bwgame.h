@@ -313,6 +313,8 @@ struct state_functions {
 	
 	virtual void play_sound(int id, xy position, const unit_t* source_unit = nullptr, bool add_race_index = false) {}
 	virtual void on_unit_deselect(unit_t* u) {}
+	
+	virtual void on_unit_destroy(unit_t* u) {}
 
 	state& st;
 	const global_state& global_st = *st.global;
@@ -596,21 +598,27 @@ struct state_functions {
 		play_sound(id, xy(), nullptr, add_race_index);
 	}
 
-	unit_t* get_unit(unit_id id) const {
+	template<typename T>
+	unit_t* get_unit(unit_id_t<T> id) const {
 		size_t idx = id.index();
 		if (!idx) return nullptr;
 		size_t actual_index = idx - 1;
 		if (actual_index >= 1700) error("attempt to dereference invalid unit id %#x (actual index %d)", id.raw_value, actual_index);
 		unit_t* u = st.units_container.try_get(actual_index);
 		if (!u) return nullptr;
-		if (u->unit_id_generation != id.generation()) return nullptr;
+		if (u->unit_id_generation % (1u << (int_bits<T>::value - 11)) != id.generation()) return nullptr;
 		if (unit_dead(u)) return nullptr;
 		return u;
 	}
 
 	unit_id get_unit_id(const unit_t* u) const {
 		if (!u) return unit_id{};
-		return unit_id(u->index + 1, u->unit_id_generation);
+		return unit_id(u->index + 1, u->unit_id_generation % (1u << 5));
+	}
+	
+	unit_id_32 get_unit_id_32(const unit_t* u) const {
+		if (!u) return unit_id_32{};
+		return unit_id_32(u->index + 1, u->unit_id_generation % (1u << 21));
 	}
 
 	bool is_in_map_bounds(const unit_type_t* unit_type, xy pos) const {
@@ -1454,6 +1462,10 @@ struct state_functions {
 
 	bool player_position_is_visible(int owner, xy position) const {
 		return (tile_visibility(position) & (1 << owner)) != 0;
+	}
+	
+	bool player_position_is_explored(int owner, xy position) const {
+		return (tile_explored(position) & (1 << owner)) != 0;
 	}
 
 	const regions_t::region* get_region_at(xy pos) const {
@@ -12187,6 +12199,10 @@ struct state_functions {
 	uint8_t tile_visibility(xy pos) const {
 		return ~st.tiles[tile_index(pos)].visible;
 	}
+	
+	uint8_t tile_explored(xy pos) const {
+		return ~st.tiles[tile_index(pos)].explored;
+	}
 
 	int get_ground_height_at(xy pos) const {
 		size_t index = tile_index(pos);
@@ -15984,6 +16000,7 @@ struct state_functions {
 				set_secondary_order(u, get_order_type(Orders::Nothing));
 				drop_carried_items(u);
 				on_unit_deselect(u);
+				on_unit_destroy(u);
 				increment_unit_counts(u, -1);
 				if (u_completed(u)) add_completed_unit(u, -1, false);
 				st.player_units[u->owner].remove(*u);
@@ -16053,7 +16070,7 @@ struct state_functions {
 		if (!initialize_unit_type(u, unit_type, pos, owner)) return false;
 
 		new (&u->build_queue) static_vector<const unit_type_t*, 5>();
-		u->unit_id_generation = (u->unit_id_generation + 1) % (1 << 5);
+		++u->unit_id_generation;
 		u->wireframe_randomizer = lcg_rand(15) & 0xff;
 		if (ut_turret(u)) u->hp = 1_fp8;
 		else u->hp = u->unit_type->hitpoints / 10;
@@ -19088,7 +19105,7 @@ struct state_copier {
 	}
 };
 
-state copy_state(const state& st) {
+static state copy_state(const state& st) {
 	state r;
 	state_copier(st, r)();
 	return std::move(r);

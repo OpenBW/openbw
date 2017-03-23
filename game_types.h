@@ -11,21 +11,25 @@ struct sprite_t;
 struct flingy_t;
 struct unit_t;
 
-struct unit_id {
-	uint16_t raw_value = 0;
-	unit_id() = default;
-	explicit unit_id(uint16_t raw_value) : raw_value(raw_value) {}
-	explicit unit_id(size_t index, int generation) : raw_value((uint16_t)(index | generation << 11)) {}
-	bool operator==(const unit_id& n) const {
+template<typename T>
+struct unit_id_t {
+	T raw_value = 0;
+	unit_id_t() = default;
+	explicit unit_id_t(T raw_value) : raw_value(raw_value) {}
+	explicit unit_id_t(size_t index, unsigned int generation) : raw_value((T)(index | generation << 11)) {}
+	bool operator==(const unit_id_t& n) const {
 		return raw_value == n.raw_value;
 	}
 	size_t index() const {
 		return raw_value & 0x7ff;
 	}
-	int generation() const {
+	unsigned int generation() const {
 		return raw_value >> 11;
 	}
 };
+
+using unit_id = unit_id_t<uint16_t>;
+using unit_id_32 = unit_id_t<uint32_t>;
 
 struct default_link_f {
 	template<typename T>
@@ -600,7 +604,7 @@ struct unit_t: flingy_t {
 	int movement_state;
 	static_vector<const unit_type_t*, 5> build_queue;
 	fp8 energy;
-	int unit_id_generation;
+	unsigned int unit_id_generation;
 	const order_type_t* secondary_order_type;
 	int damage_overlay_state;
 	fp8 hp_construction_rate;
