@@ -168,12 +168,15 @@ public:
 	using reference = typename std::result_of<transform_F(typename std::iterator_traits<iterator_T>::reference)>::type;
 	using value_type = typename std::remove_cv<typename std::remove_const<reference>::type>::type;
 	using difference_type = typename std::iterator_traits<iterator_T>::difference_type;
-	using pointer = reference*;
+	using pointer = typename std::remove_reference<reference>::type*;
 
 	template<typename arg_iterator_T, typename arg_transform_F>
 	transform_iterator(arg_iterator_T&& ptr, arg_transform_F&& f) : ptr(std::forward<arg_iterator_T>(ptr)), f(std::forward<arg_transform_F>(f)) {}
 
 	reference operator*() const {
+		return f(*ptr);
+	}
+	reference operator*() {
 		return f(*ptr);
 	}
 	this_t& operator++() {
