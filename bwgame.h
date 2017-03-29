@@ -20544,7 +20544,7 @@ struct game_load_functions : state_functions {
 	};
 
 	void load_map_file(a_string filename, std::function<void()> setup_f = {}) {
-		load_map(data_loading::mpq_file<>(std::move(filename)));
+		load_map(data_loading::mpq_file<>(std::move(filename)), std::move(setup_f));
 	}
 
 	template<typename load_data_file_F>
