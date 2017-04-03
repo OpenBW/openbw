@@ -5030,8 +5030,8 @@ struct state_functions {
 
 	void order_Unload(unit_t* u) {
 		if (u_grounded_building(u)) {
-			for (unit_t* u : loaded_units(u)) {
-				unit_unload(u);
+			for (unit_t* n : loaded_units(u)) {
+				unit_unload(n);
 			}
 			order_done(u);
 		} else {
@@ -19105,7 +19105,7 @@ struct state_copier {
 	}
 };
 
-static state copy_state(const state& st) {
+static inline state copy_state(const state& st) {
 	state r;
 	state_copier(st, r)();
 	return std::move(r);

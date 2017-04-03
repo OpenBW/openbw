@@ -21,7 +21,7 @@ struct action_state {
 	std::array<std::array<static_vector<unit_id, 12>, 10>, 8> control_groups{};
 };
 
-static action_state copy_state(const action_state& action_st, const state& source_st, const state& dest_st) {
+static inline action_state copy_state(const action_state& action_st, const state& source_st, const state& dest_st) {
 	action_state r;
 	r.player_id = action_st.player_id;
 	r.actions_data_position = action_st.actions_data_position;
