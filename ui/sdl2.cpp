@@ -12,6 +12,9 @@
 #include <cstdlib>
 #include <memory>
 
+using bwgame::log;
+using bwgame::fatal_error;
+
 namespace native_window {
 
 std::mutex init_mut;
@@ -48,6 +51,7 @@ struct window_impl {
 	}
 
 	bool create(const char* title, int x, int y, int width, int height) {
+		if (window) fatal_error("window already created");
 		Uint32 flags = 0;
 		flags |= SDL_WINDOW_RESIZABLE;
 		window = SDL_CreateWindow(title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, flags);
@@ -140,6 +144,10 @@ struct window_impl {
 	void update_surface() {
 		SDL_UpdateWindowSurface(window);
 	}
+	
+	explicit operator bool() const {
+		return window != nullptr;
+	}
 
 };
 
@@ -184,6 +192,10 @@ bool window::get_mouse_button_state(int button) {
 
 void window::update_surface() {
 	return impl->update_surface();
+}
+
+window::operator bool() const {
+	return (bool)*impl;
 }
 
 }

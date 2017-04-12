@@ -43,6 +43,7 @@ namespace native_window {
 		bool get_key_state(int scancode);
 		bool get_mouse_button_state(int button);
 		void update_surface();
+		explicit operator bool() const;
 	};
 }
 
