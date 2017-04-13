@@ -9,6 +9,8 @@
 
 namespace bwgame {
 
+namespace ui {
+
 void log_str(a_string str);
 void fatal_error_str(a_string str);
 
@@ -26,6 +28,8 @@ void fatal_error(const char* fmt, T&&... args) {
 template<typename... T>
 void xcept(const char* fmt, T&&... args) {
 	fatal_error_str(format(fmt, std::forward<T>(args)...));
+}
+
 }
 
 }

@@ -47,7 +47,7 @@ pcx_image load_pcx_data(const data_T& data) {
 	data_loading::data_reader_le r(data.data(), data.data() + data.size());
 	auto base_r = r;
 	auto id = r.get<uint8_t>();
-	if (id != 0x0a) xcept("pcx: invalid identifier %#x", id);
+	if (id != 0x0a) error("pcx: invalid identifier %#x", id);
 	r.get<uint8_t>(); // version
 	auto encoding = r.get<uint8_t>(); // encoding
 	auto bpp = r.get<uint8_t>(); // bpp
@@ -56,10 +56,10 @@ pcx_image load_pcx_data(const data_T& data) {
 	auto last_x = r.get<uint16_t>();
 	auto last_y = r.get<uint16_t>();
 
-	if (encoding != 1) xcept("pcx: invalid encoding %#x", encoding);
-	if (bpp != 8) xcept("pcx: bpp is %d, expected 8", bpp);
+	if (encoding != 1) error("pcx: invalid encoding %#x", encoding);
+	if (bpp != 8) error("pcx: bpp is %d, expected 8", bpp);
 
-	if (offset_x != 0 || offset_y != 0) xcept("pcx: offset %d %d, expected 0 0", offset_x, offset_y);
+	if (offset_x != 0 || offset_y != 0) error("pcx: offset %d %d, expected 0 0", offset_x, offset_y);
 
 	r.skip(2 + 2 + 48 + 1);
 
@@ -79,7 +79,7 @@ pcx_image load_pcx_data(const data_T& data) {
 	r.skip(128);
 
 	auto padding = bytes_per_line * bit_planes - width;
-	if (padding != 0) xcept("pcx: padding not supported");
+	if (padding != 0) error("pcx: padding not supported");
 
 	uint8_t* dst = pcx.data.data();
 	uint8_t* dst_end = pcx.data.data() + pcx.data.size();
@@ -90,7 +90,7 @@ pcx_image load_pcx_data(const data_T& data) {
 			v &= 0x3f;
 			auto c = r.get<uint8_t>();
 			for (; v; --v) {
-				if (dst == dst_end) xcept("pcx: failed to decode");
+				if (dst == dst_end) error("pcx: failed to decode");
 				*dst++ = c;
 			}
 		} else {
@@ -157,24 +157,24 @@ void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
 	};
 	
 	auto tunit_pcx = load_pcx_file("game/tunit.pcx");
-	if (tunit_pcx.width != 128 || tunit_pcx.height != 1) xcept("tunit.pcx dimensions are %dx%d (128x1 required)", tunit_pcx.width, tunit_pcx.height);
+	if (tunit_pcx.width != 128 || tunit_pcx.height != 1) error("tunit.pcx dimensions are %dx%d (128x1 required)", tunit_pcx.width, tunit_pcx.height);
 	for (size_t i = 0; i != 16; ++i) {
 		for (size_t i2 = 0; i2 != 8; ++i2) {
 			img.player_unit_colors[i][i2] = tunit_pcx.data[i * 8 + i2];
 		}
 	}
 	auto tminimap_pcx = load_pcx_file("game/tminimap.pcx");
-	if (tminimap_pcx.width != 16 || tminimap_pcx.height != 1) xcept("tminimap.pcx dimensions are %dx%d (16x1 required)", tminimap_pcx.width, tminimap_pcx.height);
+	if (tminimap_pcx.width != 16 || tminimap_pcx.height != 1) error("tminimap.pcx dimensions are %dx%d (16x1 required)", tminimap_pcx.width, tminimap_pcx.height);
 	for (size_t i = 0; i != 16; ++i) {
 		img.player_minimap_colors[i] = tminimap_pcx.data[i];
 	}
 	auto tselect_pcx = load_pcx_file("game/tselect.pcx");
-	if (tselect_pcx.width != 24 || tselect_pcx.height != 1) xcept("tselect.pcx dimensions are %dx%d (24x1 required)", tselect_pcx.width, tselect_pcx.height);
+	if (tselect_pcx.width != 24 || tselect_pcx.height != 1) error("tselect.pcx dimensions are %dx%d (24x1 required)", tselect_pcx.width, tselect_pcx.height);
 	for (size_t i = 0; i != 24; ++i) {
 		img.selection_colors[i] = tselect_pcx.data[i];
 	}
 	auto thpbar_pcx = load_pcx_file("game/thpbar.pcx");
-	if (thpbar_pcx.width != 19 || thpbar_pcx.height != 1) xcept("thpbar.pcx dimensions are %dx%d (19x1 required)", thpbar_pcx.width, thpbar_pcx.height);
+	if (thpbar_pcx.width != 19 || thpbar_pcx.height != 1) error("thpbar.pcx dimensions are %dx%d (19x1 required)", thpbar_pcx.width, thpbar_pcx.height);
 	for (size_t i = 0; i != 19; ++i) {
 		img.hp_bar_colors[i] = thpbar_pcx.data[i];
 	}
@@ -233,7 +233,7 @@ void load_tileset_image_data(tileset_image_data& img, size_t tileset_index, load
 	};
 
 	img.dark_pcx = load_pcx_file(format("Tileset/%s/dark.pcx", tileset_name));
-	if (img.dark_pcx.width != 256 || img.dark_pcx.height != 32) xcept("invalid dark.pcx");
+	if (img.dark_pcx.width != 256 || img.dark_pcx.height != 32) error("invalid dark.pcx");
 	for (size_t x = 0; x != 256; ++x) {
 		img.dark_pcx.data[256 * 31 + x] = (uint8_t)x;
 	}
@@ -243,7 +243,7 @@ void load_tileset_image_data(tileset_image_data& img, size_t tileset_index, load
 		img.light_pcx[i] = load_pcx_file(format("Tileset/%s/%s.pcx", tileset_name, light_names[i]));
 	}
 	
-	if (img.wpe.size() != 256 * 4) xcept("wpe size invalid (%d)", img.wpe.size());
+	if (img.wpe.size() != 256 * 4) error("wpe size invalid (%d)", img.wpe.size());
 	
 	auto get_nearest_color = [&](int r, int g, int b) {
 		size_t best_index = -1;
@@ -271,282 +271,6 @@ void load_tileset_image_data(tileset_image_data& img, size_t tileset_index, load
 	}
 	
 }
-
-//template<typename pixel_T, typename unit_T, bool templ_scale>
-//struct draw_info {
-//	using pixel_t = pixel_T;
-//	using unit_t = unit_T;
-//	static const bool scale = templ_scale;
-	
-//	pixel_T* dst;
-//	size_t pitch;
-	
-//	size_t dst_width;
-//	size_t dst_height;
-//	size_t next_y_pitch;
-	
-//	size_t src_offset_x;
-//	size_t src_offset_y;
-//	size_t src_width;
-//	size_t src_height;
-	
-//	unit_T x_unit;
-//	unit_T y_unit;
-	
-//	void set_dst(pixel_T* dst, size_t pitch, size_t width, size_t height) {
-//		this->dst = dst;
-//		this->pitch = pitch;
-//		dst_width = width;
-//		dst_height = height;
-//		next_y_pitch = pitch - width;
-//	}
-	
-//	void set_src(size_t offset_x, size_t offset_y, size_t width, size_t height) {
-//		src_offset_x = offset_x;
-//		src_offset_y = offset_y;
-//		src_width = width;
-//		src_height = height;
-		
-//		x_unit = unit_T::integer(src_width) / dst_width;
-//		y_unit = unit_T::integer(src_height) / dst_height;
-//	}
-	
-//	auto state() {
-//		return draw_state<draw_info>(*this);
-//	}
-//};
-
-//template<typename i_T>
-//struct draw_state {
-//	const i_T& i;
-//	draw_state(const i_T& i) : i(i) {}
-	
-//	auto* dst = i.dst;
-//};
-
-//using image_rect = rect_t<size_t>;
-
-struct shader_copy {
-	template<typename d_T, typename s_T>
-	void operator()(d_T& d, const s_T& s) {
-		*d = *s;
-	}
-};
-
-template<typename dst_T, typename src_T, typename shader_T = shader_copy>
-struct blitter {
-	dst_T& dst;
-	const src_T& src;
-	shader_T shader;
-	blitter(dst_T& dst, const src_T& src) {}
-	void operator()() {
-		if (src.width == dst.width && src.height == dst.height) copy();
-		else stretch();
-	}
-	void copy() {
-		size_t dst_skip = dst.pitch - dst.width;
-		size_t src_skip = src.pitch - src.width;
-		auto d = *dst;
-		auto s = *src;
-		for (size_t y = dst.height; y--;) {
-			for (size_t x = dst.width; x--;) {
-				shader(d, s);
-				++d;
-				++s;
-			}
-			d += dst_skip;
-			s += src_skip;
-		}
-	}
-	void stretch() {
-		xcept("stretch!");
-	}
-};
-
-struct rescaler_none {
-	bool up_x() {
-		return false;
-	}
-	bool down_x() {
-		return false;
-	}
-	bool up_y() {
-		return false;
-	}
-	bool down_y() {
-		return false;
-	}
-};
-
-struct rescaler_ufp16 {
-	ufp16 x{};
-	ufp16 y{};
-	ufp16 x_step;
-	ufp16 y_step;
-	rescaler_ufp16(ufp16 x_step, ufp16 y_step) : x(ufp16::integer(1) + x_step), y(ufp16::integer(1) + y_step), x_step(x_step), y_step(y_step) {
-		if (x_step != ufp16::integer(1)) xcept("x_step is %d\n", x_step.raw_value);
-		if (y_step != ufp16::integer(1)) xcept("y_step is %d\n", y_step.raw_value);
-	}
-	bool up_x() {
-		x += x_step;
-		return x < ufp16::integer(1);
-	}
-	bool down_x() {
-		x -= ufp16::integer(1);
-		return x >= ufp16::integer(1) / 2u;
-	}
-	bool up_y() {
-		y += y_step;
-		return y < ufp16::integer(1);
-	}
-	bool down_y() {
-		y -= ufp16::integer(1);
-		return y >= ufp16::integer(1) / 2u;
-	}
-};
-
-template<typename dst_T, typename src_T>
-void apply_blit_rescaler(dst_T& dst, const src_T& src) {
-	if (dst.width == src.width && dst.height == src.height) {
-		rescaler_none s;
-		src.blit(dst, s);
-	} else {
-		log("rescale %d %d -> %d %d\n", src.width, src.height, dst.width, dst.height);
-		rescaler_ufp16 s(ufp16::integer(dst.width) / src.width, ufp16::integer(dst.height) / src.height);
-		src.blit(dst, s);
-	}
-}
-
-struct minitile_bitmap {
-	const size_t width = 8;
-	const size_t height = 8;
-	
-	const vr4_entry::bitmap_t* const bitmap;
-	minitile_bitmap(const vr4_entry::bitmap_t* bitmap) : bitmap(bitmap) {}
-	
-	template<typename dst_T>
-	void blit(dst_T& dst) const {
-		apply_blit_rescaler(dst, *this);
-	}
-	template<typename dst_T, typename rescaler_T>
-	void blit_line(dst_T& dst, rescaler_T& rescaler, const vr4_entry::bitmap_t*& bitmap) const {
-		for (size_t iv = 0; iv != 8 / sizeof(vr4_entry::bitmap_t); ++iv) {
-			for (size_t b = 0; b != sizeof(vr4_entry::bitmap_t); ++b) {
-				if (rescaler.down_x()) {
-					log("down\n");
-					continue;
-				}
-				do {
-					dst.write((uint8_t)(*bitmap >> (8 * b)));
-					dst.inc_x();
-				} while (rescaler.up_x());
-			}
-			++bitmap;
-		}
-	}
-	void skip_line(const vr4_entry::bitmap_t*& bitmap) const {
-		bitmap += 8 / sizeof(vr4_entry::bitmap_t);
-	}
-	void backskip_line(const vr4_entry::bitmap_t*& bitmap) const {
-		bitmap -= 8 / sizeof(vr4_entry::bitmap_t);
-	}
-};
-
-struct tile_image {
-	tileset_image_data& img;
-	size_t megatile_index;
-	tile_image(tileset_image_data& img, size_t megatile_index) : img(img), megatile_index(megatile_index) {}
-	
-	const size_t width = 32;
-	const size_t height = 32;
-	
-	template<typename dst_T>
-	void blit(dst_T& dst) const {
-		apply_blit_rescaler(dst, *this);
-	}
-	template<typename dst_T, typename rescaler_T>
-	void blit(dst_T& dst, rescaler_T rescaler) const {
-		auto* images = &img.vx4.at(megatile_index).images[0];
-		for (size_t image_iy = 0; image_iy != 4; ++image_iy) {
-			std::array<const vr4_entry::bitmap_t*, 4> bitmaps;
-			for (size_t image_ix = 0; image_ix != 4; ++image_ix) {
-				auto image_index = *images;
-				bool inverted = (image_index & 1) == 1;
-				bitmaps[image_ix] = inverted ? &img.vr4.at(image_index / 2).inverted_bitmap[0] : &img.vr4.at(image_index / 2).bitmap[0];
-				++images;
-			}
-			for (size_t y = 0; y != 8; ++y) {
-				if (rescaler.down_y()) {
-					for (size_t image_ix = 0; image_ix != 4; ++image_ix) {
-						minitile_bitmap bm(nullptr);
-						bm.skip_line(bitmaps[image_ix]);
-					}
-					continue;
-				}
-				for (size_t image_ix = 0; image_ix != 4; ++image_ix) {
-					minitile_bitmap bm(nullptr);
-					while (true) {
-						bm.blit_line(dst, rescaler, bitmaps[image_ix]);
-						if (!rescaler.up_y()) break;
-						bm.backskip_line(bitmaps[image_ix]);
-					}
-				}
-				dst.next_y();
-			}
-		}
-	}
-};
-
-struct indexed_output {
-	uint8_t* ptr;
-	const size_t pitch;
-	const size_t width;
-	const size_t height;
-	const size_t skip;
-	indexed_output(uint8_t* ptr, size_t pitch, size_t width, size_t height) : ptr(ptr), pitch(pitch), width(width), height(height), skip(pitch - width) {}
-	void write(uint8_t v) {
-		*ptr = v;
-	}
-	void inc_x() {
-		++ptr;
-	}
-	void next_y() {
-		ptr += skip;
-	}
-};
-
-template<typename base_T>
-struct bounds_checked_output {
-	base_T& base;
-	size_t zero_x;
-	size_t x;
-	size_t y;
-	const size_t width;
-	const size_t height;
-	const size_t end_x;
-	const size_t end_y;
-	bounds_checked_output(base_T& base, size_t offset_x, size_t offset_y, size_t width, size_t height) : base(base), width(width), height(height), end_x(offset_x + base.width), end_y(offset_y + base.height) {
-		x = zero_x = (size_t)(0 - offset_x);
-		y = (size_t)(0 - offset_y);
-		log("initial x is %d\n", x);
-	}
-	void write(uint8_t v) {
-		if (x >= end_x || y >= end_y) return;
-		base.write(v);
-	}
-	void inc_x() {
-		bool inc = x < end_x && y < end_y;
-		++x;
-		if (inc) base.inc_x();
-	}
-	void next_y() {
-		bool next = y < end_y;
-		++y;
-		x -= width;
-		if (x != zero_x) xcept("waaa %d vs %d (width %d)\n", x, zero_x, width);
-		if (next) base.next_y();
-	}
-};
 
 template<bool bounds_check>
 void draw_tile(tileset_image_data& img, size_t megatile_index, uint8_t* dst, size_t pitch, size_t offset_x, size_t offset_y, size_t width, size_t height) {
@@ -849,7 +573,7 @@ struct ui_functions: ui_util_functions {
 	a_vector<a_string> sound_filenames;
 	
 	const sound_type_t* get_sound_type(Sounds id) const {
-		if ((size_t)id >= (size_t)Sounds::None) xcept("invalid sound id %d", (size_t)id);
+		if ((size_t)id >= (size_t)Sounds::None) error("invalid sound id %d", (size_t)id);
 		return &sound_types.vec[(size_t)id];
 	}
 	
@@ -1242,7 +966,7 @@ struct ui_functions: ui_util_functions {
 				return ptr[old_value];
 			};
 			draw_frame(frame, i_flag(image, image_t::flag_horizontally_flipped), dst, data_pitch, offset_x, offset_y, width, height, glow);
-		} else xcept("don't know how to draw image modifier %d", image->modifier);
+		} else error("don't know how to draw image modifier %d", image->modifier);
 
 	}
 	
@@ -1723,7 +1447,7 @@ struct ui_functions: ui_util_functions {
 			new_images_index_loaded = true;
 			async_read_file("index.txt", [this](const uint8_t* data, size_t len) {
 				if (!data) {
-					log("failed to load index.txt :(\n");
+					ui::log("failed to load index.txt :(\n");
 					return;
 				}
 				char* c = (char*)data;
@@ -1739,7 +1463,7 @@ struct ui_functions: ui_util_functions {
 					}
 					if (!fn.empty() && fn.front() == '/') fn.erase(fn.begin());
 					if (!fn.empty() && fn.back() == '/') fn.erase(std::prev(fn.end()));
-					log("index entry '%s'\n", fn);
+					ui::log("index entry '%s'\n", fn);
 					new_images_index.insert(std::move(fn));
 				}
 			});
@@ -1761,20 +1485,20 @@ struct ui_functions: ui_util_functions {
 			}
 			if (!fn.empty() && fn.front() == '/') fn.erase(fn.begin());
 			fn = "unit/" + fn;
-			log("checking '%s' (image %d, grp %u)\n", fn, (int)image->image_type->id, index);
+			ui::log("checking '%s' (image %d, grp %u)\n", fn, (int)image->image_type->id, index);
 			if (new_images_index.count(fn)) {
 				size_t frames = image->grp->frames.size();
 				if (new_images.size() <= index) new_images.resize(index + 1);
 				new_images[index].resize(frames);
 				if (new_images_flipped.size() <= index) new_images_flipped.resize(index + 1);
 				new_images_flipped[index].resize(frames);
-				log("loading %d frames...\n", frames);
+				ui::log("loading %d frames...\n", frames);
 				auto frames_left = std::make_shared<size_t>(frames);
 				for (size_t i = 0; i != frames; ++i) {
 					a_string frame_fn = format("%s/%02u.png", fn, i);
 					async_read_file(frame_fn, [this, frame_fn, index, i, frames_left](const uint8_t* data, size_t len) {
 						if (!data) {
-							log("failed to load '%s'\n", frame_fn);
+							ui::log("failed to load '%s'\n", frame_fn);
 							return;
 						}
 						new_images.at(index).at(i) = native_window_drawing::load_image(data, len);
@@ -1782,13 +1506,13 @@ struct ui_functions: ui_util_functions {
 						if (*frames_left == 0) {
 							grp_new_image_state.at(index) = 1;
 							
-							log("grp %d successfully loaded %d frames\n", index, new_images.at(index).size());
+							ui::log("grp %d successfully loaded %d frames\n", index, new_images.at(index).size());
 						}
 					});
 				}
 			}
 		}
-		//log("index %d state %d\n", index, state);
+		//ui::log("index %d state %d\n", index, state);
 		return state == 1;
 	}
 	
@@ -1818,7 +1542,7 @@ struct ui_functions: ui_util_functions {
 		
 		auto* surface = get_new_image_surface(image, i_flag(image, image_t::flag_horizontally_flipped));
 		if (!surface) {
-			log("ERROR: new image %d (grp %d) frame %d does not exist\n", (int)image->image_type->id, image->grp - global_st.grps.data(), image->frame_index);
+			ui::log("ERROR: new image %d (grp %d) frame %d does not exist\n", (int)image->image_type->id, image->grp - global_st.grps.data(), image->frame_index);
 			return;
 		}
 		
@@ -1964,7 +1688,7 @@ struct ui_functions: ui_util_functions {
 		auto now = clock.now();
 		
 		if (now - last_fps >= std::chrono::seconds(1)) {
-			//log("draw fps: %g\n", fps_counter / std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1>>>(now - last_fps).count());
+			//ui::log("draw fps: %g\n", fps_counter / std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1>>>(now - last_fps).count());
 			last_fps = now;
 			fps_counter = 0;
 		}
@@ -2271,7 +1995,7 @@ struct ui_functions: ui_util_functions {
 		if (!palette) palette = native_window_drawing::new_palette();
 		
 		native_window_drawing::color palette_colors[256];
-		if (tileset_img.wpe.size() != 256 * 4) xcept("wpe size invalid (%d)", tileset_img.wpe.size());
+		if (tileset_img.wpe.size() != 256 * 4) error("wpe size invalid (%d)", tileset_img.wpe.size());
 		for (size_t i = 0; i != 256; ++i) {
 			palette_colors[i].r = tileset_img.wpe[4 * i + 0];
 			palette_colors[i].g = tileset_img.wpe[4 * i + 1];

@@ -17,6 +17,8 @@ FILE* log_file = nullptr;
 
 namespace bwgame {
 
+namespace ui {
+
 void log_str(a_string str) {
 	fwrite(str.data(), str.size(), 1, stdout);
 	fflush(stdout);
@@ -34,6 +36,8 @@ void fatal_error_str(a_string str) {
 #endif
 	log("fatal error: %s\n", str);
 	std::terminate();
+}
+
 }
 
 }
