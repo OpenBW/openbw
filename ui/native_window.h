@@ -1,4 +1,5 @@
 #ifndef NATIVE_WINDOW_H
+#define NATIVE_WINDOW_H
 
 #include <memory>
 
