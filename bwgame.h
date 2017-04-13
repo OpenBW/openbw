@@ -11,6 +11,7 @@
 #include <utility>
 #include <cstdlib>
 #include <cmath>
+#include <random>
 
 namespace bwgame {
 
@@ -12857,7 +12858,7 @@ struct state_functions {
 			unit_t* u = &*i++;
 			if (u->cloak_counter == 0) {
 				st.cloaked_units.remove(*u);
-				u->cloaked_unit_link = {};
+				u->cloaked_unit_link = {nullptr, nullptr};
 				u_unset_status_flag(u, unit_t::status_flag_passively_cloaked);
 				decloak_unit(u);
 			} else {
@@ -15721,7 +15722,7 @@ struct state_functions {
 		if (unit_is(u, UnitTypes::Protoss_Pylon)) {
 			if (building_union_used) error("building union already used");
 			building_union_used = true;
-			u->building.pylon.psionic_matrix_link = {};
+			u->building.pylon.psionic_matrix_link = {nullptr, nullptr};
 			u->building.pylon.psi_field_sprite = nullptr;
 		}
 		bool unit_union_used = false;
@@ -15755,7 +15756,7 @@ struct state_functions {
 			if (unit_union_used) error("unit union already used");
 			unit_union_used = true;
 			u->fighter.parent = nullptr;
-			u->fighter.fighter_link = {};
+			u->fighter.fighter_link = {nullptr, nullptr};
 			u->fighter.is_outside = false;
 		}
 
@@ -15812,7 +15813,7 @@ struct state_functions {
 			set_remove_timer(n, lcg_rand(39, 15, 45));
 			u->carrier.outside_units.remove(*n);
 			--u->carrier.outside_count;
-			n->fighter.fighter_link = {};
+			n->fighter.fighter_link = {nullptr, nullptr};
 		}
 	}
 
@@ -15829,7 +15830,7 @@ struct state_functions {
 				n->fighter.parent = nullptr;
 				u->reaver.outside_units.remove(*n);
 				--u->reaver.outside_count;
-				n->fighter.fighter_link = {};
+				n->fighter.fighter_link = {nullptr, nullptr};
 			}
 		} else if (unit_is_ghost(u)) {
 			if (u->ghost.nuke_dot) {
@@ -15869,7 +15870,7 @@ struct state_functions {
 						}
 					}
 					u->fighter.parent = nullptr;
-					u->fighter.fighter_link = {};
+					u->fighter.fighter_link = {nullptr, nullptr};
 				}
 				break;
 			case UnitTypes::Terran_Nuclear_Silo:
@@ -15887,7 +15888,7 @@ struct state_functions {
 			case UnitTypes::Protoss_Pylon:
 				if (u->building.pylon.psionic_matrix_link.first) {
 					st.psionic_matrix_units.remove(*u);
-					u->building.pylon.psionic_matrix_link = {};
+					u->building.pylon.psionic_matrix_link = {nullptr, nullptr};
 				}
 				st.update_psionic_matrix = true;
 				if (u->building.pylon.psi_field_sprite) {
@@ -15963,7 +15964,7 @@ struct state_functions {
 					if (u->cloak_counter) u->cloak_counter = 0;
 					if (u->cloaked_unit_link.first) {
 						st.cloaked_units.remove(*u);
-						u->cloaked_unit_link = {};
+						u->cloaked_unit_link = {nullptr, nullptr};
 					}
 					if (u_passively_cloaked(u)) u_unset_status_flag(u, unit_t::status_flag_passively_cloaked);
 					if (u_requires_detector(u)) {
