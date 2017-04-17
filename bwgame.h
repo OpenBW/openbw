@@ -209,6 +209,14 @@ struct state_base_copyable {
 	std::array<type_indexed_array<int, UnitTypes>, 12> unit_counts;
 	std::array<type_indexed_array<int, UnitTypes>, 12> completed_unit_counts;
 
+	std::array<int, 12> factory_counts;
+	std::array<int, 12> building_counts;
+	std::array<int, 12> non_building_counts;
+
+	std::array<int, 12> completed_factory_counts;
+	std::array<int, 12> completed_building_counts;
+	std::array<int, 12> completed_non_building_counts;
+
 	std::array<int, 12> total_buildings_ever_completed;
 	std::array<int, 12> total_non_buildings_ever_completed;
 
@@ -15278,6 +15286,14 @@ struct state_functions {
 		} else if (race == race_t::protoss) {
 			st.supply_used[u->owner][2] += supply_required * count;
 		}
+		if (u->unit_type->group_flags & GroupFlags::Factory) st.factory_counts[u->owner] += count;
+		if (u->unit_type->group_flags & GroupFlags::Men) {
+			st.non_building_counts[u->owner] += count;
+		} else if (u->unit_type->group_flags & GroupFlags::Building) {
+			st.building_counts[u->owner] += count;
+		} else if (unit_is_egg(u)) {
+			st.non_building_counts[u->owner] += count;
+		}
 		if (st.unit_counts[u->owner][u->unit_type->id] < 0) st.unit_counts[u->owner][u->unit_type->id] = 0;
 	}
 
@@ -16531,6 +16547,15 @@ struct state_functions {
 		auto race = unit_race(u);
 		if (race != race_t::none) {
 			st.supply_available[u->owner][(size_t)race] += u->unit_type->supply_provided * count;
+		}
+
+		if (u->unit_type->group_flags & GroupFlags::Factory) {
+			st.completed_factory_counts[u->owner] += count;
+		}
+		if (u->unit_type->group_flags & GroupFlags::Men) {
+			st.completed_non_building_counts[u->owner] += count;
+		} else if (u->unit_type->group_flags & GroupFlags::Building) {
+			st.completed_building_counts[u->owner] += count;
 		}
 
 		if (increment_score) {
@@ -19244,6 +19269,14 @@ struct game_load_functions : state_functions {
 
 		st.unit_counts = {};
 		st.completed_unit_counts = {};
+
+		st.factory_counts = {};
+		st.building_counts = {};
+		st.non_building_counts = {};
+
+		st.completed_factory_counts = {};
+		st.completed_building_counts = {};
+		st.completed_non_building_counts = {};
 
 		st.total_buildings_ever_completed = {};
 		st.total_non_buildings_ever_completed = {};
