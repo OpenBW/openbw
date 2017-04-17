@@ -951,9 +951,14 @@ enum class EventType {
 };
 
 class Event {
+	EventType id = EventType::None;
+	Unit unit = nullptr;
+	bool is_winner = false;
 public:
-	EventType id;
-	Unit unit;
+	Event() = default;
+	Event(EventType id) : id(id) {}
+	Event(EventType id, Unit unit) : id(id), unit(unit) {}
+	Event(EventType id, bool is_winner) : id(id), is_winner(is_winner) {}
 	const EventType getType() const {
 		return id;
 	}
@@ -961,7 +966,7 @@ public:
 		return unit;
 	}
 	bool isWinner() const {
-		return true;
+		return is_winner;
 	}
 };
 

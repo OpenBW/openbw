@@ -13,7 +13,7 @@
 
 using bwgame::error;
 
-#ifdef OPENBW_ENABLE_UI
+//#ifdef OPENBW_ENABLE_UI
 namespace bwgame {
 namespace ui {
 void log_str(a_string str) {
@@ -26,7 +26,7 @@ void fatal_error_str(a_string str){
 }
 }
 }
-#endif
+//#endif
 
 namespace OpenBWAPI {
 
@@ -161,7 +161,7 @@ Client BWAPIClient(g);
 
 static std::string read_ini(const std::string& filename, const std::string& section, const std::string& key) {
 	FILE* f = fopen(filename.c_str(), "rb");
-	if (!f) return{};
+	if (!f) return {};
 	std::vector<char> data;
 	fseek(f, 0, SEEK_END);
 	long filesize = ftell(f);
@@ -1077,6 +1077,16 @@ struct Game_impl {
 		enemy_player_race = race;
 	}
 
+	bool game_is_won() {
+		if (!game_type_melee) return false;
+		return st.building_counts.at(funcs.enemy_player_id) == 0;
+	}
+
+	bool game_is_lost() {
+		if (!game_type_melee) return false;
+		return st.building_counts.at(funcs.local_player_id) == 0;
+	}
+
 	void update() {
 		events.clear();
 		if (!is_in_game) {
@@ -1085,15 +1095,17 @@ struct Game_impl {
 				start();
 			}
 
+			funcs.reset_bwapi();
+
 			load_map();
 			is_in_game = true;
 			events.push_back({EventType::MatchStart});
 			return;
 		}
 
-		if (left_game) {
+		if (left_game || game_is_won() || game_is_lost()) {
 			left_game = false;
-			events.push_back({EventType::MatchEnd});
+			events.push_back({EventType::MatchEnd, game_is_won()});
 
 			is_in_game = false;
 			return;
@@ -1159,15 +1171,12 @@ void Game::enableFlag(Flag flag) {
 }
 
 void Game::setLocalSpeed(int speed) {
-
 }
 
 void Game::setGUI(bool enable) {
-
 }
 
 void Game::setFrameSkip(int frameskip) {
-
 }
 
 void Game::setCommandOptimizationLevel(int level) {
