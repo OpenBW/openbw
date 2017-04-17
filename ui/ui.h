@@ -1877,6 +1877,10 @@ struct ui_functions: ui_util_functions {
 			
 			indexed_surface->set_blend_mode(native_window_drawing::blend_mode::none);
 			rgba_surface->set_blend_mode(native_window_drawing::blend_mode::none);
+			rgba_surface->set_alpha(0);
+
+			window_surface->set_blend_mode(native_window_drawing::blend_mode::none);
+			window_surface->set_alpha(0);
 		}
 		
 		auto input_poll_speed = std::chrono::milliseconds(12);
@@ -1972,7 +1976,7 @@ struct ui_functions: ui_util_functions {
 			fseek(f, 0, SEEK_END);
 			data.resize(ftell(f));
 			fseek(f, 0, SEEK_SET);
-			if (fread(data.data(), 1, data.size(), f));
+			data.resize(fread(data.data(), 1, data.size(), f));
 			fclose(f);
 			cb(data.data(), data.size());
 		}
