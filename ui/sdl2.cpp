@@ -7,20 +7,17 @@
 #include "SDL_image.h"
 #include "SDL_mixer.h"
 
-#include <mutex>
 #include <array>
 #include <cstdlib>
 #include <memory>
 
-using bwgame::log;
-using bwgame::fatal_error;
+using bwgame::ui::log;
+using bwgame::ui::fatal_error;
 
 namespace native_window {
 
-std::mutex init_mut;
 bool sdl_initialized = false;
 void sdl_init() {
-	std::lock_guard<std::mutex> l(init_mut);
 	if (!sdl_initialized) {
 		IMG_Init(IMG_INIT_PNG);
 		if (SDL_Init(SDL_INIT_VIDEO) == 0) {
@@ -246,8 +243,12 @@ struct sdl_surface: surface {
 	}
 	virtual void blit(surface* dst, int x, int y) override {
 		auto* s = ((sdl_surface*)dst)->surf;
-		SDL_Rect r{x, y, s->w, s->h};
-		SDL_BlitSurface(surf, nullptr, s, &r);
+		if (x == 0 && y == 0) {
+			SDL_BlitSurface(surf, nullptr, s, nullptr);
+		} else {
+			SDL_Rect r{ x, y, s->w, s->h };
+			SDL_BlitSurface(surf, nullptr, s, &r);
+		}
 	}
 	virtual void blit_scaled(surface* dst, int x, int y, int w, int h) override {
 		auto* s = ((sdl_surface*)dst)->surf;
@@ -337,9 +338,7 @@ bool initialized = false;
 int frequency = 0;
 int channels = 64;
 
-std::mutex init_mut;
 void init() {
-	std::lock_guard<std::mutex> l(init_mut);
 	if (initialized) return;
 	initialized = true;
 	Mix_Init(0);
