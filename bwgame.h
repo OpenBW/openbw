@@ -11,7 +11,7 @@
 #include <utility>
 #include <cstdlib>
 #include <cmath>
-#include <random>
+#include <functional>
 
 namespace bwgame {
 
