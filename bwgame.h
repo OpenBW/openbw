@@ -312,7 +312,8 @@ struct state_base_non_copyable {
 	a_vector<unit_finder_entry> unit_finder_x;
 	a_vector<unit_finder_entry> unit_finder_y;
 
-	const unit_t* consider_collision_with_unit_bug = nullptr;
+	const unit_t* consider_collision_with_unit_bug;
+	const unit_t* prev_bullet_source_unit;
 };
 
 struct state : state_base_copyable, state_base_non_copyable {
@@ -19128,6 +19129,7 @@ struct state_copier {
 		for (auto& v : r.unit_finder_y) remap_unit(v.u);
 
 		remap_unit(r.consider_collision_with_unit_bug);
+		remap_unit(r.prev_bullet_source_unit);
 	}
 };
 
@@ -19378,6 +19380,7 @@ struct game_load_functions : state_functions {
 		st.repulse_field.resize(game_st.repulse_field_width * game_st.repulse_field_height);
 
 		st.prev_bullet_source_unit = nullptr;
+		st.consider_collision_with_unit_bug = nullptr;
 
 		st.current_minerals = {};
 		st.current_gas = {};
