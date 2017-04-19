@@ -181,6 +181,10 @@ struct trigger {
 };
 
 struct running_trigger {
+	struct action {
+		int flags = 0;
+	};
+	std::array<action, 64> actions;
 	const trigger* t = nullptr;
 	int flags = 0;
 	size_t current_action_index = 0;

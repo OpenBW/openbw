@@ -242,6 +242,8 @@ struct state_base_copyable {
 
 	int trigger_timer;
 	std::array<a_vector<running_trigger>, 8> running_triggers;
+	std::array<int, 12> trigger_wait_timers;
+	std::array<bool, 12> trigger_waiting;
 
 	size_t active_orders_size;
 	size_t active_bullets_size;
@@ -12994,6 +12996,22 @@ struct state_functions {
 	}
 
 	void process_triggers() {
+
+		int timer_step = 42;
+
+		for (size_t i = 0; i != 12; ++i) {
+			if (!st.trigger_waiting[i]) continue;
+			auto& t = st.trigger_wait_timers[i];
+			if (t == -1) continue;
+			if (t < timer_step) {
+				t = 0;
+				st.trigger_waiting[i] = false;
+				st.trigger_timer = 0;
+			} else {
+				t -= timer_step;
+			}
+		}
+
 		if (st.trigger_timer) {
 			--st.trigger_timer;
 			return;
@@ -18735,11 +18753,22 @@ struct state_functions {
 		return true;
 	}
 
-	void execute_trigger_action(int owner, running_trigger& rt, const trigger::action& a) {
+	bool execute_trigger_action(int owner, running_trigger& rt, running_trigger::action& ra, const trigger::action& a) {
 		switch (a.type) {
 		case 3: // preserve trigger
 			rt.flags |= 4;
 			break;
+		case 4: // wait
+			if (st.trigger_waiting[owner]) return false;
+			if (ra.flags & 1) {
+				ra.flags &= ~1;
+				return true;
+			}
+			if (rt.flags & 0x10) return true;
+			st.trigger_waiting[owner] = true;
+			st.trigger_wait_timers[owner] = a.time_n;
+			ra.flags |= 1;
+			return true;
 		case 15:
 			switch (a.group2_n) {
 			case 0x3069562b:
@@ -18757,7 +18786,6 @@ struct state_functions {
 			case 0x3469562b:
 				st.shared_vision[4] |= 1 << owner;
 				break;
-			case 0x3569562b:
 				st.shared_vision[5] |= 1 << owner;
 				break;
 			case 0x3669562b:
@@ -18769,7 +18797,7 @@ struct state_functions {
 			default:
 				error("unknown ai script");
 			}
-			break;
+			return true;
 		case 22: // kill unit
 			for (int p : trigger_players(owner, a.group_n)) {
 				int uid = a.extra_n;
@@ -18791,7 +18819,7 @@ struct state_functions {
 					}
 				}
 			}
-			break;
+			return true;
 		case 24: // remove unit
 			for (int p : trigger_players(owner, a.group_n)) {
 				int uid = a.extra_n;
@@ -18817,7 +18845,7 @@ struct state_functions {
 					kill_unit(u);
 				}
 			}
-			break;
+			return true;
 		case 25: // remove unit at location
 			//for (int p : trigger_players(owner, a.group_n)) {
 			if (true) {
@@ -18858,7 +18886,7 @@ struct state_functions {
 					proc(u);
 				}
 			}
-			break;
+			return true;
 		case 26:
 			if (a.group_n == 13) {
 				if (a.num_n == 7) {
@@ -18890,7 +18918,7 @@ struct state_functions {
 					}
 				}
 			} else error("unknown group_n %d", a.group_n);
-			break;
+			return true;
 		case 44: // create unit
 			for (int p : trigger_players(owner, a.group_n)) {
 				const unit_type_t* ut = get_unit_type((UnitTypes)a.extra_n);
@@ -18901,7 +18929,7 @@ struct state_functions {
 					trigger_create_unit(ut, pos, p);
 				}
 			}
-			break;
+			return true;
 		case 46: // order
 			for (unit_t* u : find_units(game_st.locations.at(a.location - 1).area)) {
 				if (!trigger_players_pred(owner, a.group_n, u->owner)) continue;
@@ -18935,9 +18963,10 @@ struct state_functions {
 					set_unit_order(u, order, target_pos);
 				}
 			}
-			break;
+			return true;
 		default:
 			error("unknown trigger action %d", a.type);
+			return false;
 		}
 	}
 
@@ -18948,7 +18977,7 @@ struct state_functions {
 			auto& a = t.actions[index];
 			if (a.flags & 2) continue;
 			if (a.type == 0) index = 63;
-			else execute_trigger_action(owner, rt, a);
+			else if (!execute_trigger_action(owner, rt, rt.actions[index], a)) break;
 		}
 		rt.current_action_index = index;
 		if (index == 64) {
@@ -19615,6 +19644,8 @@ struct game_load_functions : state_functions {
 
 		st.trigger_timer = 1;
 		st.running_triggers = {};
+		st.trigger_wait_timers = {};
+		st.trigger_waiting = {};
 
 		int max_unit_width = 0;
 		int max_unit_height = 0;
