@@ -180,6 +180,18 @@ struct trigger {
 	std::array<bool, 28> enabled;
 };
 
+struct running_trigger {
+	const trigger* t = nullptr;
+	int flags = 0;
+	size_t current_action_index = 0;
+};
+
+struct location {
+	rect area;
+	a_string name;
+	int elevation_flags;
+};
+
 struct cv5_entry {
 	uint16_t flags;
 	std::array<uint16_t, 16> mega_tile_index;

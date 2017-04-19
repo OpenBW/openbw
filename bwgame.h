@@ -78,6 +78,8 @@ static const bool psi_field_mask[5][8] = {
 	{ 1, 1, 1, 0, 0, 0, 0, 0 }
 };
 
+static const std::array<int, 12> all_player_slots = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11};
+
 template<typename T>
 struct autocast {
 	T val;
@@ -184,6 +186,7 @@ struct game_state {
 	regions_t regions;
 
 	a_vector<trigger> triggers;
+	a_vector<location> locations;
 };
 
 struct state_base_copyable {
@@ -236,7 +239,9 @@ struct state_base_copyable {
 	uint32_t lcg_rand_state;
 
 	int last_error;
-	int triggers_state;
+
+	int trigger_timer;
+	std::array<a_vector<running_trigger>, 8> running_triggers;
 
 	size_t active_orders_size;
 	size_t active_bullets_size;
@@ -244,7 +249,6 @@ struct state_base_copyable {
 
 	a_vector<uint8_t> repulse_field;
 
-	const unit_t* prev_bullet_source_unit;
 	bool prev_bullet_heading_offset_clockwise;
 
 	std::array<int, 12> current_minerals;
@@ -12990,15 +12994,32 @@ struct state_functions {
 	}
 
 	void process_triggers() {
-		switch (st.triggers_state) {
-		case 0:
-		case 1:
-			++st.triggers_state;
-			break;
-		case 2:
-			st.triggers_state = 3;
-			pre_process_triggers();
-			break;
+		if (st.trigger_timer) {
+			--st.trigger_timer;
+			return;
+		}
+		st.trigger_timer = 30;
+
+		for (int i = 0; i != 8; ++i) {
+			if (st.players[i].controller != player_t::controller_occupied) continue;
+			for (auto& rt : st.running_triggers[i]) {
+				if (rt.flags & 8) continue;
+				auto& t = *rt.t;
+				bool execute_now = true;
+				if (~rt.flags & 1) {
+					for (auto& c : t.conditions) {
+						if (c.type == 0) break;
+						if (!test_trigger_condition(c, i)) {
+							execute_now = false;
+							break;
+						}
+					}
+				}
+				if (execute_now) {
+					rt.current_action_index = 0;
+					execute_trigger(i, rt, t);
+				}
+			}
 		}
 	}
 
@@ -18594,42 +18615,131 @@ struct state_functions {
 		}
 	}
 
-	bool test_trigger_condition(const trigger::condition& c) {
+	int command_count(int owner, int player, int unit_id, bool completed_units) {
+		if (player < 12) owner = player;
+		else if (player == 13) owner = owner;
+		else error("trigger_condition_command: unsupported player %d", player);
+		if (completed_units) {
+			if (unit_id == 229) return st.non_building_counts[owner] + st.building_counts[owner];
+			if (unit_id == 230) return st.non_building_counts[owner];
+			if (unit_id == 231) return st.building_counts[owner];
+			if (unit_id == 232) return st.factory_counts[owner];
+			return st.unit_counts[owner].at((UnitTypes)unit_id);
+		} else {
+			if (unit_id == 229) return st.completed_non_building_counts[owner] + st.completed_building_counts[owner];
+			if (unit_id == 230) return st.completed_non_building_counts[owner];
+			if (unit_id == 231) return st.completed_building_counts[owner];
+			if (unit_id == 232) return st.completed_factory_counts[owner];
+			return st.completed_unit_counts[owner].at((UnitTypes)unit_id);
+		}
+	}
+
+	bool trigger_count_comparison(const trigger::condition& c, int count) {
+		if (c.num_n == 0) return count >= c.count_n;
+		else if (c.num_n == 1) return count <= c.count_n;
+		else if (c.num_n == 2) return count == c.count_n;
+		else return false;
+	}
+
+	bool test_trigger_condition(const trigger::condition& c, int owner) {
 		switch (c.type) {
+		case 2:
+			return trigger_count_comparison(c, command_count(owner, c.group, c.unit_id, c.num_n != 1));
 		case 12:
-			if (c.num_n == 0) return st.current_frame >= c.count_n;
-			else if (c.num_n == 1) return st.current_frame <= c.count_n;
-			else if (c.num_n == 2) return st.current_frame == c.count_n;
-			else return false;
+			return trigger_count_comparison(c, st.current_frame);
 		case 22:
 			return true;
 		default:
+			error("unknown trigger condition %d\n", c.type);
 			return false;
 		}
 	}
 
-	void pre_process_triggers() {
-		for (size_t i = 0; i != 8; ++i) {
-			if (st.players[i].controller != player_t::controller_occupied) continue;
-			for (auto& t : game_st.triggers) {
-				if (!t.enabled[i] && !t.enabled.at(17 + st.players[i].force) && !t.enabled[17]) continue;
-				bool execute_now = true;
-				for (auto& c : t.conditions) {
-					if (c.type == 0) continue;
-					if (!test_trigger_condition(c)) {
-						execute_now = false;
-						break;
-					}
-				}
-				if (execute_now) {
-					execute_trigger((int)i, t);
-				}
-			}
+	unit_t* trigger_create_unit(const unit_type_t* unit_type, xy pos, int owner) {
+		if (~unit_type->staredit_availability_flags & 2) return nullptr;
+		pos = restrict_unit_pos_to_bounds(pos, unit_type, map_bounds());
+		if (ut_building(unit_type)) {
+			error("trigger_create_unit: fixme building");
 		}
+		unit_t* u = create_unit(unit_type, pos, owner);
+		if (!u) {
+			display_last_error_for_player(owner);
+			return nullptr;
+		}
+		bool spreads_creep = unit_type_spreads_creep(u);
+		if (spreads_creep) {
+			set_creep_building_tiles(u, u->sprite->position);
+			add_creep_provider(u);
+		} else if (ut_requires_creep(u)) {
+			spread_creep_completely(u, u->sprite->position);
+			add_creep_provider(u);
+		}
+
+		finish_building_unit(u);
+		if (!place_completed_unit(u)) {
+			// todo: show error?
+			kill_unit(u);
+			return nullptr;
+		}
+		complete_unit(u);
+
+		if (spreads_creep) add_creep_provider(u);
+		if (ut_addon(u)) set_unit_owner(u, 11, false);
+		if (u_grounded_building(u) && unit_race(u) == race_t::terran) find_and_connect_addon(u);
+		st.update_psionic_matrix = true;
+		if (unit_is(u, UnitTypes::Resource_Vespene_Geyser) || unit_is_refinery(u)) {
+			set_unit_resources(u, 5000);
+		} else if (unit_is_mineral_field(u)) {
+			set_unit_resources(u, 1500);
+		}
+		return u;
 	}
 
-	void execute_trigger_action(int owner, const trigger::action& a) {
+	bool player_slot_active(int n) {
+		auto c = st.players[n].controller;
+		if (c == player_t::controller_occupied) return true;
+		if (c == player_t::controller_computer_game) return true;
+		if (c == player_t::controller_neutral) return true;
+		if (c == player_t::controller_rescue_passive) return true;
+		if (c == player_t::controller_unused_rescue_active) return true;
+		return false;
+	}
+
+	bool trigger_players_pred(int owner, int player, int n) {
+		if (!player_slot_active(n)) return false;
+		//if (n >= 8) return false;
+		if (player < 12) return n == player;
+		else if (player == 13) return n == owner;
+		else if (player == 17) return true;
+		else error("trigger_players: unsupported player %d", player);
+		return false;
+	}
+
+	auto trigger_players(int owner, int player) {
+		return make_filter_range(all_player_slots, [this, owner, player](int n) {
+			return trigger_players_pred(owner, player, n);
+		});
+	}
+
+	bool unit_is_at_elevation_flags(const unit_t* u, int elevation_flags) const {
+		int ground_height = get_ground_height_at(u->sprite->position);
+		if (u_flying(u)) {
+			if (ground_height == 0) return (elevation_flags & 1) == 0;
+			if (ground_height == 1) return (elevation_flags & 2) == 0;
+			if (ground_height == 2) return (elevation_flags & 4) == 0;
+		} else {
+			if (ground_height == 0) return (elevation_flags & 8) == 0;
+			if (ground_height == 1) return (elevation_flags & 0x10) == 0;
+			if (ground_height == 2) return (elevation_flags & 0x20) == 0;
+		}
+		return true;
+	}
+
+	void execute_trigger_action(int owner, running_trigger& rt, const trigger::action& a) {
 		switch (a.type) {
+		case 3: // preserve trigger
+			rt.flags |= 4;
+			break;
 		case 15:
 			switch (a.group2_n) {
 			case 0x3069562b:
@@ -18658,6 +18768,95 @@ struct state_functions {
 				break;
 			default:
 				error("unknown ai script");
+			}
+			break;
+		case 22: // kill unit
+			for (int p : trigger_players(owner, a.group_n)) {
+				int uid = a.extra_n;
+				for (auto i = st.player_units[p].begin(); i != st.player_units[p].end();) {
+					unit_t* u = &*i++;
+					if (ut_turret(u)) continue;
+					if (unit_dying(u)) continue;
+					if (ut_powerup(u)) error("trigger kill unit fixme: powerup");
+					if (u->owner != p) continue;
+					if (uid == 229) kill_unit(u);
+					else if (uid == 230) {
+						if (u->unit_type->group_flags & GroupFlags::Men) kill_unit(u);
+					} else if (uid == 231) {
+						if (u->unit_type->group_flags & GroupFlags::Building) kill_unit(u);
+					} else if (uid == 232) {
+						if (u->unit_type->group_flags & GroupFlags::Factory) kill_unit(u);
+					} else {
+						if (unit_is(u, (UnitTypes)uid)) kill_unit(u);
+					}
+				}
+			}
+			break;
+		case 24: // remove unit
+			for (int p : trigger_players(owner, a.group_n)) {
+				int uid = a.extra_n;
+				for (auto i = st.player_units[p].begin(); i != st.player_units[p].end();) {
+					unit_t* u = &*i++;
+					if (ut_turret(u)) continue;
+					if (unit_dying(u)) continue;
+					if (ut_powerup(u)) error("trigger kill unit fixme: powerup");
+					if (u->owner != p) continue;
+					bool ok = false;
+					if (uid == 229) ok = true;
+					else if (uid == 230) {
+						if (u->unit_type->group_flags & GroupFlags::Men) ok = true;
+					} else if (uid == 231) {
+						if (u->unit_type->group_flags & GroupFlags::Building) ok = true;
+					} else if (uid == 232) {
+						if (u->unit_type->group_flags & GroupFlags::Factory) ok = true;
+					} else {
+						if (unit_is(u, (UnitTypes)uid)) ok = true;
+					}
+					if (!ok) continue;
+					hide_unit(u);
+					kill_unit(u);
+				}
+			}
+			break;
+		case 25: // remove unit at location
+			//for (int p : trigger_players(owner, a.group_n)) {
+			if (true) {
+				int uid = a.extra_n;
+				std::function<void(unit_t*)> proc = [&](unit_t* u) {
+					if (!unit_is_at_elevation_flags(u, game_st.locations[a.location - 1].elevation_flags)) return;
+
+					if (unit_provides_space(u)) {
+						for (unit_t* n : loaded_units(u)) {
+							proc(n);
+						}
+					}
+					if (ut_worker(u) && u->worker.powerup) {
+						proc(u->worker.powerup);
+					}
+
+					if (ut_turret(u)) return;
+					if (unit_dying(u)) return;
+					if (ut_powerup(u)) error("trigger remove unit fixme: powerup");
+					if (!trigger_players_pred(owner, a.group_n, u->owner)) return;
+					bool ok = false;
+					if (uid == 229) ok = true;
+					else if (uid == 230) {
+						if (u->unit_type->group_flags & GroupFlags::Men) ok = true;
+					} else if (uid == 231) {
+						if (u->unit_type->group_flags & GroupFlags::Building) ok = true;
+					} else if (uid == 232) {
+						if (u->unit_type->group_flags & GroupFlags::Factory) ok = true;
+					} else {
+						if (unit_is(u, (UnitTypes)uid)) ok = true;
+					}
+					if (!ok) return;
+					hide_unit(u);
+					kill_unit(u);
+
+				};
+				for (unit_t* u : find_units(game_st.locations.at(a.location - 1).area)) {
+					proc(u);
+				}
 			}
 			break;
 		case 26:
@@ -18692,15 +18891,71 @@ struct state_functions {
 				}
 			} else error("unknown group_n %d", a.group_n);
 			break;
-//		default:
-//			xcept("unknown trigger action %d", a.type);
+		case 44: // create unit
+			for (int p : trigger_players(owner, a.group_n)) {
+				const unit_type_t* ut = get_unit_type((UnitTypes)a.extra_n);
+				if (unit_is_mineral_field(ut) || unit_is(ut, UnitTypes::Resource_Vespene_Geyser)) p = 11;
+				auto& loc = game_st.locations.at(a.location - 1);
+				xy pos = (loc.area.from + loc.area.to) / 2;
+				for (int i = 0; i != a.num_n; ++i) {
+					trigger_create_unit(ut, pos, p);
+				}
+			}
+			break;
+		case 46: // order
+			for (unit_t* u : find_units(game_st.locations.at(a.location - 1).area)) {
+				if (!trigger_players_pred(owner, a.group_n, u->owner)) continue;
+				if (!unit_is_at_elevation_flags(u, game_st.locations[a.location - 1].elevation_flags)) continue;
+				if (ut_building(u)) {
+					if (u->order_type->id == Orders::BuildingLand || u->order_type->id == Orders::BuildingLiftoff) continue;
+				}
+				if (!u_can_move(u)) continue;
+				if (unit_is(u, UnitTypes::Terran_Nuclear_Missile)) continue;
+				if (unit_is_fighter(u)) continue;
+				if (unit_is_rescuable(u)) continue;
+				bool ok = false;
+				if (a.extra_n == 229) ok = true;
+				else if (a.extra_n == 230) ok = (u->unit_type->group_flags & GroupFlags::Men) != 0;
+				else if (a.extra_n == 231) ok = (u->unit_type->group_flags & GroupFlags::Building) != 0;
+				else if (a.extra_n == 232) ok = (u->unit_type->group_flags & GroupFlags::Factory) != 0;
+				else ok = (int)u->unit_type->id == a.extra_n;
+				if (!ok) continue;
+				Orders o = Orders::Nothing;
+				if (a.num_n == 0) o = Orders::Move;
+				else if (a.num_n == 1) o = Orders::Patrol;
+				else if (a.num_n == 2) o = Orders::AttackMove;
+				const order_type_t* order = get_order_type(o);
+				auto& target_loc = game_st.locations.at(a.group2_n - 1);
+				xy target_pos = (target_loc.area.from + target_loc.area.to) / 2;
+				if (u_burrowed(u)) {
+					unburrow_unit(u);
+					set_queued_order(u, false, order, target_pos);
+				} else {
+					if (!unit_can_receive_order(u, order, u->owner)) continue;
+					set_unit_order(u, order, target_pos);
+				}
+			}
+			break;
+		default:
+			error("unknown trigger action %d", a.type);
 		}
 	}
 
-	void execute_trigger(int owner, const trigger& t) {
-		for (auto& a : t.actions) {
-			if (a.type == 0) continue;
-			execute_trigger_action(owner, a);
+	void execute_trigger(int owner, running_trigger& rt, const trigger& t) {
+		rt.flags |= 1;
+		size_t index = rt.current_action_index;
+		for (;index != 64; ++index) {
+			auto& a = t.actions[index];
+			if (a.flags & 2) continue;
+			if (a.type == 0) index = 63;
+			else execute_trigger_action(owner, rt, a);
+		}
+		rt.current_action_index = index;
+		if (index == 64) {
+			if (rt.flags & 4) {
+				rt.current_action_index = 0;
+				rt.flags &= ~0x51;
+			} else rt.flags |= 8;
 		}
 	}
 
@@ -18717,7 +18972,6 @@ struct state_functions {
 		if (unit_type_spreads_creep(unit_type, unit_is_completed)) {
 			r.from = pos - xy(320, 200);
 			r.to = pos + xy(320, 200);
-		} else {
 			r.from = (pos / 32 - unit_type->placement_size / 32 / 2) * 32;
 			r.to = (r.from / 32 + unit_type->placement_size / 32 - xy(1, 1)) * 32;
 		}
@@ -19358,7 +19612,9 @@ struct game_load_functions : state_functions {
 
 		st.last_error = 0;
 		st.recent_lurker_hit_current_index = 0;
-		st.triggers_state = 0;
+
+		st.trigger_timer = 1;
+		st.running_triggers = {};
 
 		int max_unit_width = 0;
 		int max_unit_height = 0;
@@ -21053,12 +21309,11 @@ struct game_load_functions : state_functions {
 				int bottom = r.get<int32_t>();
 				a_string name = get_map_string(r.get<uint16_t>());
 				int elevation_flags = r.get<uint16_t>();
-				(void)left;
-				(void)top;
-				(void)right;
-				(void)bottom;
-				(void)name;
-				(void)elevation_flags;
+				game_st.locations.emplace_back();
+				auto& loc = game_st.locations.back();
+				loc.area = { {left, top}, {right, bottom} };
+				loc.name = name;
+				loc.elevation_flags = elevation_flags;
 			}
 		};
 
@@ -21094,12 +21349,23 @@ struct game_load_functions : state_functions {
 					r.get<uint8_t>(); // padding
 				}
 				t.execution_flags = r.get<uint32_t>();
+
 				bool enabled_for_any = false;
 				for (size_t i = 0; i != 28; ++i) {
 					t.enabled[i] = r.get<uint8_t>() != 0;
 					if (!enabled_for_any && t.enabled[i]) enabled_for_any = true;
 				}
 				if (!enabled_for_any) game_st.triggers.pop_back();
+			}
+			for (auto& t : game_st.triggers) {
+				for (int i = 0; i != 8; ++i) {
+					if (st.players[i].controller != player_t::controller_occupied) continue;
+					if (!t.enabled[i] && !t.enabled.at(17 + st.players[i].force) && !t.enabled[17]) continue;
+					st.running_triggers[i].emplace_back();
+					auto& rt = st.running_triggers[i].back();
+					rt.t = &t;
+					rt.flags = t.execution_flags;
+				}
 			}
 		};
 
