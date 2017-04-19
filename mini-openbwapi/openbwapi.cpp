@@ -41,6 +41,7 @@ struct ui_wrapper {
 		return player;
 	}
 	ui_wrapper(bwgame::state& st) : ui(get_player(st)) {
+		ui.global_volume = 0;
 		auto load_data_file = bwgame::data_loading::data_files_directory(".");
 		ui.load_data_file = [&](bwgame::a_vector<uint8_t>& data, bwgame::a_string filename) {
 			load_data_file(data, std::move(filename));
