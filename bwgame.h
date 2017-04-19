@@ -18757,7 +18757,7 @@ struct state_functions {
 		switch (a.type) {
 		case 3: // preserve trigger
 			rt.flags |= 4;
-			break;
+			return true;
 		case 4: // wait
 			if (st.trigger_waiting[owner]) return false;
 			if (ra.flags & 1) {
