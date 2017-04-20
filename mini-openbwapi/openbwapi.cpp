@@ -88,8 +88,6 @@ struct openbwapi_functions: bwgame::replay_functions {
 		for (size_t i = 0; i != 12; ++i) {
 			players_container[i] = {i, this};
 		}
-
-		enable_ui();
 	}
 
 	virtual void on_unit_destroy(bwgame::unit_t* u) override {
@@ -1175,6 +1173,8 @@ void Game::setLocalSpeed(int speed) {
 }
 
 void Game::setGUI(bool enable) {
+	if (enable) impl->funcs.enable_ui();
+	else impl->funcs.disable_ui();
 }
 
 void Game::setFrameSkip(int frameskip) {
