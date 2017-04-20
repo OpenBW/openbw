@@ -18634,22 +18634,23 @@ struct state_functions {
 		}
 	}
 
-	int command_count(int owner, int player, int unit_id, bool completed_units) const {
+	template<typename T>
+	int command_count(const T& count_obj, int owner, int player, int unit_id, bool completed_units) const {
 		if (player < 12) owner = player;
 		else if (player == 13) owner = owner;
 		else error("trigger_condition_command: unsupported player %d", player);
 		if (completed_units) {
-			if (unit_id == 229) return st.non_building_counts[owner] + st.building_counts[owner];
-			if (unit_id == 230) return st.non_building_counts[owner];
-			if (unit_id == 231) return st.building_counts[owner];
-			if (unit_id == 232) return st.factory_counts[owner];
+			if (unit_id == 229) return count_obj.non_building_counts[owner] + count_obj.building_counts[owner];
+			if (unit_id == 230) return count_obj.non_building_counts[owner];
+			if (unit_id == 231) return count_obj.building_counts[owner];
+			if (unit_id == 232) return count_obj.factory_counts[owner];
 			return st.unit_counts[owner].at((UnitTypes)unit_id);
 		} else {
-			if (unit_id == 229) return st.completed_non_building_counts[owner] + st.completed_building_counts[owner];
-			if (unit_id == 230) return st.completed_non_building_counts[owner];
-			if (unit_id == 231) return st.completed_building_counts[owner];
-			if (unit_id == 232) return st.completed_factory_counts[owner];
-			return st.completed_unit_counts[owner].at((UnitTypes)unit_id);
+			if (unit_id == 229) return count_obj.completed_non_building_counts[owner] + count_obj.completed_building_counts[owner];
+			if (unit_id == 230) return count_obj.completed_non_building_counts[owner];
+			if (unit_id == 231) return count_obj.completed_building_counts[owner];
+			if (unit_id == 232) return count_obj.completed_factory_counts[owner];
+			return count_obj.completed_unit_counts[owner].at((UnitTypes)unit_id);
 		}
 	}
 
@@ -18660,10 +18661,72 @@ struct state_functions {
 		else return false;
 	}
 
+	struct bring_unit_counters {
+		std::array<type_indexed_array<int, UnitTypes>, 12> unit_counts;
+		std::array<type_indexed_array<int, UnitTypes>, 12> completed_unit_counts;
+
+		std::array<int, 12> factory_counts;
+		std::array<int, 12> building_counts;
+		std::array<int, 12> non_building_counts;
+
+		std::array<int, 12> completed_factory_counts;
+		std::array<int, 12> completed_building_counts;
+		std::array<int, 12> completed_non_building_counts;
+	};
+
+	bring_unit_counters trigger_bring_count(const location& loc) const {
+		bring_unit_counters r;
+		r.unit_counts = {};
+		r.completed_unit_counts = {};
+		r.factory_counts = {};
+		r.building_counts = {};
+		r.non_building_counts = {};
+		r.completed_factory_counts = {};
+		r.completed_building_counts = {};
+		r.completed_non_building_counts = {};
+		std::function<void(const unit_t*)> add_completed = [&](const unit_t* u) {
+			++r.completed_unit_counts[u->owner][u->unit_type->id];
+			if (unit_provides_space(u)) {
+				for (const unit_t* n : loaded_units(u)) add_completed(n);
+			}
+			if (unit_is_carrier(u)) {
+				r.completed_unit_counts[u->owner][UnitTypes::Protoss_Interceptor] += u->carrier.inside_count;
+			} else if (unit_is_reaver(u)) {
+				r.completed_unit_counts[u->owner][UnitTypes::Protoss_Reaver] += u->carrier.inside_count;
+			}
+			if (ut_worker(u) && u->worker.powerup) {
+				if (unit_is(u->worker.powerup, UnitTypes::Powerup_Flag)) add_completed(u->worker.powerup);
+				else ++r.completed_unit_counts[u->owner][u->worker.powerup->unit_type->id];
+			}
+			if (unit_is(u, UnitTypes::Terran_Nuclear_Silo) && u->building.silo.ready) {
+				++r.completed_unit_counts[u->owner][UnitTypes::Terran_Nuclear_Missile];
+			}
+			if (u->unit_type->group_flags & GroupFlags::Factory) ++r.completed_factory_counts[u->owner];
+			if (u->unit_type->group_flags & GroupFlags::Men) ++r.completed_non_building_counts[u->owner];
+			else if (u->unit_type->group_flags & GroupFlags::Building) ++r.completed_building_counts[u->owner];
+		};
+		for (const unit_t* u : find_units(loc.area)) {
+			if (ut_turret(u)) continue;
+			if (!unit_is_at_elevation_flags(u, loc.elevation_flags)) continue;
+
+			++r.unit_counts[u->owner][u->unit_type->id];
+			if (u->unit_type->group_flags & GroupFlags::Factory) ++r.factory_counts[u->owner];
+			if (u->unit_type->group_flags & GroupFlags::Men) ++r.non_building_counts[u->owner];
+			else if (u->unit_type->group_flags & GroupFlags::Building) ++r.building_counts[u->owner];
+			else if (unit_is_egg(u)) ++r.non_building_counts[u->owner];
+
+			if (u_completed(u)) add_completed(u);
+
+		}
+		return r;
+	}
+
 	bool test_trigger_condition(const trigger::condition& c, int owner) const {
 		switch (c.type) {
 		case 2:
-			return trigger_count_comparison(c, command_count(owner, c.group, c.unit_id, c.num_n != 1));
+			return trigger_count_comparison(c, command_count(st, owner, c.group, c.unit_id, c.num_n != 1));
+		case 3: // bring
+			return trigger_count_comparison(c, command_count(trigger_bring_count(st.locations.at(c.location - 1)), owner, c.group, c.unit_id, c.num_n != 1));
 		case 12:
 			return trigger_count_comparison(c, st.current_frame);
 		case 22:
@@ -18678,7 +18741,12 @@ struct state_functions {
 		if (~unit_type->staredit_availability_flags & 2) return nullptr;
 		pos = restrict_unit_pos_to_bounds(pos, unit_type, map_bounds());
 		if (ut_building(unit_type)) {
-			error("trigger_create_unit: fixme building");
+			xy top_left = restrict_pos_to_map_bounds(pos - unit_type->placement_size / 2);
+			pos = top_left / 32 * 32 + unit_type->placement_size / 2;
+			if (!can_place_building(nullptr, owner, unit_type, pos, true, false)) {
+				// todo: show error?
+				return nullptr;
+			}
 		}
 		unit_t* u = create_unit(unit_type, pos, owner);
 		if (!u) {
@@ -18803,7 +18871,7 @@ struct state_functions {
 			st.trigger_waiting[owner] = true;
 			st.trigger_wait_timers[owner] = a.time_n;
 			ra.flags |= 1;
-			return true;
+			return false;
 		case 15:
 			switch (a.group2_n) {
 			case 0x3069562b:
@@ -18923,36 +18991,36 @@ struct state_functions {
 			}
 			return true;
 		case 26:
-			if (a.group_n == 13) {
+			for (int p : trigger_players(owner, a.group_n)) {
 				if (a.num_n == 7) {
 					if (a.extra_n == 0 || a.extra_n == 2) {
-						st.current_minerals[owner] = a.group2_n;
-						st.total_minerals_gathered[owner] = a.group2_n;
+						st.current_minerals[p] = a.group2_n;
+						st.total_minerals_gathered[p] = a.group2_n;
 					}
 					if (a.extra_n == 1 || a.extra_n == 2) {
-						st.current_gas[owner] = a.group2_n;
-						st.total_gas_gathered[owner] = a.group2_n;
+						st.current_gas[p] = a.group2_n;
+						st.total_gas_gathered[p] = a.group2_n;
 					}
 				} else if (a.num_n == 8) {
 					if (a.extra_n == 0 || a.extra_n == 2) {
-						st.current_minerals[owner] += a.group2_n;
-						st.total_minerals_gathered[owner] += a.group2_n;
+						st.current_minerals[p] += a.group2_n;
+						st.total_minerals_gathered[p] += a.group2_n;
 					}
 					if (a.extra_n == 1 || a.extra_n == 2) {
-						st.current_gas[owner] += a.group2_n;
-						st.total_gas_gathered[owner] += a.group2_n;
+						st.current_gas[p] += a.group2_n;
+						st.total_gas_gathered[p] += a.group2_n;
 					}
 				} else if (a.num_n == 8) {
 					if (a.extra_n == 0 || a.extra_n == 2) {
-						if (st.current_minerals[owner] < a.group2_n) st.current_minerals[owner] = 0;
-						else st.current_minerals[owner] -= a.group2_n;
+						if (st.current_minerals[p] < a.group2_n) st.current_minerals[p] = 0;
+						else st.current_minerals[p] -= a.group2_n;
 					}
 					if (a.extra_n == 1 || a.extra_n == 2) {
-						if (st.current_gas[owner] < a.group2_n) st.current_gas[owner] = 0;
-						else st.current_gas[owner] -= a.group2_n;
+						if (st.current_gas[p] < a.group2_n) st.current_gas[p] = 0;
+						else st.current_gas[p] -= a.group2_n;
 					}
 				}
-			} else error("unknown group_n %d", a.group_n);
+			}
 			return true;
 		case 38: // move location
 			if (true) {
@@ -19027,6 +19095,13 @@ struct state_functions {
 					if (!unit_can_receive_order(u, order, u->owner)) continue;
 					set_unit_order(u, order, target_pos);
 				}
+			}
+			return true;
+		case 52: // set unit resources
+			for (unit_t* u : find_units(st.locations.at(a.location - 1).area)) {
+				if (!trigger_players_pred(owner, a.group_n, u->owner)) continue;
+				if (!unit_is_at_elevation_flags(u, st.locations[a.location - 1].elevation_flags)) continue;
+				set_unit_resources(u, a.group2_n);
 			}
 			return true;
 		default:
