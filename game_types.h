@@ -192,7 +192,6 @@ struct running_trigger {
 
 struct location {
 	rect area;
-	a_string name;
 	int elevation_flags;
 };
 

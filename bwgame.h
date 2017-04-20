@@ -186,7 +186,6 @@ struct game_state {
 	regions_t regions;
 
 	a_vector<trigger> triggers;
-	a_vector<location> locations;
 };
 
 struct state_base_copyable {
@@ -264,6 +263,8 @@ struct state_base_copyable {
 	creep_life_t creep_life;
 	bool update_psionic_matrix;
 	int disruption_webbed_units;
+
+	a_vector<location> locations;
 };
 
 struct psionic_matrix_link_f {
@@ -18633,7 +18634,7 @@ struct state_functions {
 		}
 	}
 
-	int command_count(int owner, int player, int unit_id, bool completed_units) {
+	int command_count(int owner, int player, int unit_id, bool completed_units) const {
 		if (player < 12) owner = player;
 		else if (player == 13) owner = owner;
 		else error("trigger_condition_command: unsupported player %d", player);
@@ -18652,14 +18653,14 @@ struct state_functions {
 		}
 	}
 
-	bool trigger_count_comparison(const trigger::condition& c, int count) {
+	bool trigger_count_comparison(const trigger::condition& c, int count) const {
 		if (c.num_n == 0) return count >= c.count_n;
 		else if (c.num_n == 1) return count <= c.count_n;
 		else if (c.num_n == 2) return count == c.count_n;
 		else return false;
 	}
 
-	bool test_trigger_condition(const trigger::condition& c, int owner) {
+	bool test_trigger_condition(const trigger::condition& c, int owner) const {
 		switch (c.type) {
 		case 2:
 			return trigger_count_comparison(c, command_count(owner, c.group, c.unit_id, c.num_n != 1));
@@ -18713,7 +18714,7 @@ struct state_functions {
 		return u;
 	}
 
-	bool player_slot_active(int n) {
+	bool player_slot_active(int n) const {
 		auto c = st.players[n].controller;
 		if (c == player_t::controller_occupied) return true;
 		if (c == player_t::controller_computer_game) return true;
@@ -18723,7 +18724,7 @@ struct state_functions {
 		return false;
 	}
 
-	bool trigger_players_pred(int owner, int player, int n) {
+	bool trigger_players_pred(int owner, int player, int n) const {
 		if (!player_slot_active(n)) return false;
 		//if (n >= 8) return false;
 		if (player < 12) return n == player;
@@ -18733,7 +18734,7 @@ struct state_functions {
 		return false;
 	}
 
-	auto trigger_players(int owner, int player) {
+	auto trigger_players(int owner, int player) const {
 		return make_filter_range(all_player_slots, [this, owner, player](int n) {
 			return trigger_players_pred(owner, player, n);
 		});
@@ -18751,6 +18752,40 @@ struct state_functions {
 			if (ground_height == 2) return (elevation_flags & 0x20) == 0;
 		}
 		return true;
+	}
+
+	bool trigger_unit_pred(int owner, const unit_t* u, int player, int uid) const {
+		if (unit_provides_space(u)) {
+			for (unit_t* n : loaded_units(u)) {
+				if (trigger_unit_pred(owner, n, player, uid)) return true;
+			}
+		}
+		if (ut_worker(u) && u->worker.powerup) {
+			if (trigger_unit_pred(owner, u->worker.powerup, player, uid)) return true;
+		}
+
+		if (unit_dying(u)) return false;
+		if (ut_powerup(u)) error("trigger remove unit fixme: powerup");
+		if (!trigger_players_pred(owner, player, u->owner)) return false;
+		if (uid == 229) return true;
+		else if (uid == 230) {
+			if (u->unit_type->group_flags & GroupFlags::Men) return true;
+		} else if (uid == 231) {
+			if (u->unit_type->group_flags & GroupFlags::Building) return true;
+		} else if (uid == 232) {
+			if (u->unit_type->group_flags & GroupFlags::Factory) return true;
+		} else {
+			if (unit_is(u, (UnitTypes)uid)) return true;
+		}
+		return false;
+	}
+
+	unit_t* trigger_find_unit(int owner, const location& loc, int player, int unit_id) {
+		for (unit_t* u : find_units(loc.area)) {
+			if (!unit_is_at_elevation_flags(u, loc.elevation_flags)) continue;
+			if (trigger_unit_pred(owner, u, player, unit_id)) return u;
+		}
+		return nullptr;
 	}
 
 	bool execute_trigger_action(int owner, running_trigger& rt, running_trigger::action& ra, const trigger::action& a) {
@@ -18851,7 +18886,7 @@ struct state_functions {
 			if (true) {
 				int uid = a.extra_n;
 				std::function<void(unit_t*)> proc = [&](unit_t* u) {
-					if (!unit_is_at_elevation_flags(u, game_st.locations[a.location - 1].elevation_flags)) return;
+					if (!unit_is_at_elevation_flags(u, st.locations[a.location - 1].elevation_flags)) return;
 
 					if (unit_provides_space(u)) {
 						for (unit_t* n : loaded_units(u)) {
@@ -18882,7 +18917,7 @@ struct state_functions {
 					kill_unit(u);
 
 				};
-				for (unit_t* u : find_units(game_st.locations.at(a.location - 1).area)) {
+				for (unit_t* u : find_units(st.locations.at(a.location - 1).area)) {
 					proc(u);
 				}
 			}
@@ -18919,11 +18954,41 @@ struct state_functions {
 				}
 			} else error("unknown group_n %d", a.group_n);
 			return true;
+		case 38: // move location
+			if (true) {
+				auto& loc = st.locations.at(a.location - 1);
+				xy pos = (loc.area.from + loc.area.to) / 2;
+				unit_t* u = trigger_find_unit(owner, loc, a.group_n, a.extra_n);
+				if (u) pos = u->sprite->position;
+				auto& target_loc = st.locations.at(a.group2_n - 1);
+				xy diff = pos - (loc.area.from + loc.area.to) / 2;
+				xy from = target_loc.area.from + diff;
+				xy to = target_loc.area.to + diff;
+				if (from.x < 0) {
+					to.x -= from.x;
+					from.x = 0;
+				}
+				if (from.y < 0) {
+					to.y -= from.y;
+					from.y = 0;
+				}
+				if (to.x >= (int)game_st.map_width) {
+					from.x += (int)game_st.map_width - 1 - to.x;
+					to.x = (int)game_st.map_width - 1;
+				}
+				if (to.y >= (int)game_st.map_height) {
+					from.y += (int)game_st.map_height - 1 - to.y;
+					to.y = (int)game_st.map_height - 1;
+				}
+				target_loc.area.from = from;
+				target_loc.area.to = to;
+			}
+			return true;
 		case 44: // create unit
 			for (int p : trigger_players(owner, a.group_n)) {
 				const unit_type_t* ut = get_unit_type((UnitTypes)a.extra_n);
 				if (unit_is_mineral_field(ut) || unit_is(ut, UnitTypes::Resource_Vespene_Geyser)) p = 11;
-				auto& loc = game_st.locations.at(a.location - 1);
+				auto& loc = st.locations.at(a.location - 1);
 				xy pos = (loc.area.from + loc.area.to) / 2;
 				for (int i = 0; i != a.num_n; ++i) {
 					trigger_create_unit(ut, pos, p);
@@ -18931,9 +18996,9 @@ struct state_functions {
 			}
 			return true;
 		case 46: // order
-			for (unit_t* u : find_units(game_st.locations.at(a.location - 1).area)) {
+			for (unit_t* u : find_units(st.locations.at(a.location - 1).area)) {
 				if (!trigger_players_pred(owner, a.group_n, u->owner)) continue;
-				if (!unit_is_at_elevation_flags(u, game_st.locations[a.location - 1].elevation_flags)) continue;
+				if (!unit_is_at_elevation_flags(u, st.locations[a.location - 1].elevation_flags)) continue;
 				if (ut_building(u)) {
 					if (u->order_type->id == Orders::BuildingLand || u->order_type->id == Orders::BuildingLiftoff) continue;
 				}
@@ -18953,7 +19018,7 @@ struct state_functions {
 				else if (a.num_n == 1) o = Orders::Patrol;
 				else if (a.num_n == 2) o = Orders::AttackMove;
 				const order_type_t* order = get_order_type(o);
-				auto& target_loc = game_st.locations.at(a.group2_n - 1);
+				auto& target_loc = st.locations.at(a.group2_n - 1);
 				xy target_pos = (target_loc.area.from + target_loc.area.to) / 2;
 				if (u_burrowed(u)) {
 					unburrow_unit(u);
@@ -21339,11 +21404,11 @@ struct game_load_functions : state_functions {
 				int right = r.get<int32_t>();
 				int bottom = r.get<int32_t>();
 				a_string name = get_map_string(r.get<uint16_t>());
+				(void)name;
 				int elevation_flags = r.get<uint16_t>();
-				game_st.locations.emplace_back();
-				auto& loc = game_st.locations.back();
+				st.locations.emplace_back();
+				auto& loc = st.locations.back();
 				loc.area = { {left, top}, {right, bottom} };
-				loc.name = name;
 				loc.elevation_flags = elevation_flags;
 			}
 		};
