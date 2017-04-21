@@ -27,6 +27,5 @@ endif()
 add_library(mini-openbwapi ${mini-openbwapi_srcs})
 
 target_link_libraries(mini-openbwapi
-	czmq
 	${SDL2_LIBRARY}
 )
