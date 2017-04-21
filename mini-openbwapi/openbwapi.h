@@ -1,6 +1,9 @@
 #ifndef MINI_OPENBWAPI_OPENBWAPI_H
 #define MINI_OPENBWAPI_OPENBWAPI_H
 
+#define MINI_OPENBWAPI
+#define OPENBW_BWAPI
+
 //#define OPENBW_ENABLE_UI
 
 #include <utility>
@@ -15,7 +18,7 @@
 #include <array>
 
 namespace bwgame {
-      struct weapon_type_t;
+	struct weapon_type_t;
 	struct unit_type_t;
 	struct unit_t;
 	struct bullet_t;
@@ -925,7 +928,7 @@ public:
 	}
 	
 	Position getPosition() const;
-	int getType() const ;
+	int getType() const;
 };
 
 enum class EventType {
