@@ -98,6 +98,7 @@ struct openbwapi_functions: bwgame::replay_functions {
 	}
 
 	void enable_ui() {
+		if (ui) return;
 		ui = std::make_unique<ui_wrapper>(st);
 	}
 	void disable_ui() {
