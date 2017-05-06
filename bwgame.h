@@ -257,7 +257,7 @@ struct state_base_copyable {
 	std::array<int, 12> total_minerals_gathered;
 	std::array<int, 12> total_gas_gathered;
 
-	std::array<static_vector<std::pair<const unit_t*, const unit_t*>, 16>, 32> recent_lurker_hits;
+	std::array<static_vector<std::pair<size_t, size_t>, 16>, 32> recent_lurker_hits;
 	size_t recent_lurker_hit_current_index;
 
 	creep_life_t creep_life;
@@ -13966,7 +13966,7 @@ struct state_functions {
 					if (b->bullet_owner_unit) {
 						bool found = false;
 						for (auto& arr : st.recent_lurker_hits) {
-							if (std::find(arr.begin(), arr.end(), std::make_pair((const unit_t*)b->bullet_owner_unit, (const unit_t*)target)) != arr.end()) {
+							if (std::find(arr.begin(), arr.end(), std::make_pair(b->bullet_owner_unit->index, target->index)) != arr.end()) {
 								found = true;
 								break;
 							}
@@ -13974,7 +13974,7 @@ struct state_functions {
 						if (found) continue;
 						auto& arr = st.recent_lurker_hits[st.recent_lurker_hit_current_index];
 						if (arr.size() != 16) {
-							arr.emplace_back(b->bullet_owner_unit, target);
+							arr.emplace_back(b->bullet_owner_unit->index, target->index);
 						}
 					}
 					bullet_deal_damage(b, target);
