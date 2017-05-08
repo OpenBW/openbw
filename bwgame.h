@@ -2077,7 +2077,7 @@ struct state_functions {
 	}
 
 	int unit_long_path_distance(const unit_t* u, xy from, xy to) const {
-		if (!u->pathing_flags & 1) return xy_length(to - from);
+		if (~u->pathing_flags & 1) return xy_length(to - from);
 		return long_path_distance(from, to);
 	}
 
@@ -12997,6 +12997,7 @@ struct state_functions {
 	}
 
 	void process_triggers() {
+		allow_random = true;
 
 		int timer_step = 42;
 
@@ -13040,6 +13041,8 @@ struct state_functions {
 				}
 			}
 		}
+		
+		allow_random = false;
 	}
 
 	void next_frame() {
