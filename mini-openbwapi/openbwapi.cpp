@@ -92,6 +92,14 @@ struct openbwapi_functions: bwgame::replay_functions {
 
 	virtual void on_unit_destroy(bwgame::unit_t* u) override {
 		auto id = get_unit_id_32(u);
+		auto i = units_lookup.find((int)id.raw_value);
+		if (i != units_lookup.end() && i->second->u) {
+			destroyed_units.push_back(id);
+			i->second->u = nullptr;
+		}
+	}
+	virtual void on_kill_unit(bwgame::unit_t* u) override {
+		auto id = get_unit_id_32(u);
 		destroyed_units.push_back(id);
 		auto i = units_lookup.find((int)id.raw_value);
 		if (i != units_lookup.end()) i->second->u = nullptr;
@@ -300,9 +308,11 @@ bool UnitType::isResourceDepot() const {
 const std::vector<Unit>& PlayerInterface::getUnits() {
 	units.clear();
 	for (auto* u : ptr(funcs->st.player_units[index])) {
-		if (!funcs->unit_is_map_revealer(u) && !funcs->ut_turret(u)) {
-			units.push_back(funcs->get_unit(u));
-		}
+		if (funcs->unit_dying(u)) continue;
+		if (funcs->us_hidden(u)) continue;
+		if (funcs->ut_turret(u)) continue;
+		if (funcs->unit_is_map_revealer(u)) continue;
+		units.push_back(funcs->get_unit(u));
 	}
 	return units;
 //	auto gcc_bug_workaround_ptr = [&](auto&& r) {
