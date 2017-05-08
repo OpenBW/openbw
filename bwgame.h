@@ -332,6 +332,7 @@ struct state_functions {
 	virtual void on_unit_deselect(unit_t* u) {}
 	
 	virtual void on_unit_destroy(unit_t* u) {}
+	virtual void on_kill_unit(unit_t* u) {}
 
 	state& st;
 	const global_state& global_st = *st.global;
@@ -2611,6 +2612,7 @@ struct state_functions {
 			remove_queued_order(u, &u->order_queue.front());
 		}
 		set_unit_order(u, get_order_type(Orders::Die), u->order_target.pos);
+		on_kill_unit(u);
 	}
 
 	bool unit_can_enter_nydus(const unit_t* u, const unit_t* target) const {
