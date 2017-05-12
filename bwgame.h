@@ -333,6 +333,8 @@ struct state_functions {
 	
 	virtual void on_unit_destroy(unit_t* u) {}
 	virtual void on_kill_unit(unit_t* u) {}
+	
+	virtual ~state_functions() {}
 
 	state& st;
 	const global_state& global_st = *st.global;
@@ -18642,7 +18644,7 @@ struct state_functions {
 	template<typename T>
 	int command_count(const T& count_obj, int owner, int player, int unit_id, bool completed_units) const {
 		if (player < 12) owner = player;
-		else if (player == 13) owner = owner;
+		else if (player == 13) ;
 		else error("trigger_condition_command: unsupported player %d", player);
 		if (completed_units) {
 			if (unit_id == 229) return count_obj.non_building_counts[owner] + count_obj.building_counts[owner];
@@ -19564,7 +19566,7 @@ struct state_copier {
 static inline state copy_state(const state& st) {
 	state r;
 	state_copier(st, r)();
-	return std::move(r);
+	return r;
 }
 
 
