@@ -7,7 +7,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_CURRENT_SOURCE_DIR}/../cmake")
 
-find_package(SDL2 REQUIRED)
+if (OPENBW_ENABLE_UI)
+	find_package(SDL2 REQUIRED)
+endif()
 
 include_directories(
 	${CMAKE_CURRENT_SOURCE_DIR}/..
