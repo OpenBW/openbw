@@ -279,9 +279,9 @@ struct psionic_matrix_link_f {
 struct state_base_non_copyable {
 
 	state_base_non_copyable() = default;
-	state_base_non_copyable(state_base_non_copyable&) = delete;
+	state_base_non_copyable(const state_base_non_copyable&) = delete;
 	state_base_non_copyable(state_base_non_copyable&&) = default;
-	state_base_non_copyable& operator=(state_base_non_copyable&) = delete;
+	state_base_non_copyable& operator=(const state_base_non_copyable&) = delete;
 	state_base_non_copyable& operator=(state_base_non_copyable&&) = default;
 
 	intrusive_list<unit_t, default_link_f> visible_units;
@@ -19558,7 +19558,9 @@ struct state_copier {
 		r.unit_finder_y = st.unit_finder_y;
 		for (auto& v : r.unit_finder_y) remap_unit(v.u);
 
+		r.consider_collision_with_unit_bug = st.consider_collision_with_unit_bug;
 		remap_unit(r.consider_collision_with_unit_bug);
+		r.prev_bullet_source_unit = st.prev_bullet_source_unit;
 		remap_unit(r.prev_bullet_source_unit);
 	}
 };

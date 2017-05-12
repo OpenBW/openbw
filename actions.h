@@ -7,9 +7,9 @@ namespace bwgame {
 
 struct action_state {
 	action_state() = default;
-	action_state(action_state&&) = default;
 	action_state(const action_state&) = delete;
-	action_state& operator=(action_state&) = delete;
+	action_state(action_state&&) = default;
+	action_state& operator=(const action_state&) = delete;
 	action_state& operator=(action_state&&) = default;
 
 	std::array<int, 12> player_id{};
