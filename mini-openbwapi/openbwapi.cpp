@@ -148,16 +148,30 @@ struct openbwapi_functions: bwgame::replay_functions {
 	}
 };
 
+template<typename T>
+struct init_safe_global {
+	typename std::aligned_storage<sizeof(T), alignof(T)>::type buf;
+	bool inited = [this]{if (!inited) new ((T*)&buf) T{}; return true;}();
+	~init_safe_global() {
+		(**this).~T();
+	}
+	T& operator*() {
+		if (!inited) {
+			new ((T*)&buf) T{};
+			inited = true;
+		}
+		return *(T*)&buf;
+	}
+};
 
-
-bwgame::global_state g_global_st;
-static bool global_inited = false;
-static std::mutex global_init_mut;
+init_safe_global<bwgame::global_state> g_global_st;
+bool global_inited = false;
+init_safe_global<std::mutex> global_init_mut;
 void g_global_init() {
 	if (global_inited) return;
-	std::unique_lock<std::mutex> l;
+	std::unique_lock<std::mutex> l(*global_init_mut);
 	if (global_inited) return;
-	bwgame::global_init(g_global_st, bwgame::data_loading::data_files_directory("."));
+	bwgame::global_init(*g_global_st, bwgame::data_loading::data_files_directory("."));
 	global_inited = true;
 }
 
@@ -932,7 +946,7 @@ int Bullet::getType() const {
 
 
 struct full_state {
-	bwgame::global_state& global_st = g_global_st;
+	bwgame::global_state& global_st = *g_global_st;
 	bwgame::game_state game_st;
 	bwgame::state st;
 	bwgame::action_state action_st;
@@ -942,7 +956,7 @@ struct full_state {
 		st.game = &game_st;
 	}
 	void global_init() {
-		if (&global_st == &g_global_st) {
+		if (&global_st == &*g_global_st) {
 			g_global_init();
 		}
 	}
