@@ -151,7 +151,13 @@ struct openbwapi_functions: bwgame::replay_functions {
 template<typename T>
 struct init_safe_global {
 	typename std::aligned_storage<sizeof(T), alignof(T)>::type buf;
-	bool inited = [this]{if (!inited) new ((T*)&buf) T{}; return true;}();
+	bool inited;
+	init_safe_global() {
+		if (!inited) {
+			new ((T*)&buf) T{};
+			inited = true;
+		}
+	}
 	~init_safe_global() {
 		(**this).~T();
 	}
