@@ -416,7 +416,7 @@ struct image_t: link_base {
 	iscript_state_t iscript_state;
 	size_t frame_index_base;
 	size_t frame_index;
-	grp_t* grp;
+	const grp_t* grp;
 	int modifier_data1;
 	int modifier_data2;
 	sprite_t* sprite;
