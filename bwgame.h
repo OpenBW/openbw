@@ -18647,22 +18647,23 @@ struct state_functions {
 
 	template<typename T>
 	int command_count(const T& count_obj, int owner, int player, int unit_id, bool completed_units) const {
-		if (player < 12) owner = player;
-		else if (player == 13) ;
-		else error("trigger_condition_command: unsupported player %d", player);
-		if (completed_units) {
-			if (unit_id == 229) return count_obj.non_building_counts[owner] + count_obj.building_counts[owner];
-			if (unit_id == 230) return count_obj.non_building_counts[owner];
-			if (unit_id == 231) return count_obj.building_counts[owner];
-			if (unit_id == 232) return count_obj.factory_counts[owner];
-			return st.unit_counts[owner].at((UnitTypes)unit_id);
-		} else {
-			if (unit_id == 229) return count_obj.completed_non_building_counts[owner] + count_obj.completed_building_counts[owner];
-			if (unit_id == 230) return count_obj.completed_non_building_counts[owner];
-			if (unit_id == 231) return count_obj.completed_building_counts[owner];
-			if (unit_id == 232) return count_obj.completed_factory_counts[owner];
-			return count_obj.completed_unit_counts[owner].at((UnitTypes)unit_id);
+		int r = 0;
+		for (int p : trigger_players(owner, player)) {
+			if (completed_units) {
+				if (unit_id == 229) r += count_obj.non_building_counts[p] + count_obj.building_counts[p];
+				else if (unit_id == 230) r += count_obj.non_building_counts[p];
+				else if (unit_id == 231) r += count_obj.building_counts[p];
+				else if (unit_id == 232) r += count_obj.factory_counts[p];
+				else r += st.unit_counts[owner].at((UnitTypes)unit_id);
+			} else {
+				if (unit_id == 229) r += count_obj.completed_non_building_counts[p] + count_obj.completed_building_counts[p];
+				else if (unit_id == 230) r += count_obj.completed_non_building_counts[p];
+				else if (unit_id == 231) r += count_obj.completed_building_counts[p];
+				else if (unit_id == 232) r += count_obj.completed_factory_counts[p];
+				else r += count_obj.completed_unit_counts[p].at((UnitTypes)unit_id);
+			}
 		}
+		return r;
 	}
 
 	bool trigger_count_comparison(const trigger::condition& c, int count) const {
@@ -18805,12 +18806,21 @@ struct state_functions {
 
 	bool trigger_players_pred(int owner, int player, int n) const {
 		if (!player_slot_active(n)) return false;
-		//if (n >= 8) return false;
-		if (player < 12) return n == player;
-		else if (player == 13) return n == owner;
-		else if (player == 17) return true;
-		else error("trigger_players: unsupported player %d", player);
-		return false;
+		if (player < 12) return n == player; // player index
+		switch (player) {
+		case 12: return false; // no players
+		case 13: return n == owner; // current player
+		case 14: return owner != n && st.alliances[owner][n] == 0; // enemy
+		case 15: return owner != n && st.alliances[owner][n] == 2; // ally
+		case 16: return owner != n && st.alliances[owner][n] == 1; // neutral
+		case 17: return true; // all players
+		case 18: return n < 8 && st.players[n].force == 0;
+		case 19: return n < 8 && st.players[n].force == 1;
+		case 20: return n < 8 && st.players[n].force == 2;
+		case 21: return n < 8 && st.players[n].force == 3;
+		case 26: return owner != n && (st.alliances[owner][n] != 2 || st.alliances[n][owner] != 2); // non allied victory
+		default: return false;
+		}
 	}
 
 	auto trigger_players(int owner, int player) const {
