@@ -409,6 +409,10 @@ public:
 		has_obj = true;
 		new (ptr()) value_type(std::forward<args_T>(args)...);
 	}
+	~optional() {
+		if (has_obj) destroy();
+	}
+
 	optional& operator=(nullopt_t) noexcept {
 		if (has_obj) destroy();
 		return *this;
