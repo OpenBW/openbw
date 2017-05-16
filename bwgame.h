@@ -617,17 +617,21 @@ struct state_functions {
 	void play_sound(int id, bool add_race_index = false) {
 		play_sound(id, xy(), nullptr, add_race_index);
 	}
+	
+	unit_t* get_unit(size_t index) const {
+		unit_t* u = st.units_container.try_get(index);
+		if (!u) return nullptr;
+		if (unit_dead(u)) return nullptr;
+		return u;
+	}
 
 	template<typename T>
 	unit_t* get_unit(unit_id_t<T> id) const {
 		size_t idx = id.index();
 		if (!idx) return nullptr;
-		size_t actual_index = idx - 1;
-		if (actual_index >= 1700) error("attempt to dereference invalid unit id %#x (actual index %d)", id.raw_value, actual_index);
-		unit_t* u = st.units_container.try_get(actual_index);
+		unit_t* u = get_unit(idx - 1);
 		if (!u) return nullptr;
 		if (u->unit_id_generation % (1u << (int_bits<T>::value - 11)) != id.generation()) return nullptr;
-		if (unit_dead(u)) return nullptr;
 		return u;
 	}
 
