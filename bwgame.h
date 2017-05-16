@@ -334,6 +334,9 @@ struct state_functions {
 	virtual void on_unit_destroy(unit_t* u) {}
 	virtual void on_kill_unit(unit_t* u) {}
 	
+	virtual void on_victory(int player) {}
+	virtual void on_defeat(int player) {}
+	
 	virtual ~state_functions() {}
 
 	state& st;
@@ -18879,6 +18882,12 @@ struct state_functions {
 
 	bool execute_trigger_action(int owner, running_trigger& rt, running_trigger::action& ra, const trigger::action& a) {
 		switch (a.type) {
+		case 1: // victory
+			on_victory(owner);
+			return true;
+		case 2: // defeat
+			on_defeat(owner);
+			return true;
 		case 3: // preserve trigger
 			rt.flags |= 4;
 			return true;
