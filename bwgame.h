@@ -18657,7 +18657,7 @@ struct state_functions {
 				else if (unit_id == 230) r += count_obj.non_building_counts[p];
 				else if (unit_id == 231) r += count_obj.building_counts[p];
 				else if (unit_id == 232) r += count_obj.factory_counts[p];
-				else r += st.unit_counts[owner].at((UnitTypes)unit_id);
+				else r += count_obj.unit_counts[owner].at((UnitTypes)unit_id);
 			} else {
 				if (unit_id == 229) r += count_obj.completed_non_building_counts[p] + count_obj.completed_building_counts[p];
 				else if (unit_id == 230) r += count_obj.completed_non_building_counts[p];
