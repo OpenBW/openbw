@@ -18817,10 +18817,10 @@ struct state_functions {
 		case 15: return owner != n && st.alliances[owner][n] == 2; // ally
 		case 16: return owner != n && st.alliances[owner][n] == 1; // neutral
 		case 17: return true; // all players
-		case 18: return n < 8 && st.players[n].force == 0;
-		case 19: return n < 8 && st.players[n].force == 1;
-		case 20: return n < 8 && st.players[n].force == 2;
-		case 21: return n < 8 && st.players[n].force == 3;
+		case 18: return n < 8 && st.players[n].force == 1;
+		case 19: return n < 8 && st.players[n].force == 2;
+		case 20: return n < 8 && st.players[n].force == 3;
+		case 21: return n < 8 && st.players[n].force == 4;
 		case 26: return owner != n && (st.alliances[owner][n] != 2 || st.alliances[n][owner] != 2); // non allied victory
 		default: return false;
 		}
