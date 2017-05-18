@@ -16,6 +16,7 @@
 #include <functional>
 #include <stdexcept>
 #include <array>
+#include <tuple>
 
 namespace bwgame {
 	struct weapon_type_t;
@@ -574,10 +575,13 @@ public:
 	}
 };
 
+using frame_id = std::tuple<int, int>; 
+
 class PlayerInterface {
 	size_t index = -1;
 	openbwapi_functions* funcs = nullptr;
 	std::vector<Unit> units;
+	frame_id last_units_update;
 public:
 	PlayerInterface(size_t index, openbwapi_functions* funcs) : index(index), funcs(funcs) {}
 	PlayerInterface() = default;
@@ -1011,13 +1015,6 @@ public:
 	virtual void onUnitComplete(Unit unit) {}
 };
 
-struct scenario {
-	virtual ~scenario() {}
-	virtual void update() = 0;
-};
-
-std::unique_ptr<scenario> get_new_scenario(openbwapi_functions& funcs);
-
 struct Game_impl;
 
 class Game {
@@ -1085,6 +1082,27 @@ public:
 	void setScreenPosition(Position) {}
 	void vPrintf(const char* fmt, va_list args);
 	void update();
+	
+	void saveSnapshot(std::string id);
+	void loadSnapshot(const std::string& id);
+	void deleteSnapshot(const std::string& id);
+	std::vector<std::string> listSnapshots();
+	
+	void saveGlobalState(const std::string& filename);
+	void loadGlobalState(const std::string& filename);
+	void saveGameState(const std::string& filename);
+	void loadGameState(const std::string& filename);
+	void saveState(const std::string& filename);
+	void loadState(const std::string& filename);
+	
+	Unit createUnit(Player player, int type, Position pos);
+	void killUnit(Unit u);
+	void removeunit(Unit u);
+	
+	void setRandomSeed(uint32_t value);
+	void randomizeRandomSeed();
+	
+	void disableTriggers();
 };
 
 using Playerset = std::vector<Player>;

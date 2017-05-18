@@ -69,11 +69,27 @@ struct ui_wrapper {
 };
 #endif
 
-struct openbwapi_functions: bwgame::replay_functions {
-	std::vector<bwgame::unit_id_32> destroyed_units;
+struct game_vars {
 	int local_player_id = -1;
 	int enemy_player_id = -1;
 	bool is_replay = false;
+	
+	std::vector<Event> events;
+	bool left_game = false;
+	bool is_in_game = false;
+	bool has_started = false;
+	bool game_type_melee = false;
+	int local_player_race = 0;
+	int enemy_player_race = 0;
+	
+	std::array<bool, 12> player_has_won{};
+	std::array<bool, 12> player_has_lost{};
+};
+
+struct openbwapi_functions: bwgame::replay_functions {
+	game_vars& vars;
+	
+	std::vector<bwgame::unit_id_32> destroyed_units;
 	std::unique_ptr<ui_wrapper> ui;
 
 	std::unordered_map<int, Unit> units_lookup;
@@ -83,8 +99,11 @@ struct openbwapi_functions: bwgame::replay_functions {
 	std::vector<Player> players;
 	std::vector<Bullet> bullets;
 	std::array<std::vector<Unit>, 12> player_units;
+	
+	int reset_counter = 0;
+	frame_id last_bullets_update;
 
-	openbwapi_functions(bwgame::state& st, bwgame::action_state& action_st, bwgame::replay_state& replay_st) : bwgame::replay_functions(st, action_st, replay_st) {
+	openbwapi_functions(game_vars& vars, bwgame::state& st, bwgame::action_state& action_st, bwgame::replay_state& replay_st) : bwgame::replay_functions(st, action_st, replay_st), vars(vars) {
 		for (size_t i = 0; i != 12; ++i) {
 			players_container[i] = {i, this};
 		}
@@ -104,6 +123,13 @@ struct openbwapi_functions: bwgame::replay_functions {
 		auto i = units_lookup.find((int)id.raw_value);
 		if (i != units_lookup.end()) i->second->u = nullptr;
 	}
+	
+	virtual void on_victory(int player) override {
+		vars.player_has_won.at(player) = true;
+	}
+	virtual void on_defeat(int player) override {
+		vars.player_has_lost.at(player) = true;
+	}
 
 	void enable_ui() {
 		if (ui) return;
@@ -114,12 +140,16 @@ struct openbwapi_functions: bwgame::replay_functions {
 	}
 
 	void next_frame() {
-		if (is_replay) bwgame::replay_functions::next_frame();
+		if (vars.is_replay) bwgame::replay_functions::next_frame();
 		else bwgame::state_functions::next_frame();
 
 		if (ui) {
 			ui->update();
 		}
+	}
+	
+	frame_id get_frame_id() {
+		return frame_id{st.current_frame, reset_counter};
 	}
 
 	Unit get_unit(bwgame::unit_t* u) {
@@ -141,10 +171,33 @@ struct openbwapi_functions: bwgame::replay_functions {
 	void reset_bwapi() {
 		units_lookup.clear();
 		units_container.clear();
-
+		destroyed_units.clear();
+		++reset_counter;
 	}
 	Player get_player(int id) {
 		return &players_container.at((size_t)id);
+	}
+	
+	const std::vector<Player>& get_players() {
+		if (players.empty()) {
+			for (auto& v : st.players) {
+				if (v.controller == bwgame::player_t::controller_occupied) {
+					players.push_back(get_player((size_t)(&v - st.players.data())));
+				}
+			}
+		}
+		return players;
+	}
+	const std::vector<Bullet>& get_bullets() {
+		auto fid = get_frame_id();
+		if (fid != last_bullets_update) {
+			last_bullets_update = fid;
+			bullets.clear();
+			for (auto* b : ptr(st.active_bullets)) {
+				bullets.push_back(b);
+			}
+		}
+		return bullets;
 	}
 };
 
@@ -326,25 +379,19 @@ bool UnitType::isResourceDepot() const {
 }
 
 const std::vector<Unit>& PlayerInterface::getUnits() {
-	units.clear();
-	for (auto* u : ptr(funcs->st.player_units[index])) {
-		if (funcs->unit_dying(u)) continue;
-		if (funcs->us_hidden(u)) continue;
-		if (funcs->ut_turret(u)) continue;
-		if (funcs->unit_is_map_revealer(u)) continue;
-		units.push_back(funcs->get_unit(u));
+	auto fid = funcs->get_frame_id();
+	if (fid != last_units_update) {
+		last_units_update = fid;
+		units.clear();
+		for (auto* u : ptr(funcs->st.player_units.at(index))) {
+			if (funcs->unit_dying(u)) continue;
+			if (funcs->us_hidden(u)) continue;
+			if (funcs->ut_turret(u)) continue;
+			if (funcs->unit_is_map_revealer(u)) continue;
+			units.push_back(funcs->get_unit(u));
+		}
 	}
 	return units;
-//	auto gcc_bug_workaround_ptr = [&](auto&& r) {
-//		return bwgame::make_transform_range(r, [](auto& ref) {
-//			return &ref;
-//		});
-//	};
-//	return bwgame::make_transform_range(bwgame::make_filter_range(gcc_bug_workaround_ptr(funcs->st.player_units[index]), [&](bwgame::unit_t* u) {
-//	      return !funcs->unit_is_map_revealer(u) && !funcs->ut_turret(u);
-//	}), [this, tmp = Unit()](bwgame::unit_t* u) mutable -> Unit& {
-//		return tmp = funcs->get_unit(u);
-//	});
 }
 
 int PlayerInterface::minerals() const {
@@ -622,7 +669,7 @@ bool UnitInterface::isIdle() const {
 
 bool UnitInterface::isDetected() const {
 	if (!exists()) return {};
-	return !funcs->unit_is_undetected(u, funcs->local_player_id);
+	return !funcs->unit_is_undetected(u, funcs->vars.local_player_id);
 }
 
 bool UnitInterface::isLifted() const {
@@ -968,24 +1015,25 @@ struct full_state {
 	}
 };
 
+struct saved_state {
+	bwgame::state st;
+	bwgame::optional<bwgame::action_state> action_st;
+	game_vars vars;
+};
+
 struct Game_impl {
 	full_state fst;
 	bwgame::state& st;
+	bwgame::action_state& action_st;
 	const bwgame::game_state& game_st;
 	openbwapi_functions funcs;
+	game_vars vars;
+	
 	std::string map_filename;
 	std::string map_full_filename;
-	std::vector<Event> events;
-	bool left_game = false;
-	bwgame::state initial_state;
-	bool global_inited = false;
-	std::unique_ptr<scenario> current_scenario = nullptr;
-	bool is_in_game = false;
-	bool has_started = false;
 	std::string set_map_filename;
-	bool game_type_melee = false;
-	int local_player_race = 0;
-	int enemy_player_race = 0;
+	
+	std::unordered_map<std::string, std::unique_ptr<saved_state>> snapshots;
 
 	std::default_random_engine rng_engine{[]{
 		std::array<unsigned int, 4> arr;
@@ -1003,8 +1051,12 @@ struct Game_impl {
 		std::uniform_int_distribution<T> dis(0, v - 1);
 		return dis(rng_engine);
 	}
+	template<typename T>
+	auto rng() {
+		return rng((T)0);
+	}
 
-	Game_impl() : st(fst.st), game_st(fst.game_st), funcs(fst.st, fst.action_st, fst.replay_st) {}
+	Game_impl() : st(fst.st), action_st(fst.action_st), game_st(fst.game_st), funcs(vars, fst.st, fst.action_st, fst.replay_st) {}
 
 	void load_map() {
 		auto& filename = set_map_filename;
@@ -1027,15 +1079,12 @@ struct Game_impl {
 
 			funcs.load_replay_file(filename);
 
-			funcs.is_replay = true;
-			funcs.local_player_id = -1;
-			funcs.enemy_player_id = -1;
-			current_scenario = nullptr;
+			vars.is_replay = true;
+			vars.local_player_id = -1;
+			vars.enemy_player_id = -1;
 
 		} else {
 			bwgame::game_load_functions load_funcs(st);
-
-
 
 			load_funcs.load_map_file(filename, [&]() {
 				bwgame::static_vector<size_t, 12> available_slots;
@@ -1047,23 +1096,23 @@ struct Game_impl {
 					}
 				}
 				if (available_slots.size() < 2) error("%s: not enough available player slots (need 2)", filename);
-				if (game_type_melee) {
-					funcs.local_player_id = available_slots.at(rng(available_slots.size()));
-					available_slots.erase(available_slots.begin() + funcs.local_player_id);
-					funcs.enemy_player_id = available_slots.at(rng(available_slots.size()));
+				if (vars.game_type_melee) {
+					vars.local_player_id = available_slots.at(rng(available_slots.size()));
+					available_slots.erase(available_slots.begin() + vars.local_player_id);
+					vars.enemy_player_id = available_slots.at(rng(available_slots.size()));
 				} else {
-					funcs.local_player_id = 0;
-					funcs.enemy_player_id = 1;
+					vars.local_player_id = 0;
+					vars.enemy_player_id = 1;
 				}
 
-				auto& local_player = st.players.at(funcs.local_player_id);
-				auto& enemy_player = st.players.at(funcs.enemy_player_id);
+				auto& local_player = st.players.at(vars.local_player_id);
+				auto& enemy_player = st.players.at(vars.enemy_player_id);
 				local_player.controller = bwgame::player_t::controller_occupied;
 				enemy_player.controller = bwgame::player_t::controller_occupied;
 
-				if ((int)local_player.race == 5) local_player.race = (bwgame::race_t)local_player_race;
-				if ((int)enemy_player.race == 5) enemy_player.race = (bwgame::race_t)enemy_player_race;
-				if (game_type_melee) {
+				if ((int)local_player.race == 5) local_player.race = (bwgame::race_t)vars.local_player_race;
+				if ((int)enemy_player.race == 5) enemy_player.race = (bwgame::race_t)vars.enemy_player_race;
+				if (vars.game_type_melee) {
 					load_funcs.setup_info.victory_condition = 1;
 					load_funcs.setup_info.starting_units = 1;
 				}
@@ -1074,17 +1123,13 @@ struct Game_impl {
 					}
 				}
 
-				st.lcg_rand_state = rng((decltype(st.lcg_rand_state))0);
+				st.lcg_rand_state = rng<decltype(st.lcg_rand_state)>();
 			});
 
-			funcs.is_replay = false;
+			vars.is_replay = false;
 
-			if (!game_type_melee) {
-				//current_scenario = get_new_scenario(funcs);
-			}
-
-			if (st.players.at(funcs.local_player_id).controller != bwgame::player_t::controller_occupied) error("%s: slot %d is not occupied (not a 2 player map?)", filename, funcs.local_player_id);
-			if (st.players.at(funcs.enemy_player_id).controller != bwgame::player_t::controller_occupied) error("%s: slot %d is not occupied (not a 2 player map?)", filename, funcs.enemy_player_id);
+			if (st.players.at(vars.local_player_id).controller != bwgame::player_t::controller_occupied) error("%s: slot %d is not occupied (not a 2 player map?)", filename, vars.local_player_id);
+			if (st.players.at(vars.enemy_player_id).controller != bwgame::player_t::controller_occupied) error("%s: slot %d is not occupied (not a 2 player map?)", filename, vars.enemy_player_id);
 		}
 
 		size_t slash_pos = filename.rfind('/');
@@ -1094,63 +1139,67 @@ struct Game_impl {
 	}
 
 	void set_game_type_melee() {
-		game_type_melee = true;
+		vars.game_type_melee = true;
 	}
 	void set_game_type_ums() {
-		game_type_melee = false;
+		vars.game_type_melee = false;
 	}
 
 	void set_local_player_race(int race) {
-		local_player_race = race;
+		vars.local_player_race = race;
 	}
 	void set_enemy_player_race(int race) {
-		enemy_player_race = race;
+		vars.enemy_player_race = race;
 	}
 
 	bool game_is_won() {
-		if (!game_type_melee) return false;
-		return st.building_counts.at(funcs.enemy_player_id) == 0;
+		if (vars.player_has_won.at(vars.local_player_id)) return true;
+		if (!vars.game_type_melee) return false;
+		return st.building_counts.at(vars.enemy_player_id) == 0;
 	}
 
 	bool game_is_lost() {
-		if (!game_type_melee) return false;
-		return st.building_counts.at(funcs.local_player_id) == 0;
+		if (vars.player_has_lost.at(vars.local_player_id)) return true;
+		if (!vars.game_type_melee) return false;
+		return st.building_counts.at(vars.local_player_id) == 0;
 	}
 
 	void update() {
-		events.clear();
-		if (!is_in_game) {
-			if (!has_started) {
-				has_started = true;
+		vars.events.clear();
+		if (!vars.is_in_game) {
+			if (!vars.has_started) {
+				vars.has_started = true;
 				start();
 			}
 
 			funcs.reset_bwapi();
 
 			load_map();
-			is_in_game = true;
-			events.push_back({EventType::MatchStart});
+			vars.is_in_game = true;
+			vars.events.push_back({EventType::MatchStart});
 			return;
 		}
 
-		if (left_game || game_is_won() || game_is_lost()) {
-			left_game = false;
-			events.push_back({EventType::MatchEnd, game_is_won()});
+		if (vars.left_game || game_is_won() || game_is_lost()) {
+			vars.left_game = false;
+			vars.events.push_back({EventType::MatchFrame});
+			vars.events.push_back({EventType::MatchEnd, game_is_won()});
 
-			is_in_game = false;
+			vars.is_in_game = false;
 			return;
 		}
 
 		funcs.next_frame();
-		if (current_scenario) current_scenario->update();
 
 		for (auto& v : funcs.destroyed_units) {
 			auto unit = funcs.get_unit(v.raw_value);
 			if (!unit) continue;
-			events.push_back({EventType::UnitDestroy, unit});
+			vars.events.push_back({EventType::UnitDestroy, unit});
 		}
 
 		funcs.destroyed_units.clear();
+		
+		vars.events.push_back({EventType::MatchFrame});
 	}
 
 	void start() {
@@ -1177,6 +1226,50 @@ struct Game_impl {
 
 		set_map_filename = map_fn;
 	}
+	
+	void save_snapshot(std::string id) {
+		auto v = std::make_unique<saved_state>();
+		v->st = bwgame::copy_state(st);
+		if (vars.is_replay) v->action_st = bwgame::copy_state(action_st, st, v->st);
+		v->vars = vars;
+		snapshots[std::move(id)] = std::move(v);
+	}
+	void load_snapshot(const std::string& id) {
+		auto i = snapshots.find(id);
+		if (i == snapshots.end()) error("no such snapshot: '%s'", id);
+		auto& v = i->second;
+		vars = v->vars;
+		st = bwgame::copy_state(v->st);
+		if (vars.is_replay) action_st = bwgame::copy_state(*v->action_st, v->st, st);
+		
+		funcs.reset_bwapi();
+	}
+	void delete_snapshot(const std::string& id) {
+		auto i = snapshots.find(id);
+		if (i != snapshots.end()) snapshots.erase(i);
+	}
+	std::vector<std::string> list_snapshots() {
+		std::vector<std::string> r;
+		for (auto& v : snapshots) r.push_back(v.first);
+		return r;
+	}
+	
+	void set_random_seed(uint32_t value) {
+		funcs.st.lcg_rand_state = value;
+	}
+	
+	Unit create_unit(int owner, int type, Position pos) {
+		return funcs.get_unit(funcs.trigger_create_unit(funcs.get_unit_type((bwgame::UnitTypes)type), {pos.x, pos.y}, owner));
+	}
+	void kill_unit(Unit u) {
+		if (u->u) funcs.kill_unit(u->u);
+	}
+	void remove_unit(Unit u) {
+		if (u->u) {
+			funcs.hide_unit(u->u);
+			funcs.kill_unit(u->u);
+		}
+	}
 };
 
 void Game::start() {
@@ -1186,15 +1279,15 @@ void Game::start() {
 Game::Game() : impl(std::make_unique<Game_impl>()) {}
 
 bool Game::isInGame() const {
-	return impl->is_in_game;
+	return impl->vars.is_in_game;
 }
 
 void Game::leaveGame() {
-	impl->left_game = true;
+	impl->vars.left_game = true;
 }
 
 void Game::restartGame() {
-	impl->left_game = true;
+	impl->vars.left_game = true;
 }
 
 void Game::enableFlag(Flag flag) {
@@ -1249,17 +1342,17 @@ int Game::getFrameCount() {
 }
 
 bool Game::isReplay() {
-	return impl->funcs.is_replay;
+	return impl->vars.is_replay;
 }
 
 Player Game::self() {
-	if (impl->funcs.local_player_id == -1) return nullptr;
-	return impl->funcs.get_player(impl->funcs.local_player_id);
+	if (impl->vars.local_player_id == -1) return nullptr;
+	return impl->funcs.get_player(impl->vars.local_player_id);
 }
 
 Player Game::enemy() {
-	if (impl->funcs.enemy_player_id == -1) return nullptr;
-	return impl->funcs.get_player(impl->funcs.enemy_player_id);
+	if (impl->vars.enemy_player_id == -1) return nullptr;
+	return impl->funcs.get_player(impl->vars.enemy_player_id);
 }
 
 Player Game::neutral() {
@@ -1267,40 +1360,19 @@ Player Game::neutral() {
 }
 
 const std::vector<Player>& Game::getPlayers() {
-	auto& players = impl->funcs.players;
-	if (players.empty()) {
-		for (auto& v : impl->st.players) {
-			if (v.controller == bwgame::player_t::controller_occupied) {
-				players.push_back(impl->funcs.get_player((size_t)(&v - impl->st.players.data())));
-			}
-		}
-	}
-	return players;
-//	return bwgame::make_transform_range(bwgame::make_filter_range(st.players, [&](auto& v) mutable {
-//		return v.controller == bwgame::player_t::controller_occupied;
-//	}), [&, tmp = Player{}](auto& v) mutable -> Player& {
-//		return tmp = funcs.get_player((size_t)(&v - st.players.data()));
-//	});
+	return impl->funcs.get_players();
 }
 
 bool Game::isExplored(int x, int y) {
-	return impl->funcs.player_position_is_explored(impl->funcs.local_player_id, {x, y});
+	return impl->funcs.player_position_is_explored(impl->vars.local_player_id, {x, y});
 }
 
 bool Game::isVisible(int x, int y) {
-	return impl->funcs.player_position_is_visible(impl->funcs.local_player_id, {x, y});
+	return impl->funcs.player_position_is_visible(impl->vars.local_player_id, {x, y});
 }
 
 const std::vector<Bullet>& Game::getBullets() {
-	auto& bullets = impl->funcs.bullets;
-	bullets.clear();
-	for (auto* b : ptr(impl->st.active_bullets)) {
-		bullets.push_back(b);
-	}
-	return bullets;
-//	return bwgame::make_transform_range(ptr(st.active_bullets), [tmp = Bullet{}](bwgame::bullet_t* b) mutable -> Bullet& {
-//		return tmp = Bullet{b};
-//	});
+	return impl->funcs.get_bullets();
 }
 
 const std::vector<Unit>& Game::getNeutralUnits() {
@@ -1308,7 +1380,7 @@ const std::vector<Unit>& Game::getNeutralUnits() {
 }
 
 const std::vector<Event>& Game::getEvents() {
-	return impl->events;
+	return impl->vars.events;
 }
 
 bool Game::isWalkable(int x, int y) {
@@ -1331,6 +1403,52 @@ void Game::vPrintf(const char *fmt, va_list args) {
 void Game::update() {
 	impl->update();
 }
+
+void Game::saveSnapshot(std::string id) {
+	impl->save_snapshot(std::move(id));
+}
+
+void Game::loadSnapshot(const std::string& id) {
+	impl->load_snapshot(id);
+}
+
+void Game::deleteSnapshot(const std::string& id) {
+	impl->delete_snapshot(id);
+}
+
+std::vector<std::string> Game::listSnapshots() {
+  return impl->list_snapshots();
+}
+
+Unit Game::createUnit(Player player, int type, Position pos)
+{
+  return impl->create_unit(player->getID(), type, pos);
+}
+
+void Game::killUnit(Unit u)
+{
+	impl->kill_unit(u);
+}
+
+void Game::removeunit(Unit u)
+{
+	impl->remove_unit(u);
+}
+
+void Game::setRandomSeed(uint32_t value) {
+	impl->set_random_seed(value);
+}
+
+void Game::randomizeRandomSeed() {
+	impl->set_random_seed(impl->rng<uint32_t>());
+}
+
+void Game::disableTriggers()
+{
+	impl->funcs.st.trigger_timer = -1;
+}
+
+
 
 Position UnitCommand::getTargetPosition() const {
 	return target ? target->getPosition() : Position();
