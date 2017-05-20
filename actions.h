@@ -1307,10 +1307,14 @@ struct action_functions: state_functions {
 	bool read_action(reader_T&& r) {
 		auto rs = make_thingy_setter(allow_random, true);
 		int player_id = r.template get<uint8_t>();
-		int action_id = r.template get<uint8_t>();
 		auto i = std::find(action_st.player_id.begin(), action_st.player_id.end(), player_id);
 		if (i == action_st.player_id.end()) error("execute_action: player id %d not found", player_id);
 		int owner = (int)(i - action_st.player_id.begin());
+		return read_action(owner, r);
+	}
+	template<typename reader_T>
+	bool read_action(int owner, reader_T&& r) {
+		int action_id = r.template get<uint8_t>();
 		on_action(owner, action_id);
 		switch (action_id) {
 		case 9:
@@ -1405,9 +1409,14 @@ struct action_functions: state_functions {
 		return false;
 	}
 
-	bool read_action(uint8_t* data, size_t data_size) {
+	bool read_action(const uint8_t* data, size_t data_size) {
 		data_loading::data_reader_le r(data, data + data_size);
 		return read_action(r);
+	}
+	
+	bool read_action(int owner, const uint8_t* data, size_t data_size) {
+		data_loading::data_reader_le r(data, data + data_size);
+		return read_action(owner, r);
 	}
 
 	void execute_actions(uint8_t* actions_data_begin, uint8_t* actions_data_end) {
