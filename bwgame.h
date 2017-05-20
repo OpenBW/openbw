@@ -7595,6 +7595,19 @@ struct state_functions {
 			order_done(u);
 		}
 	}
+	
+	void order_Neutral(unit_t* u) {
+		unit_t* target = u->auto_target_unit;
+		if (target) {
+			u->auto_target_unit = nullptr;
+			if (!us_hidden(target) && !unit_target_is_undetected(u, target) && target->owner != u->owner) {
+				st.players[u->owner].controller = player_t::controller_computer_game;
+				st.alliances[u->owner][target->owner] = 0;
+				st.alliances[target->owner][u->owner] = 0;
+				error("a neutral unit attacked something. this triggers computer player behavior which is not supported yet :(");
+			}
+		}
+	}
 
 	void execute_main_order(unit_t* u) {
 		switch (u->order_type->id) {
@@ -8068,7 +8081,7 @@ struct state_functions {
 			error("RescuePassive");
 			break;
 		case Orders::Neutral:
-			error("Neutral");
+			order_Neutral(u);
 			break;
 		case Orders::ComputerReturn:
 			error("ComputerReturn");
@@ -21465,6 +21478,7 @@ struct game_load_functions : state_functions {
 					if (controller == player_t::controller_occupied) return true;
 					if (controller == player_t::controller_rescue_passive) return true;
 					if (controller == player_t::controller_unused_rescue_active) return true;
+					if (controller == player_t::controller_neutral) return true;
 					return false;
 				};
 				auto is_neutral_unit = [&]() {
