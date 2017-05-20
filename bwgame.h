@@ -263,6 +263,8 @@ struct state_base_copyable {
 	creep_life_t creep_life;
 	bool update_psionic_matrix;
 	int disruption_webbed_units;
+	bool cheats_enabled;
+	bool cheat_operation_cwal;
 
 	a_vector<location> locations;
 };
@@ -4937,7 +4939,9 @@ struct state_functions {
 			int lowest_cost = target_gas_cost == 0 ? target_mineral_cost : std::min(target_mineral_cost, target_gas_cost);
 			if (lowest_cost) {
 				auto target_max_hp = target->unit_type->hitpoints;
-				time_cost = target_max_hp.raw_value * 3 / (lowest_cost * target->hp_construction_rate.raw_value);
+				auto hp_construction_rate = target->hp_construction_rate;
+				if (st.cheat_operation_cwal) hp_construction_rate *= 16;
+				time_cost = target_max_hp.raw_value * 3 / (lowest_cost * hp_construction_rate.raw_value);
 				if (time_cost) {
 					if (lowest_cost == target_mineral_cost) {
 						mineral_cost = 1;
@@ -4948,11 +4952,11 @@ struct state_functions {
 					}
 				} else {
 					if (target_mineral_cost) {
-						mineral_cost = target_mineral_cost * target->hp_construction_rate.raw_value / (target_max_hp.raw_value * 3);
+						mineral_cost = target_mineral_cost * hp_construction_rate.raw_value / (target_max_hp.raw_value * 3);
 						if (mineral_cost == 0) mineral_cost = 1;
 					} else mineral_cost = 0;
 					if (target_gas_cost) {
-						gas_cost = target_gas_cost * target->hp_construction_rate.raw_value / (target_max_hp.raw_value * 3);
+						gas_cost = target_gas_cost * hp_construction_rate.raw_value / (target_max_hp.raw_value * 3);
 						if (gas_cost == 0) gas_cost = 1;
 					} else gas_cost = 0;
 					time_cost = 1;
@@ -4977,7 +4981,8 @@ struct state_functions {
 					return;
 				}
 			} else --u->worker.repair_timer;
-			set_unit_hp(target, target->hp + target->hp_construction_rate);
+			if (st.cheat_operation_cwal) set_unit_hp(target, target->hp + target->hp_construction_rate * 16);
+			else set_unit_hp(target, target->hp + target->hp_construction_rate);
 			if (target->hp >= target->unit_type->hitpoints) {
 				sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
 				order_done(u);
@@ -5293,7 +5298,7 @@ struct state_functions {
 			done();
 			return;
 		}
-		if (u->building.upgrade_research_time-- == 0 || player_has_researched(u->owner, tech->id)) {
+		if (u->building.upgrade_research_time-- == 0 || player_has_researched(u->owner, tech->id) || st.cheat_operation_cwal) {
 			// todo: callback for sound
 			st.tech_researched[u->owner][tech->id] = true;
 			done();
@@ -5314,7 +5319,7 @@ struct state_functions {
 			return;
 		}
 		bool already_upgraded = player_upgrade_level(u->owner, upgrade->id) >= u->building.upgrading_level;
-		if (u->building.upgrade_research_time-- == 0 || already_upgraded) {
+		if (u->building.upgrade_research_time-- == 0 || already_upgraded || st.cheat_operation_cwal) {
 			// todo: callback for sound
 			if (!already_upgraded && player_max_upgrade_level(u->owner, upgrade->id) >= u->building.upgrading_level) {
 				st.upgrade_levels[u->owner][upgrade->id] = u->building.upgrading_level;
@@ -6303,8 +6308,12 @@ struct state_functions {
 			u->remaining_build_time = unit_type->build_time;
 			u->order_state = 1;
 		} else if (u->order_state == 1) {
-			if (u->remaining_build_time) --u->remaining_build_time;
-			else {
+			if (u->remaining_build_time) {
+				if (st.cheat_operation_cwal) {
+					if (u->remaining_build_time > 16) u->remaining_build_time -= 16;
+					else u->remaining_build_time = 0;
+				} else --u->remaining_build_time;
+			} else {
 				sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
 				u->order_state = 2;
 			}
@@ -6538,9 +6547,15 @@ struct state_functions {
 			}
 			return;
 		}
-		if (u->remaining_build_time) --u->remaining_build_time;
+		if (u->remaining_build_time) {
+			if (st.cheat_operation_cwal) {
+				if (u->remaining_build_time > 16) u->remaining_build_time -= 16;
+				else u->remaining_build_time = 0;
+			} else --u->remaining_build_time;
+		}
 		if (!unit_type_is_morphing_building(build_type)) {
-			set_unit_hp(u, u->hp + u->hp_construction_rate);
+			if (st.cheat_operation_cwal) set_unit_hp(u, u->hp + u->hp_construction_rate * 16);
+			else set_unit_hp(u, u->hp + u->hp_construction_rate);
 		}
 	}
 
@@ -7007,9 +7022,16 @@ struct state_functions {
 				sprite_run_anim(u->sprite, iscript_anims::Disable);
 			}
 		}
-		if (u->remaining_build_time) --u->remaining_build_time;
-		set_unit_hp(u, u->hp + u->hp_construction_rate);
-		set_unit_shield_points(u, u->shield_points + u->shield_construction_rate);
+		if (st.cheat_operation_cwal) {
+			if (u->remaining_build_time > 16) u->remaining_build_time -= 16;
+			else u->remaining_build_time = 0;
+			set_unit_hp(u, u->hp + u->hp_construction_rate * 16);
+			set_unit_shield_points(u, u->shield_points + u->shield_construction_rate * 16);
+		} else {
+			if (u->remaining_build_time) --u->remaining_build_time;
+			set_unit_hp(u, u->hp + u->hp_construction_rate);
+			set_unit_shield_points(u, u->shield_points + u->shield_construction_rate);
+		}
 	}
 	
 	void order_InitializePsiProvider(unit_t* u) {
@@ -7089,8 +7111,12 @@ struct state_functions {
 	
 	void order_CompletingArchonSummon(unit_t* u) {
 		if (u->order_state == 0) {
-			if (u->remaining_build_time) --u->remaining_build_time;
-			else {
+			if (u->remaining_build_time) {
+				if (st.cheat_operation_cwal) {
+					if (u->remaining_build_time > 16) u->remaining_build_time -= 16;
+					else u->remaining_build_time = 0;
+				} else --u->remaining_build_time;
+			} else {
 				u->sprite->flags &= ~sprite_t::flag_iscript_nobrk;
 				sprite_run_anim(u->sprite, iscript_anims::Init);
 				u->order_state = 1;
@@ -8098,10 +8124,19 @@ struct state_functions {
 	}
 
 	bool resume_building_unit(unit_t* u, bool place_when_completed) {
-		set_unit_hp(u, u->hp + u->hp_construction_rate);
-		if (u->remaining_build_time) {
-			--u->remaining_build_time;
-			return true;
+		if (st.cheat_operation_cwal) {
+			set_unit_hp(u, u->hp + u->hp_construction_rate * 16);
+			if (u->remaining_build_time) {
+				if (u->remaining_build_time > 16) u->remaining_build_time -= 16;
+				else u->remaining_build_time = 0;
+				return true;
+			}
+		} else {
+			set_unit_hp(u, u->hp + u->hp_construction_rate);
+			if (u->remaining_build_time) {
+				--u->remaining_build_time;
+				return true;
+			}
 		}
 		finish_building_unit(u);
 		if (place_when_completed) {
@@ -19849,6 +19884,9 @@ struct game_load_functions : state_functions {
 		st.creep_life = {};
 		st.update_psionic_matrix = false;
 		st.disruption_webbed_units = 0;
+		st.cheats_enabled = false;
+		
+		st.locations.clear();
 	}
 
 	regions_t::region* get_new_region() {

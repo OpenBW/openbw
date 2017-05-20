@@ -987,6 +987,23 @@ struct action_functions: state_functions {
 		}
 		return true;
 	}
+	
+	bool action_cheat(int owner, int flags) {
+		if (!st.cheats_enabled) return false;
+		st.cheat_operation_cwal = (flags & 2) != 0;
+		if (flags & 2) flags &= ~2;
+		if (flags & 0x10) {
+			flags &=  ~0x10;
+			for (size_t i = 0; i != 12; ++i) {
+				if (st.players[i].controller == player_t::controller_occupied) {
+					st.current_minerals[i] += 10000;
+					st.current_gas[i] += 10000;
+				}
+			}
+		}
+		if (flags) error("unknown cheat flag(s) %#x", flags);
+		return true;
+	}
 
 	template<typename reader_T>
 	bool read_action_select(int owner, reader_T&& r) {
@@ -1276,6 +1293,12 @@ struct action_functions: state_functions {
 	bool read_action_reaver_stop(int owner, reader_T&& r) {
 		return action_reaver_stop(owner);
 	}
+	
+	template<typename reader_T>
+	bool read_action_cheat(int owner, reader_T&& r) {
+		int flags = r.template get<uint32_t>();
+		return action_cheat(owner, flags);
+	}
 
 	virtual void on_action(int owner, int action) {
 	}
@@ -1302,6 +1325,8 @@ struct action_functions: state_functions {
 			return read_action_set_shared_vision(owner, r);
 		case 14:
 			return read_action_set_alliances(owner, r);
+		case 18:
+			return read_action_cheat(owner, r);
 		case 19:
 			return read_action_control_group(owner, r);
 		case 20:
