@@ -19654,7 +19654,7 @@ struct game_load_functions : state_functions {
 		int victory_condition = 0;
 		int tournament_mode = 0;
 		int starting_units = 0;
-		int resource_type = 1;
+		int resource_type = 0;
 		int starting_minerals = 50;
 		bool create_no_units = false;
 	};
