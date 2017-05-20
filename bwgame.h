@@ -6921,6 +6921,10 @@ struct state_functions {
 		if (!u->order_queue.empty()) activate_next_order(u);
 	}
 	
+	void order_QueenHoldPosition(unit_t* u) {
+		order_SuicideHoldPosition(u);
+	}
+	
 	void order_PlaceProtossBuilding(unit_t* u) {
 		if (u->order_state == 0) {
 			set_unit_move_target(u, u->order_target.pos);
@@ -7951,6 +7955,9 @@ struct state_functions {
 			break;
 		case Orders::HoldPosition:
 			order_HoldPosition(u);
+			break;
+		case Orders::QueenHoldPosition:
+			order_QueenHoldPosition(u);
 			break;
 		case Orders::Unload:
 			order_Unload(u);
