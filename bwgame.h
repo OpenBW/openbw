@@ -141,8 +141,6 @@ struct game_state {
 	size_t map_width;
 	size_t map_height;
 
-	a_string map_file_name;
-
 	a_vector<a_string> map_strings;
 
 	a_string scenario_name;
@@ -18905,7 +18903,7 @@ struct state_functions {
 		}
 
 		if (unit_dying(u)) return false;
-		if (ut_powerup(u)) error("trigger remove unit fixme: powerup");
+		if (ut_powerup(u)) error("trigger_unit_pred: powerup");
 		if (!trigger_players_pred(owner, player, u->owner)) return false;
 		if (uid == 229) return true;
 		else if (uid == 230) {
@@ -18950,7 +18948,7 @@ struct state_functions {
 			st.trigger_wait_timers[owner] = a.time_n;
 			ra.flags |= 1;
 			return false;
-		case 15:
+		case 15: // ai script
 			switch (a.group2_n) {
 			case 0x3069562b:
 				st.shared_vision[0] |= 1 << owner;
@@ -19068,8 +19066,9 @@ struct state_functions {
 				}
 			}
 			return true;
-		case 26:
+		case 26: // set resources
 			for (int p : trigger_players(owner, a.group_n)) {
+				if (p >= 8) continue;
 				if (a.num_n == 7) {
 					if (a.extra_n == 0 || a.extra_n == 2) {
 						st.current_minerals[p] = a.group2_n;
@@ -21302,21 +21301,22 @@ struct game_load_functions : state_functions {
 				unit_type->gas_cost = gas_cost[i];
 				unit_type->unit_map_string_index = string_index[i];
 				const unit_type_t* attacking_type = unit_type->turret_unit_type ? (const unit_type_t*)unit_type->turret_unit_type : unit_type;
-				weapon_type_t* ground_weapon = &game_st.weapon_types.vec.at((size_t)attacking_type->ground_weapon->id);
-				weapon_type_t* air_weapon = &game_st.weapon_types.vec.at((size_t)attacking_type->air_weapon->id);
-				if (ground_weapon) {
-					ground_weapon->damage_amount = weapon_damage[(size_t)ground_weapon->id];
-					ground_weapon->damage_bonus =  weapon_bonus_damage[(size_t)ground_weapon->id];
+				weapon_type_t* ground_weapon = (weapon_type_t*)(const weapon_type_t*)attacking_type->ground_weapon;
+				weapon_type_t* air_weapon = (weapon_type_t*)(const weapon_type_t*)attacking_type->air_weapon;
+				if (ground_weapon && (size_t)ground_weapon->id < weapon_damage.size()) {
+					ground_weapon->damage_amount = weapon_damage.at((size_t)ground_weapon->id);
+					ground_weapon->damage_bonus =  weapon_bonus_damage.at((size_t)ground_weapon->id);
 				}
-				if (air_weapon) {
-					air_weapon->damage_amount = weapon_damage[(size_t)air_weapon->id];
-					air_weapon->damage_bonus = weapon_bonus_damage[(size_t)air_weapon->id];
+				if (air_weapon && (size_t)air_weapon->id < weapon_damage.size()) {
+					air_weapon->damage_amount = weapon_damage.at((size_t)air_weapon->id);
+					air_weapon->damage_bonus = weapon_bonus_damage.at((size_t)air_weapon->id);
 				}
 			}
 		};
 
 		auto upgrades = [&](data_reader_le r, bool broodwar) {
 			auto uses_default_settings = r.get_vec<uint8_t>(broodwar ? 61 : 46);
+			if (broodwar) r.get<uint8_t>();
 			auto mineral_cost = r.get_vec<uint16_t>(broodwar ? 61 : 46);
 			auto mineral_cost_factor = r.get_vec<uint16_t>(broodwar ? 61 : 46);
 			auto gas_cost = r.get_vec<uint16_t>(broodwar ? 61 : 46);
