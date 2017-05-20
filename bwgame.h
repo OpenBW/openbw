@@ -19218,6 +19218,7 @@ struct state_functions {
 		if (unit_type_spreads_creep(unit_type, unit_is_completed)) {
 			r.from = pos - xy(320, 200);
 			r.to = pos + xy(320, 200);
+		} else {
 			r.from = (pos / 32 - unit_type->placement_size / 32 / 2) * 32;
 			r.to = (r.from / 32 + unit_type->placement_size / 32 - xy(1, 1)) * 32;
 		}
