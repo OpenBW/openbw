@@ -184,7 +184,7 @@ struct replay_functions: action_functions {
 		}
 		
 		auto player_color = gir.get<std::array<uint32_t, 8>>(); // player colors
-		auto player_force = gir.get<std::array<uint8_t, 8>>(); // player force ?
+		auto create_melee_units_for_player = gir.get<std::array<uint8_t, 8>>();
 		
 		replay_st.end_frame = frame_count;
 		
@@ -208,7 +208,7 @@ struct replay_functions: action_functions {
 				st.players[i].force = slot_force[i];
 				if (victory_condition == 0 && tournament_mode == 0) {
 					if (i >= 8) game_load_funcs.setup_info.create_melee_units_for_player[i] = false;
-					else game_load_funcs.setup_info.create_melee_units_for_player[i] = player_force[i] != 0;
+					else game_load_funcs.setup_info.create_melee_units_for_player[i] = create_melee_units_for_player[i] != 0;
 				}
 			}
 			st.lcg_rand_state = random_seed;
