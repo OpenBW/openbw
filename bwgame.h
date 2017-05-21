@@ -21097,18 +21097,18 @@ struct game_load_functions : state_functions {
 		}
 	};
 
-	void load_map_file(a_string filename, std::function<void()> setup_f = {}) {
-		load_map(data_loading::mpq_file<>(std::move(filename)), std::move(setup_f));
+	void load_map_file(a_string filename, std::function<void()> setup_f = {}, bool initial_processing = true) {
+		load_map(data_loading::mpq_file<>(std::move(filename)), std::move(setup_f), initial_processing);
 	}
 
 	template<typename load_data_file_F>
-	void load_map(load_data_file_F&& load_data_file, std::function<void()> setup_f = {}) {
+	void load_map(load_data_file_F&& load_data_file, std::function<void()> setup_f = {}, bool initial_processing = true) {
 		a_vector<uint8_t> data;
 		load_data_file(data, "staredit/scenario.chk");
-		load_map_data(data.data(), data.size(), std::move(setup_f));
+		load_map_data(data.data(), data.size(), std::move(setup_f), initial_processing);
 	}
 
-	void load_map_data(uint8_t* data, size_t data_size, std::function<void()> setup_f = {}) {
+	void load_map_data(uint8_t* data, size_t data_size, std::function<void()> setup_f = {}, bool initial_processing = true) {
 
 		using data_loading::data_reader_le;
 
@@ -21766,6 +21766,11 @@ struct game_load_functions : state_functions {
 		}
 
 		allow_random = false;
+		
+		if (initial_processing) {
+			process_frame();
+			process_frame();
+		}
 
 	}
 };
@@ -22223,11 +22228,7 @@ public:
 	void load_map_file(const a_string& filename, bool initial_processing = true) {
 		if (!opt_funcs) error("game_player: not initialized");
 		game_load_functions game_load_funcs(st());
-		game_load_funcs.load_map_file(std::move(filename));
-		if (initial_processing) {
-			funcs().process_frame();
-			funcs().process_frame();
-		}
+		game_load_funcs.load_map_file(std::move(filename), {}, initial_processing);
 	}
 	void next_frame() {
 		if (!opt_funcs) error("game_player: not initialized");
