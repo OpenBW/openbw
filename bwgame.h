@@ -20401,8 +20401,10 @@ struct game_load_functions : state_functions {
 				if (r->tile_count == 0) continue;
 				size_t new_index = new_region_count++;
 				reindex[i] = new_index;
-				r->index = new_index;
-				game_st.regions.regions[new_index] = std::move(*r);
+				if (i != new_index) {
+					r->index = new_index;
+					game_st.regions.regions[new_index] = std::move(*r);
+				}
 			}
 			for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 				for (size_t x = 0; x != game_st.map_tile_width; ++x) {
