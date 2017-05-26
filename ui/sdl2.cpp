@@ -14,6 +14,7 @@
 #include <array>
 #include <cstdlib>
 #include <memory>
+#include <csignal>
 
 using bwgame::ui::log;
 using bwgame::ui::fatal_error;
@@ -26,11 +27,13 @@ void sdl_init() {
 #ifndef OPENBW_NO_SDL_IMAGE
 		IMG_Init(IMG_INIT_PNG);
 #endif
+		auto original_handler = signal(SIGINT, SIG_DFL);
 		if (SDL_Init(SDL_INIT_VIDEO) == 0) {
 			sdl_initialized = true;
 		} else {
 			log("SDL_Init failed: %s\n", SDL_GetError());
 		}
+		signal(SIGINT, original_handler);
 	}
 }
 
