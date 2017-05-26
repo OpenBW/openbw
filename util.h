@@ -392,6 +392,7 @@ public:
 	using value_type = T;
 	optional() = default;
 	optional(nullopt_t) noexcept {}
+	template<typename NT = T, typename std::enable_if<std::is_copy_constructible<NT>::value>::type* = nullptr>
 	optional(const optional& n) {
 		if (n.has_obj) {
 			has_obj = true;
@@ -417,6 +418,7 @@ public:
 		if (has_obj) destroy();
 		return *this;
 	}
+	template<typename NT = T, typename std::enable_if<std::is_copy_assignable<NT>::value>::type* = nullptr>
 	optional& operator=(const optional& n) noexcept(std::is_nothrow_move_assignable<value_type>::value && std::is_nothrow_move_constructible<value_type>::value) {
 		if (!n.has_obj) *this = nullopt;
 		else {
