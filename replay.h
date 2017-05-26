@@ -20,9 +20,9 @@ struct crc32_t {
 			table[i] = v;
 		}
 	}
-	uint32_t operator()(uint8_t* data, size_t data_size) {
+	uint32_t operator()(const uint8_t* data, size_t data_size) {
 		uint32_t r = 0xffffffff;
-		uint8_t* end = data + data_size;
+		const uint8_t* end = data + data_size;
 		for (; data != end; ++data) {
 			r = (r >> 8) ^ table[(r ^ *data) & 0xff];
 		}
