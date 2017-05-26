@@ -202,6 +202,14 @@ private:
 		}
 		m_end = e;
 	}
+	void m_clear() {
+		pointer e = ptr_begin();
+		for (pointer i = ptr_end(); i != e; --i) {
+			m_destroy(i - 1);
+		}
+		m_end = e;
+	}
+	template<typename VT = value_type, typename std::enable_if<std::is_copy_constructible<VT>::value && std::is_nothrow_copy_assignable<VT>::value, int>::type = 0>
 	void m_assign(const static_vector& other) {
 		auto src_i = other.ptr_begin();
 		pointer dst_i = ptr_begin();
@@ -221,13 +229,42 @@ private:
 		}
 		m_end = e;
 	}
-	template<typename VT = value_type, typename std::enable_if<std::is_nothrow_move_constructible<VT>::value &&std::is_nothrow_move_assignable<VT>::value, int>::type = 0>
+	template<typename VT = value_type, typename std::enable_if<std::is_copy_constructible<VT>::value && !std::is_nothrow_copy_assignable<VT>::value, int>::type = 0>
+	void m_assign(const static_vector& other) {
+		m_clear();
+		auto src_i = other.ptr_begin();
+		pointer dst_i = ptr_begin();
+		auto e = ptr_begin() + other.size();
+		for (; src_i != other.ptr_end(); ++src_i, ++dst_i) {
+			try {
+				new (dst_i) value_type(*src_i);
+			} catch (...) {
+				for (pointer i2 = dst_i; i2 > ptr_end(); --i2) {
+					m_destroy(i2 - 1);
+				}
+				throw;
+			}
+		}
+		m_end = e;
+	}
+	template<typename VT = value_type, typename std::enable_if<std::is_nothrow_move_constructible<VT>::value && std::is_nothrow_move_assignable<VT>::value, int>::type = 0>
 	void m_assign(static_vector&& other) {
 		auto src_i = other.ptr_begin();
 		pointer dst_i = ptr_begin();
 		for (; dst_i != ptr_end() && src_i != other.ptr_end(); ++src_i, ++dst_i) {
 			*dst_i = std::move(*src_i);
 		}
+		auto e = ptr_begin() + other.size();
+		for (; src_i != other.ptr_end(); ++src_i, ++dst_i) {
+			new (dst_i) value_type(std::move(*src_i));
+		}
+		m_end = e;
+	}
+	template<typename VT = value_type, typename std::enable_if<std::is_nothrow_move_constructible<VT>::value && !std::is_nothrow_move_assignable<VT>::value, int>::type = 0>
+	void m_assign(static_vector&& other) {
+		m_clear();
+		auto src_i = other.ptr_begin();
+		pointer dst_i = ptr_begin();
 		auto e = ptr_begin() + other.size();
 		for (; src_i != other.ptr_end(); ++src_i, ++dst_i) {
 			new (dst_i) value_type(std::move(*src_i));
@@ -372,7 +409,7 @@ public:
 		return max_elements;
 	}
 	void clear() {
-		m_resize(0);
+		m_clear();
 	}
 	void push_back(const T& value) {
 		if (size() == capacity()) throw std::length_error("static_vector resized beyond capacity");
