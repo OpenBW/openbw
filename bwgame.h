@@ -18700,6 +18700,12 @@ struct state_functions {
 			return false;
 		}
 	}
+	
+	auto trigger_players(int owner, int player) const {
+		return make_filter_range(all_player_slots, [this, owner, player](int n) {
+			return trigger_players_pred(owner, player, n);
+		});
+	}
 
 	template<typename T>
 	int command_count(const T& count_obj, int owner, int player, int unit_id, bool completed_units) const {
@@ -18877,12 +18883,6 @@ struct state_functions {
 		case 26: return owner != n && (st.alliances[owner][n] != 2 || st.alliances[n][owner] != 2); // non allied victory
 		default: return false;
 		}
-	}
-
-	auto trigger_players(int owner, int player) const {
-		return make_filter_range(all_player_slots, [this, owner, player](int n) {
-			return trigger_players_pred(owner, player, n);
-		});
 	}
 
 	bool unit_is_at_elevation_flags(const unit_t* u, int elevation_flags) const {
