@@ -121,6 +121,8 @@ struct global_state {
 	a_vector<uint8_t> weapons_dat;
 	a_vector<uint8_t> upgrades_dat;
 	a_vector<uint8_t> techdata_dat;
+	
+	a_vector<uint8_t> melee_trg;
 
 	std::array<a_vector<uint8_t>, 8> tileset_vf4;
 	std::array<a_vector<uint8_t>, 8> tileset_cv5;
@@ -334,8 +336,8 @@ struct state_functions {
 	virtual void on_unit_destroy(unit_t* u) {}
 	virtual void on_kill_unit(unit_t* u) {}
 	
-	virtual void on_victory(int player) {}
-	virtual void on_defeat(int player) {}
+	virtual void on_player_eliminated(int owner) {}
+	virtual void on_victory_state(int owner, int state) {}
 	
 	virtual ~state_functions() {}
 
@@ -13034,6 +13036,22 @@ struct state_functions {
 			break;
 		}
 	}
+	
+	auto active_players() const {
+		return make_filter_range(all_player_slots, [this](int n) {
+			return player_slot_active(n);
+		});
+	}
+	
+	void remove_player(int owner) {
+		if (st.players.at(owner).controller == player_t::controller_occupied) {
+			st.players[owner].controller = player_t::controller_user_left;
+		}
+		for (auto i = st.player_units[owner].begin(); i != st.player_units[owner].end();) {
+			unit_t* u = &*i++;
+			make_unit_neutral(u);
+		}
+	}
 
 	void process_frame() {
 		recede_creep();
@@ -13074,9 +13092,11 @@ struct state_functions {
 			return;
 		}
 		st.trigger_timer = 30;
+		
+		execute_trigger_struct ets;
 
-		for (int i = 0; i != 8; ++i) {
-			if (st.players[i].controller != player_t::controller_occupied) continue;
+		bool any_triggers_executed = false;
+		for (int i : active_players()) {
 			for (auto& rt : st.running_triggers[i]) {
 				if (rt.flags & 8) continue;
 				auto& t = *rt.t;
@@ -13092,7 +13112,44 @@ struct state_functions {
 				}
 				if (execute_now) {
 					rt.current_action_index = 0;
-					execute_trigger(i, rt, t);
+					execute_trigger(ets, i, rt, t);
+					any_triggers_executed = true;
+				}
+			}
+		}
+		
+		if (any_triggers_executed) {
+			int winners = 0;
+			for (int p : active_players()) {
+				if (player_won(p)) {
+					++winners;
+				}
+			}
+			if (winners) {
+				for (int p : active_players()) {
+					if (ets.victory_state[p] == 0) ets.victory_state[p] = 2;
+				}
+				int initially_active_count = 0;
+				for (auto& v : st.players) {
+					if (v.initially_active) ++initially_active_count;
+				}
+				if (winners == initially_active_count) {
+					for (auto& v : st.players) {
+						if (v.initially_active) ets.victory_state.at(&v - st.players.data()) = 5;
+					}
+				}
+			}
+			for (int i = 0; i != 8; ++i) {
+				int s = ets.victory_state[i];
+				if (s != st.players[i].victory_state) {
+					st.players[i].victory_state = s;
+					if (s == 2) {
+						on_player_eliminated(i);
+						remove_player(i);
+					}
+				}
+				if (s && s != 4) {
+					st.running_triggers[i].clear();
 				}
 			}
 		}
@@ -18696,7 +18753,7 @@ struct state_functions {
 	}
 
 	template<typename T>
-	int command_count(const T& count_obj, int owner, int player, int unit_id, bool completed_units) const {
+	int trigger_command_count(const T& count_obj, int owner, int player, int unit_id, bool completed_units) const {
 		int r = 0;
 		for (int p : trigger_players(owner, player)) {
 			if (completed_units) {
@@ -18782,16 +18839,28 @@ struct state_functions {
 		}
 		return r;
 	}
+	
+	int trigger_opponent_count(int owner, int player) const {
+		int r = 0;
+		for (int p : trigger_players(owner, player)) {
+			for (int p2 : trigger_players(p, 26)) {
+				++r;
+			}
+		}
+		return r;
+	}
 
 	bool test_trigger_condition(const trigger::condition& c, int owner) const {
 		switch (c.type) {
-		case 2:
-			return trigger_count_comparison(c, command_count(st, owner, c.group, c.unit_id, c.num_n != 1));
+		case 2: // command
+			return trigger_count_comparison(c, trigger_command_count(st, owner, c.group, c.unit_id, c.num_n != 1));
 		case 3: // bring
-			return trigger_count_comparison(c, command_count(trigger_bring_count(st.locations.at(c.location - 1)), owner, c.group, c.unit_id, c.num_n != 1));
-		case 12:
+			return trigger_count_comparison(c, trigger_command_count(trigger_bring_count(st.locations.at(c.location - 1)), owner, c.group, c.unit_id, c.num_n != 1));
+		case 12: // elapsed time
 			return trigger_count_comparison(c, st.current_frame);
-		case 22:
+		case 14: // opponents
+			return trigger_count_comparison(c, trigger_opponent_count(owner, c.group));
+		case 22: // always
 			return true;
 		default:
 			error("unknown trigger condition %d\n", c.type);
@@ -18843,17 +18912,27 @@ struct state_functions {
 		}
 		return u;
 	}
+	
+	bool player_won(int owner) const {
+		return st.players.at(owner).victory_state >= 3;
+	}
+	
+	bool player_defeated(int owner) const {
+		int s = st.players.at(owner).victory_state;
+		return s && !player_won(owner);
+	}
 
 	bool player_slot_active(int n) const {
-		auto c = st.players[n].controller;
-		if (c == player_t::controller_occupied) return true;
-		if (c == player_t::controller_computer_game) return true;
+		if (n >= 8) return false;
+		auto c = st.players.at(n).controller;
+		if (c == player_t::controller_occupied) return !player_defeated(n);
+		if (c == player_t::controller_computer_game) return !player_defeated(n);
 		if (c == player_t::controller_neutral) return true;
 		if (c == player_t::controller_rescue_passive) return true;
 		if (c == player_t::controller_unused_rescue_active) return true;
 		return false;
 	}
-
+	
 	bool trigger_players_pred(int owner, int player, int n) const {
 		if (!player_slot_active(n)) return false;
 		if (player < 12) return n == player; // player index
@@ -18920,14 +18999,22 @@ struct state_functions {
 		}
 		return nullptr;
 	}
+	
+	struct execute_trigger_struct {
+		std::array<int, 12> victory_state{};
+	};
 
-	bool execute_trigger_action(int owner, running_trigger& rt, running_trigger::action& ra, const trigger::action& a) {
+	bool execute_trigger_action(execute_trigger_struct& ets, int owner, running_trigger& rt, running_trigger::action& ra, const trigger::action& a) {
 		switch (a.type) {
 		case 1: // victory
-			on_victory(owner);
+			if (st.players[owner].controller == player_t::controller_occupied || st.players[owner].controller == player_t::controller_computer_game) {
+				ets.victory_state[owner] = 3;
+			}
 			return true;
 		case 2: // defeat
-			on_defeat(owner);
+			if (st.players[owner].controller == player_t::controller_occupied || st.players[owner].controller == player_t::controller_computer_game) {
+				ets.victory_state[owner] = 2;
+			}
 			return true;
 		case 3: // preserve trigger
 			rt.flags |= 4;
@@ -19182,14 +19269,14 @@ struct state_functions {
 		}
 	}
 
-	void execute_trigger(int owner, running_trigger& rt, const trigger& t) {
+	void execute_trigger(execute_trigger_struct& ets, int owner, running_trigger& rt, const trigger& t) {
 		rt.flags |= 1;
 		size_t index = rt.current_action_index;
 		for (;index != 64; ++index) {
 			auto& a = t.actions[index];
 			if (a.flags & 2) continue;
 			if (a.type == 0) index = 63;
-			else if (!execute_trigger_action(owner, rt, rt.actions[index], a)) break;
+			else if (!execute_trigger_action(ets, owner, rt, rt.actions[index], a)) break;
 		}
 		rt.current_action_index = index;
 		if (index == 64) {
@@ -21730,6 +21817,18 @@ struct game_load_functions : state_functions {
 				});
 			}
 		} else error("unsupported map version %d", version);
+		
+		if (!use_map_settings) {
+			if (setup_info.victory_condition == 1) {
+				data_reader_le r(global_st.melee_trg.data(), global_st.melee_trg.data() + global_st.melee_trg.size());
+				tag_funcs["TRIG"](r);
+			}
+		}
+		
+		for (auto& v : st.players) v.initially_active = false;
+		for (int p : active_players()) {
+			st.players[p].initially_active = true;
+		}
 
 		for (size_t i = 8; i;) {
 			--i;
@@ -22143,6 +22242,8 @@ void global_init(global_state& st, load_data_file_F&& load_data_file) {
 	load_data_file(st.weapons_dat, "arr/weapons.dat");
 	load_data_file(st.upgrades_dat, "arr/upgrades.dat");
 	load_data_file(st.techdata_dat, "arr/techdata.dat");
+	
+	load_data_file(st.melee_trg, "triggers/Melee.trg");
 
 	a_vector<uint8_t> buf;
 	load_data_file(buf, "arr/flingy.dat");

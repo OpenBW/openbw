@@ -978,13 +978,7 @@ struct action_functions: state_functions {
 	}
 	
 	bool action_player_leave(int owner, int reason) {
-		if (st.players.at(owner).controller == player_t::controller_occupied) {
-			st.players[owner].controller = player_t::controller_user_left;
-		}
-		for (auto i = st.player_units[owner].begin(); i != st.player_units[owner].end();) {
-			unit_t* u = &*i++;
-			make_unit_neutral(u);
-		}
+		remove_player(owner);
 		return true;
 	}
 	

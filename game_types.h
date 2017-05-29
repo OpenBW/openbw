@@ -132,6 +132,9 @@ struct player_t {
 	race_t race{};
 	int force = 0;
 	int color = 0;
+	
+	bool initially_active = false;
+	int victory_state = 0;
 };
 
 struct sight_values_t {
