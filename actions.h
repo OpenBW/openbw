@@ -1305,7 +1305,6 @@ struct action_functions: state_functions {
 
 	template<typename reader_T>
 	bool read_action(reader_T&& r) {
-		auto rs = make_thingy_setter(allow_random, true);
 		int player_id = r.template get<uint8_t>();
 		auto i = std::find(action_st.player_id.begin(), action_st.player_id.end(), player_id);
 		if (i == action_st.player_id.end()) error("execute_action: player id %d not found", player_id);

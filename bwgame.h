@@ -347,7 +347,6 @@ struct state_functions {
 	state_functions(state_functions&& n) : st(n.st) {}
 	state_functions(const state_functions& n) : st(n.st) {}
 
-	bool allow_random = false;
 	bool update_tiles = false;
 	flingy_t* iscript_flingy = nullptr;
 	bullet_t* iscript_bullet = nullptr;
@@ -13037,9 +13036,6 @@ struct state_functions {
 	}
 
 	void process_frame() {
-
-		allow_random = true;
-
 		recede_creep();
 
 		if (st.update_tiles_countdown == 0) st.update_tiles_countdown = 100;
@@ -13055,14 +13051,9 @@ struct state_functions {
 		update_units();
 		update_bullets();
 		update_thingies();
-
-		allow_random = false;
-
 	}
 
 	void process_triggers() {
-		allow_random = true;
-
 		int timer_step = 42;
 
 		for (size_t i = 0; i != 12; ++i) {
@@ -13105,8 +13096,6 @@ struct state_functions {
 				}
 			}
 		}
-		
-		allow_random = false;
 	}
 
 	void next_frame() {
@@ -13116,7 +13105,6 @@ struct state_functions {
 	}
 
 	int lcg_rand(int source) {
-		if (!allow_random) return 0;
 		++st.random_counts[source];
 		++st.total_random_counts;
 		st.lcg_rand_state = st.lcg_rand_state * 22695477 + 1;
@@ -21641,8 +21629,6 @@ struct game_load_functions : state_functions {
 			}
 		};
 
-		allow_random = true;
-
 		read_chunks({
 			{"VER ", true},
 			{"DIM ", true},
@@ -21766,8 +21752,6 @@ struct game_load_functions : state_functions {
 				}
 			}
 		}
-
-		allow_random = false;
 		
 		if (initial_processing) {
 			process_frame();

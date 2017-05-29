@@ -572,7 +572,6 @@ struct sync_functions: action_functions {
 			for (auto& v : sync_st.clients) seed_str += v.uid.str();
 			uint32_t rand_state = seed ^ data_loading::crc32_t()((const uint8_t*)seed_str.data(), seed_str.size());
 			st.lcg_rand_state = rand_state;
-			auto rs = funcs.make_thingy_setter(funcs.allow_random, true);
 			
 			for (int i = 0; i != 12; ++i) {
 				auto& v = st.players[i];
