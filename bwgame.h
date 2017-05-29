@@ -19880,6 +19880,8 @@ struct game_load_functions : state_functions {
 		game_st.repulse_field_width = (game_st.map_width + 47) / 48;
 		game_st.repulse_field_height = (game_st.map_height + 47) / 48;
 		st.repulse_field.resize(game_st.repulse_field_width * game_st.repulse_field_height);
+		
+		game_st.triggers.clear();
 
 		st.prev_bullet_source_unit = nullptr;
 		st.consider_collision_with_unit_bug = nullptr;
@@ -19893,6 +19895,7 @@ struct game_load_functions : state_functions {
 		st.update_psionic_matrix = false;
 		st.disruption_webbed_units = 0;
 		st.cheats_enabled = false;
+		st.cheat_operation_cwal = false;
 		
 		st.locations.clear();
 	}
@@ -21628,6 +21631,8 @@ struct game_load_functions : state_functions {
 				st.players[i].color = r.get<uint8_t>();
 			}
 		};
+		
+		st.players = {};
 
 		read_chunks({
 			{"VER ", true},
