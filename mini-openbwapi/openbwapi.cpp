@@ -81,9 +81,6 @@ struct game_vars {
 	bool game_type_melee = false;
 	int local_player_race = 0;
 	int enemy_player_race = 0;
-	
-	std::array<bool, 12> player_has_won{};
-	std::array<bool, 12> player_has_lost{};
 };
 
 struct openbwapi_functions: bwgame::replay_functions {
@@ -122,13 +119,6 @@ struct openbwapi_functions: bwgame::replay_functions {
 		destroyed_units.push_back(id);
 		auto i = units_lookup.find((int)id.raw_value);
 		if (i != units_lookup.end()) i->second->u = nullptr;
-	}
-	
-	virtual void on_victory(int player) override {
-		vars.player_has_won.at(player) = true;
-	}
-	virtual void on_defeat(int player) override {
-		vars.player_has_lost.at(player) = true;
 	}
 
 	void enable_ui() {
@@ -1153,13 +1143,13 @@ struct Game_impl {
 	}
 
 	bool game_is_won() {
-		if (vars.player_has_won.at(vars.local_player_id)) return true;
+		if (funcs.player_won(vars.local_player_id)) return true;
 		if (!vars.game_type_melee) return false;
 		return st.building_counts.at(vars.enemy_player_id) == 0;
 	}
 
 	bool game_is_lost() {
-		if (vars.player_has_lost.at(vars.local_player_id)) return true;
+		if (funcs.player_defeated(vars.local_player_id)) return true;
 		if (!vars.game_type_melee) return false;
 		return st.building_counts.at(vars.local_player_id) == 0;
 	}
