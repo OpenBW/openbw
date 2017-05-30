@@ -1,8 +1,8 @@
 #ifndef BWGAME_SYNC_H
 #define BWGAME_SYNC_H
 
-#include "actions.h"
 #include "bwgame.h"
+#include "actions.h"
 #include "replay.h"
 #include <chrono>
 #include <random>
@@ -57,6 +57,9 @@ struct sync_state {
 		}
 		bool operator==(const uid_t& n) const {
 			return vals == n.vals;
+		}
+		bool operator!=(const uid_t& n) const {
+			return vals != n.vals;
 		}
 		a_string str() {
 			a_string r;
@@ -116,18 +119,8 @@ struct sync_server_noop {
 		timeout_time = std::chrono::steady_clock::now() + duration;
 		timeout_function = std::forward<callback_F>(callback);
 	}
-	a_deque<std::function<void()>> functions_to_call;
-	template<typename F>
-	void dispatch(F&& f) {
-		functions_to_call.push_back(std::forward<F>(f));
-	}
 	template<typename on_new_client_F>
 	void poll(on_new_client_F&& on_new_client) {
-		if (!functions_to_call.empty()) {
-			auto funcs = std::move(functions_to_call);
-			functions_to_call.clear();
-			for (auto& v : funcs) std::move(v)();
-		}
 		if (timeout_function && std::chrono::steady_clock::now() >= timeout_time) {
 			auto f = std::move(timeout_function);
 			timeout_function = nullptr;
@@ -136,12 +129,6 @@ struct sync_server_noop {
 	}
 	template<typename on_new_client_F>
 	void run_one(on_new_client_F&& on_new_client) {
-		if (!functions_to_call.empty()) {
-			auto f = std::move(functions_to_call.front());
-			functions_to_call.pop_front();
-			f();
-			return;
-		}
 		if (timeout_function) {
 			while (std::chrono::steady_clock::now() < timeout_time) {
 				std::this_thread::sleep_until(timeout_time);
@@ -379,7 +366,11 @@ struct sync_functions: action_functions {
 				if (get_client(uid)) {
 					this->kill_client(client);
 				} else {
-					if (sync_st.clients.size() > 2) {
+					size_t clients_with_uid = 0;
+					for (auto* c : ptr(sync_st.clients)) {
+						if (c->uid != sync_state::uid_t()) ++clients_with_uid;
+					}
+					if (clients_with_uid >= 2) {
 						this->kill_client(client);
 					} else {
 						client->uid = uid;
@@ -448,7 +439,6 @@ struct sync_functions: action_functions {
 					break;
 				}
 			}
-			server.dispatch([]{});
 		}
 		sync_state::client_t* new_client(const void* h) {
 			sync_st.clients.emplace_back();
@@ -528,8 +518,6 @@ struct sync_functions: action_functions {
 			server.set_on_kill(h, std::bind(&syncer_t::kill_client, this, c));
 		}
 		void on_message(sync_state::client_t* client, const void* data, size_t size) {
-			a_string str;
-			for (size_t i = 0; i != size; ++i) str += format("%02x", ((const uint8_t*)data)[i]);
 			data_loading::data_reader_le r((const uint8_t*)data, (const uint8_t*)data + size);
 			if (!client->has_greeted) {
 				auto v = r.get<uint32_t>();
@@ -631,8 +619,6 @@ struct sync_functions: action_functions {
 				return a.uid < b.uid;
 			});
 			send_game_started();
-			
-			if (sync_st.clients.size() > 2) error("sorry, more than 2 player games are not supported yet :(");
 			
 		}
 
