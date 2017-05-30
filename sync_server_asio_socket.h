@@ -24,6 +24,10 @@ namespace bwgame {
 template<typename socket_T>
 struct sync_server_asio_socket {
 	
+	asio::io_service io_service;
+	asio::io_service::work work{io_service};
+	asio::steady_timer timer{io_service};
+	
 	template<typename T, typename release_F>
 	struct async_handle_t {
 		T* obj;
@@ -106,10 +110,6 @@ struct sync_server_asio_socket {
 	};
 	
 	a_list<client_t> clients;
-	
-	asio::io_service io_service;
-	asio::io_service::work work{io_service};
-	asio::steady_timer timer{io_service};
 	
 	typename send_buffers_t::iterator get_send_buffer_with_space(size_t n) {
 		for (auto i = send_buffers.begin(); i != send_buffers.end(); ++i) {
