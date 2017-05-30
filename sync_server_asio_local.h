@@ -19,6 +19,11 @@ struct sync_server_asio_local: sync_server_asio_socket<asio::local::stream_proto
 		a->acceptor.async_accept(a->socket, std::bind(&sync_server_asio_local::accept_handler, this, std::placeholders::_1, std::move(acceptor)));
 	}
 	
+	void assign(const asio::local::stream_protocol::socket::native_handle_type& handle) {
+		asio::local::stream_protocol::socket socket(io_service, asio::local::stream_protocol::socket::protocol_type(), handle);
+		new_connection_handler(std::move(socket));
+	}
+	
 	void bind(const asio::local::stream_protocol::endpoint& ep) {
 		auto a = std::make_shared<acceptor_t>(*this);
 		auto& acceptor = a->acceptor;
