@@ -1,1 +1,4 @@
-This project is in a very premature state, it is not usable and is missing a few files so it does not even compile yet.
+# OpenBW
+
+OpenBW does not yet have any usage examples or documentation by itself,
+however it can be used with BWAPI by using the fork at https://github.com/OpenBW/bwapi.
