@@ -21,11 +21,8 @@ static inline void silence_asio_warnings() {
 
 namespace bwgame {
 
+template<typename socket_T>
 struct sync_server_asio_socket {
-	
-	asio::io_service io_service;
-	asio::io_service::work work{io_service};
-	asio::steady_timer timer{io_service};
 	
 	template<typename T, typename release_F>
 	struct async_handle_t {
@@ -65,11 +62,11 @@ struct sync_server_asio_socket {
 	
 	struct message_buffer_handle {
 		sync_server_asio_socket* server = nullptr;
-		send_buffers_t::iterator buffer;
+		typename send_buffers_t::iterator buffer;
 		size_t offset = 0;
 		size_t size = 0;
 		message_buffer_handle() = default;
-		message_buffer_handle(sync_server_asio_socket& server, send_buffers_t::iterator buffer) : server(&server), buffer(buffer) {
+		message_buffer_handle(sync_server_asio_socket& server, typename send_buffers_t::iterator buffer) : server(&server), buffer(buffer) {
 			++buffer->refcount;
 		}
 		message_buffer_handle(const message_buffer_handle& n) {
@@ -95,9 +92,9 @@ struct sync_server_asio_socket {
 	};
 	
 	struct client_t {
-		client_t(asio::ip::tcp::socket socket) : socket(std::move(socket)) {}
-		a_list<client_t>::iterator my_it;
-		asio::ip::tcp::socket socket;
+		client_t(socket_T socket) : socket(std::move(socket)) {}
+		typename a_list<client_t>::iterator my_it;
+		socket_T socket;
 		int async_count = 0;
 		a_vector<uint8_t> recv_buffer;
 		size_t recv_message_size = 0;
@@ -105,12 +102,16 @@ struct sync_server_asio_socket {
 		bool is_dead = false;
 		std::function<void()> on_kill;
 		std::function<void(const void*, size_t)> on_message;
-		bool allow_send = true;
+		bool allow_send = false;
 	};
 	
 	a_list<client_t> clients;
 	
-	send_buffers_t::iterator get_send_buffer_with_space(size_t n) {
+	asio::io_service io_service;
+	asio::io_service::work work{io_service};
+	asio::steady_timer timer{io_service};
+	
+	typename send_buffers_t::iterator get_send_buffer_with_space(size_t n) {
 		for (auto i = send_buffers.begin(); i != send_buffers.end(); ++i) {
 			if (i->buffer.size() - i->pos >= n) return i;
 		}
@@ -154,7 +155,7 @@ struct sync_server_asio_socket {
 		auto buffer = get_send_buffer_with_space(0x10);
 		r.buffers.emplace_back(*this, buffer);
 		r.buffers.back().offset = buffer->pos;
-		r.put<uint16_t>(0);
+		r.template put<uint16_t>(0);
 		return r;
 	}
 	
@@ -203,83 +204,12 @@ struct sync_server_asio_socket {
 	
 	a_vector<client_t*> new_clients;
 	
-	void new_connection_handler(asio::ip::tcp::socket& socket) {
+	void new_connection_handler(socket_T socket) {
 		clients.emplace_back(std::move(socket));
 		client_t* c = &clients.back();
 		c->my_it = std::prev(clients.end());
+            ++c->async_count;
 		new_clients.push_back(c);
-	}
-	
-	struct acceptor_t {
-		sync_server_asio_socket& server;
-		asio::ip::tcp::acceptor acceptor{server.io_service};
-		asio::ip::tcp::socket socket{server.io_service};
-		acceptor_t(sync_server_asio_socket& server) : server(server) {}
-	};
-
-	void accept_handler(const asio::error_code& ec, std::shared_ptr<acceptor_t> acceptor) {
-		if (!ec) new_connection_handler(acceptor->socket);
-		auto* a = &*acceptor;
-		a->acceptor.async_accept(a->socket, std::bind(&sync_server_asio_socket::accept_handler, this, std::placeholders::_1, std::move(acceptor)));
-	}
-	
-	void bind(const asio::ip::tcp::endpoint& ep) {
-		auto a = std::make_shared<acceptor_t>(*this);
-		auto& acceptor = a->acceptor;
-		asio::error_code ec;
-		acceptor.open(ep.protocol());
-		acceptor.set_option(asio::socket_base::reuse_address(true));
-		acceptor.bind(ep, ec);
-		if (ec) return;
-		acceptor.listen(asio::socket_base::max_connections, ec);
-		if (ec) return;
-		acceptor.async_accept(a->socket, std::bind(&sync_server_asio_socket::accept_handler, this, std::placeholders::_1, a));
-	}
-	
-	void bind(const a_string& hostname, int port) {
-		asio::error_code ec;
-		asio::ip::address address = asio::ip::address::from_string(hostname.c_str(), ec);
-		if (ec) {
-			auto resolver = std::make_shared<asio::ip::tcp::resolver>(io_service);
-			asio::ip::tcp::resolver::query query(hostname.c_str(), "");
-			using it_t = asio::ip::tcp::resolver::iterator;
-			auto* r = &*resolver;
-			r->async_resolve(query, [this, port, resolver = std::move(resolver)](const asio::error_code& ec, it_t iterator) {
-				for (;iterator != it_t{}; ++iterator) {
-					bind({iterator->endpoint().address(), (unsigned short)port});
-				}
-			});
-		} else {
-			bind(asio::ip::tcp::endpoint(address, port));
-		}
-	}
-	
-	void connect(const asio::ip::tcp::endpoint& ep) {
-		auto socket = std::make_shared<asio::ip::tcp::socket>(io_service);
-		auto* s = &*socket;
-		s->async_connect(ep, [this, socket = std::move(socket)](const asio::error_code& ec) {
-			if (!ec) {
-				new_connection_handler(*socket);
-			}
-		});
-	}
-	
-	void connect(const a_string& hostname, int port) {
-		asio::error_code ec;
-		asio::ip::address address = asio::ip::address::from_string(hostname.c_str(), ec);
-		if (ec) {
-			auto resolver = std::make_shared<asio::ip::tcp::resolver>(io_service);
-			asio::ip::tcp::resolver::query query(hostname.c_str(), "");
-			using it_t = asio::ip::tcp::resolver::iterator;
-			auto* r = &*resolver;
-			r->async_resolve(query, [this, port, resolver = std::move(resolver)](const asio::error_code& ec, it_t iterator) {
-				for (;iterator != it_t{}; ++iterator) {	
-					connect({iterator->endpoint().address(), (unsigned short)port});
-				}
-			});
-		} else {
-			connect({address, (unsigned short)port});
-		}
 	}
 	
 	void kill_client(const void* h) {
@@ -343,16 +273,11 @@ struct sync_server_asio_socket {
 		c->socket.async_read_some(asio::buffer(c->recv_buffer), std::bind(&sync_server_asio_socket::read_handler, this, async_handle(c, std::bind(&sync_server_asio_socket::async_release, this, std::placeholders::_1)), std::placeholders::_1, std::placeholders::_2));
 	}
 	
-	template<typename F>
-	void dispatch(F&& f) {
-		io_service.dispatch(std::forward<F>(f));
-	}
-	
 	template<typename on_new_client_F>
 	void poll(on_new_client_F&& on_new_client) {
 		io_service.poll();
 		for (auto* c : new_clients) {
-			++c->async_count;
+			c->allow_send = true;
 			on_new_client(c);
 		}
 		new_clients.clear();
@@ -362,7 +287,7 @@ struct sync_server_asio_socket {
 	void run_one(on_new_client_F&& on_new_client) {
 		if (!io_service.run_one()) error("asio io_service has no work");
 		for (auto* c : new_clients) {
-			++c->async_count;
+			c->allow_send = true;
 			on_new_client(c);
 		}
 		new_clients.clear();
