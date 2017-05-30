@@ -1049,6 +1049,7 @@ public:
 	Player self();
 	Player enemy();
 	Player neutral();
+	Player getPlayer(int n) const;
 	const std::vector<Player>& getPlayers();
 	Position getScreenPosition() {
 		return {};

@@ -1349,6 +1349,11 @@ Player Game::neutral() {
 	return impl->funcs.get_player(11);
 }
 
+Player Game::getPlayer(int n) const
+{
+	return impl->funcs.get_player(n);
+}
+
 const std::vector<Player>& Game::getPlayers() {
 	return impl->funcs.get_players();
 }
