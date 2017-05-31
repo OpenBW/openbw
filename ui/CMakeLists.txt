@@ -9,7 +9,7 @@ find_package(SDL2 REQUIRED)
 
 include_directories(
 	..
-	${SDL2_INCLUDE_DIR}
+	${SDL2_INCLUDE_DIRS}
 )
 
 add_definitions(-DOPENBW_NO_SDL_IMAGE)
@@ -19,6 +19,6 @@ add_definitions(-DOPENBW_ENABLE_UI)
 
 add_library(openbw_ui ./sdl2.cpp)
 
-target_link_libraries(openbw_ui ${SDL2_LIBRARY})
+target_link_libraries(openbw_ui ${SDL2_LIBRARIES})
 
 set_property(TARGET openbw_ui PROPERTY POSITION_INDEPENDENT_CODE ON)
