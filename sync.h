@@ -154,7 +154,8 @@ namespace sync_messages {
 		id_start_game,
 		id_game_info,
 		id_set_race,
-		id_game_started
+		id_game_started,
+		id_leave_game
 	};
 }
 
@@ -164,7 +165,9 @@ struct sync_functions: action_functions {
 	
 	template<typename action_F>
 	void execute_scheduled_actions(action_F&& action_f) {
-		for (sync_state::client_t* c : ptr(sync_st.clients)) {
+		for (auto i = sync_st.clients.begin(); i != sync_st.clients.end();) {
+			sync_state::client_t* c = &*i;
+			++i;
 			while (!c->scheduled_actions.empty() && (uint8_t)sync_st.sync_frame == c->scheduled_actions.front().frame) {
 				auto act = c->scheduled_actions.front();
 				c->scheduled_actions.pop_front();
@@ -172,7 +175,7 @@ struct sync_functions: action_functions {
 				const uint8_t* data = c->buffer.data();
 				if (data + act.data_end > data + c->buffer.size()) error("data beyond end");
 				data_loading::data_reader_le r(data + act.data_begin, data + act.data_end);
-				action_f(c, r);
+				if (!action_f(c, r)) break;
 			}
 		}
 	}
@@ -339,6 +342,11 @@ struct sync_functions: action_functions {
 		syncer_t(const syncer_t&) = delete;
 		syncer_t& operator=(const syncer_t&) = delete;
 		
+		~syncer_t() {
+			send_leave_game();
+			final_sync();
+		}
+		
 		const uint32_t greeting_value = 0x39e25069;
 		
 		void send(const uint8_t* data, size_t size, const void* h = nullptr) {
@@ -368,7 +376,7 @@ struct sync_functions: action_functions {
 				} else {
 					size_t clients_with_uid = 0;
 					for (auto* c : ptr(sync_st.clients)) {
-						if (c->uid != sync_state::uid_t()) ++clients_with_uid;
+						if (c->has_uid) ++clients_with_uid;
 					}
 					if (clients_with_uid >= 2) {
 						this->kill_client(client);
@@ -425,10 +433,23 @@ struct sync_functions: action_functions {
 			}
 			return nullptr;
 		}
-
-		void kill_client(sync_state::client_t* client) {
+		
+		auto get_player_left_action(bool player_left) {
+			writer<2> w;
+			w.put<uint8_t>(87);
+			w.put<uint8_t>(player_left ? 0 : 6);
+			return w;
+		}
+		
+		void kill_client(sync_state::client_t* client, bool player_left = false) {
 			if (client->player_slot != -1) {
-				st.players[client->player_slot].controller = player_t::controller_open;
+				if (sync_st.game_started) {
+					auto w = get_player_left_action(player_left);
+					data_loading::data_reader_le r(w.data(), w.data() + w.size());
+					funcs.read_action(client->player_slot, r);
+				} else {
+					st.players[client->player_slot].controller = player_t::controller_open;
+				}
 				client->player_slot = -1;
 			}
 			if (client == sync_st.local_client) error("attempt to kill local client");
@@ -515,7 +536,7 @@ struct sync_functions: action_functions {
 			sync_st.sync_frame = frame;
 			server.allow_send(h, false);
 			server.set_on_message(h, std::bind(&syncer_t::on_message, this, c, std::placeholders::_1, std::placeholders::_2));
-			server.set_on_kill(h, std::bind(&syncer_t::kill_client, this, c));
+			server.set_on_kill(h, std::bind(&syncer_t::kill_client, this, c, false));
 		}
 		void on_message(sync_state::client_t* client, const void* data, size_t size) {
 			data_loading::data_reader_le r((const uint8_t*)data, (const uint8_t*)data + size);
@@ -552,6 +573,15 @@ struct sync_functions: action_functions {
 			writer<1> w;
 			w.put<uint8_t>(sync_messages::id_game_started);
 			send(w);
+		}
+		void send_leave_game() {
+			if (!sync_st.local_client->game_started) {
+				writer<1> w;
+				w.put<uint8_t>(sync_messages::id_leave_game);
+				send(w);
+			} else {
+				send(get_player_left_action(true));
+			}
 		}
 		
 		void start_game(uint32_t seed) {
@@ -621,54 +651,8 @@ struct sync_functions: action_functions {
 			send_game_started();
 			
 		}
-
-		void sync() {
-			if (!sync_st.has_initialized) {
-				sync_st.has_initialized = true;
-				for (int i = 0; i != 12; ++i) {
-					sync_st.initial_slot_races[i] = st.players[i].race;
-					sync_st.initial_slot_controllers[i] = st.players[i].controller;
-				}
-			}
-			++sync_st.sync_frame;
-			send_client_frame();
-			
-			server.poll(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1));
-			
-			auto pred = [&]() {
-				for (auto* c : ptr(sync_st.clients)) {
-					if ((int8_t)(sync_st.sync_frame - c->frame) >= (int8_t)sync_st.latency) {
-						return false;
-					}
-				}
-				return true;
-			};
-			if (!sync_st.game_started && !sync_st.game_starting_countdown && pred()) {
-				auto any_scheduled_actions = [&]() {
-					for (auto& c : sync_st.clients) {
-						if (!c.scheduled_actions.empty()) return true;
-					}
-					return false;
-				};
-				bool timed_out = false;
-				server.set_timeout(std::chrono::milliseconds(50), [&]{
-					timed_out = true;
-				});
-				while (!any_scheduled_actions() && !timed_out) {
-					server.run_one(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1));
-				}
-				if (!pred()) {
-					server.set_timeout(std::chrono::seconds(1), std::bind(&syncer_t::timeout_func, this));
-					server.run_until(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1), pred);
-				}
-			} else {
-				server.set_timeout(std::chrono::seconds(1), std::bind(&syncer_t::timeout_func, this));
-				server.run_until(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1), pred);
-			}
-			auto now = std::chrono::steady_clock::now();
-			for (auto& c : sync_st.clients) {
-				c.last_synced = now;
-			}
+		
+		void process_messages() {
 			
 			if (sync_st.game_starting_countdown) {
 				--sync_st.game_starting_countdown;
@@ -680,13 +664,21 @@ struct sync_functions: action_functions {
 			if (sync_st.game_started) {
 				funcs.execute_scheduled_actions([this](sync_state::client_t* client, auto& r) {
 					if (client->game_started) {
-						if (client->player_slot != -1) funcs.read_action(client->player_slot, r);
+						if (client->player_slot != -1) {
+							funcs.read_action(client->player_slot, r);
+							if (st.players.at(client->player_slot).controller != player_t::controller_occupied) {
+								if (client != sync_st.local_client) this->kill_client(client);
+								else this->clear_scheduled_actions(client);
+								return false;
+							}
+						}
 					} else {
 						int id = r.template get<uint8_t>();
 						if (id == sync_messages::id_game_started) {
 							client->game_started = true;
 						}
 					}
+					return true;
 				});
 			} else {
 				funcs.execute_scheduled_actions([this](sync_state::client_t* client, auto& r) {
@@ -753,9 +745,90 @@ struct sync_functions: action_functions {
 							sync_st.start_game_seed = r.template get<uint32_t>();
 						}
 						break;
+					case sync_messages::id_leave_game:
+						if (client != sync_st.local_client) this->kill_client(client);
+						else this->clear_scheduled_actions(client);
+						return false;
 					default: error("unknown pre game message id %d", id);
 					}
+					return true;
 				});
+			}
+		}
+		
+		void sync_next_frame() {
+			if (!sync_st.has_initialized) {
+				sync_st.has_initialized = true;
+				for (int i = 0; i != 12; ++i) {
+					sync_st.initial_slot_races[i] = st.players[i].race;
+					sync_st.initial_slot_controllers[i] = st.players[i].controller;
+				}
+			}
+			++sync_st.sync_frame;
+			send_client_frame();
+		}
+		
+		bool all_clients_in_sync() {
+			for (auto* c : ptr(sync_st.clients)) {
+				if ((int8_t)(sync_st.sync_frame - c->frame) >= (int8_t)sync_st.latency) {
+					return false;
+				}
+			}
+			return true;
+		}
+
+		void sync() {
+			sync_next_frame();
+			
+			server.poll(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1));
+			
+			auto pred = [this]() {
+				return all_clients_in_sync();
+			};
+			
+			if (!sync_st.game_started && !sync_st.game_starting_countdown && pred()) {
+				auto any_scheduled_actions = [&]() {
+					for (auto& c : sync_st.clients) {
+						if (!c.scheduled_actions.empty()) return true;
+					}
+					return false;
+				};
+				bool timed_out = false;
+				server.set_timeout(std::chrono::milliseconds(50), [&]{
+					timed_out = true;
+				});
+				while (!any_scheduled_actions() && !timed_out) {
+					server.run_one(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1));
+				}
+				if (!pred()) {
+					server.set_timeout(std::chrono::seconds(1), std::bind(&syncer_t::timeout_func, this));
+					server.run_until(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1), pred);
+				}
+			} else {
+				server.set_timeout(std::chrono::seconds(1), std::bind(&syncer_t::timeout_func, this));
+				server.run_until(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1), pred);
+			}
+			
+			auto now = std::chrono::steady_clock::now();
+			for (auto& c : sync_st.clients) {
+				c.last_synced = now;
+			}
+			
+			process_messages();
+		}
+		
+		void final_sync() {
+			bool timed_out = false;
+			server.set_timeout(std::chrono::milliseconds(250), [&]{
+				timed_out = true;
+			});
+			while (!sync_st.local_client->scheduled_actions.empty() && !timed_out) {
+				sync_next_frame();
+				server.poll(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1));
+				while (!all_clients_in_sync() && !timed_out) {
+					server.run_one(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1));
+				}
+				if (!timed_out) process_messages();
 			}
 		}
 	};
@@ -771,6 +844,10 @@ struct sync_functions: action_functions {
 		syncer_container_t(const syncer_container_t&) = delete;
 		syncer_container_t& operator=(const syncer_container_t&) = delete;
 		~syncer_container_t() {
+			destroy();
+		}
+		
+		void destroy() {
 			if (type) (this->*destroy_f)();
 		}
 		
@@ -842,6 +919,10 @@ struct sync_functions: action_functions {
 	template<typename server_T>
 	void input_action(server_T& server, const uint8_t* data, size_t size) {
 		get_syncer<server_T>(server).send(data, size);
+	}
+	
+	void leave_game() {
+		syncer_container.destroy();
 	}
 
 };

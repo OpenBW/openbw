@@ -978,7 +978,8 @@ struct action_functions: state_functions {
 	}
 	
 	bool action_player_leave(int owner, int reason) {
-		remove_player(owner);
+		if (reason == 6) player_dropped(owner);
+		else player_left(owner);
 		return true;
 	}
 	
@@ -1054,9 +1055,7 @@ struct action_functions: state_functions {
 
 	template<typename reader_T>
 	bool read_action_player_leave(int owner, reader_T&& r) {
-		(void)owner;
 		int reason = r.template get<int8_t>();
-		(void)reason;
 		return action_player_leave(owner, reason);
 	}
 
