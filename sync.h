@@ -575,7 +575,7 @@ struct sync_functions: action_functions {
 			send(w);
 		}
 		void send_leave_game() {
-			if (!sync_st.local_client->game_started) {
+			if (!sync_st.game_started) {
 				writer<1> w;
 				w.put<uint8_t>(sync_messages::id_leave_game);
 				send(w);
