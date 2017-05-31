@@ -554,6 +554,9 @@ struct ui_functions: ui_util_functions {
 	image_data img;
 	tileset_image_data tileset_img;
 	native_window::window wnd;
+	
+	bool exit_on_close = true;
+	bool window_closed = false;
 
 	xy screen_pos;
 
@@ -1795,7 +1798,8 @@ struct ui_functions: ui_util_functions {
 		while (wnd.peek_message(e)) {
 			switch (e.type) {
 			case native_window::event_t::type_quit:
-				exit(0);
+				if (exit_on_close) std::exit(0);
+				else window_closed = true;
 				break;
 			case native_window::event_t::type_resize:
 				resize(e.width, e.height);
