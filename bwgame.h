@@ -18862,9 +18862,7 @@ struct state_functions {
 	int trigger_opponent_count(int owner, int player) const {
 		int r = 0;
 		for (int p : trigger_players(owner, player)) {
-			for (int p2 : trigger_players(p, 26)) {
-				++r;
-			}
+			r += range_size(trigger_players(p, 26));
 		}
 		return r;
 	}

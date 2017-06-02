@@ -5,6 +5,7 @@
 #include <iterator>
 #include <limits>
 #include <array>
+#include <type_traits>
 
 #include "containers.h"
 #include "strf.h"
@@ -323,6 +324,11 @@ auto reverse(range_T&& r) {
 	return make_iterators_range(std::make_reverse_iterator(r.end()), std::make_reverse_iterator(r.begin()));
 }
 
+template<typename range_T>
+auto range_size(range_T&& r) {
+	auto rv = std::distance(r.begin(), r.end());
+	return (typename std::make_unsigned<decltype(rv)>::type)rv;
+}
 
 struct identity {
 	template<typename T>
