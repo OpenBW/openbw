@@ -13048,6 +13048,7 @@ struct state_functions {
 		st.running_triggers[owner].clear();
 		if (p.victory_state) return;
 		p.victory_state = 2;
+		on_victory_state(owner, 2);
 		remove_player(owner);
 	}
 	
@@ -13056,6 +13057,7 @@ struct state_functions {
 		st.running_triggers[owner].clear();
 		if (p.victory_state) return;
 		p.victory_state = 1;
+		on_victory_state(owner, 1);
 		remove_player(owner);
 	}
 	
@@ -13162,6 +13164,7 @@ struct state_functions {
 				int s = ets.victory_state[i];
 				if (s != st.players[i].victory_state) {
 					st.players[i].victory_state = s;
+					on_victory_state(i, s);
 					if (s == 2) {
 						on_player_eliminated(i);
 						remove_player(i);
