@@ -4,6 +4,8 @@
 #include "bwgame.h"
 #include "actions.h"
 #include "replay.h"
+#include "replay_saver.h"
+
 #include <chrono>
 #include <random>
 #include <thread>
@@ -43,7 +45,7 @@ struct sync_state {
 			std::seed_seq seq(arr.begin(), arr.end());
 			seq.generate(r.vals.begin(), r.vals.end());
 			data_loading::crc32_t crc32;
-			const uint8_t* c = (const uint8_t*)r.vals.data();
+			const uint8_t* c = (const uint8_t*)arr.data();
 			size_t n = 32;
 			for (auto& v : r.vals) {
 				v ^= crc32(c, n);
@@ -96,6 +98,10 @@ struct sync_state {
 	std::array<int, 12> initial_slot_controllers;
 	
 	bool game_type_melee = false;
+	
+	game_load_functions::setup_info_t* setup_info = nullptr;
+	replay_saver_state* save_replay = nullptr;
+	
 };
 
 struct sync_server_noop {
@@ -339,14 +345,6 @@ struct sync_functions: action_functions {
 		sync_state& sync_st;
 		syncer_t(sync_functions& funcs, server_T& server) : funcs(funcs), server(server), st(funcs.st), sync_st(funcs.sync_st) {}
 		
-		syncer_t(const syncer_t&) = delete;
-		syncer_t& operator=(const syncer_t&) = delete;
-		
-		~syncer_t() {
-			send_leave_game();
-			final_sync();
-		}
-		
 		const uint32_t greeting_value = 0x39e25069;
 		
 		void send(const uint8_t* data, size_t size, const void* h = nullptr) {
@@ -446,6 +444,7 @@ struct sync_functions: action_functions {
 				if (sync_st.game_started) {
 					auto w = get_player_left_action(player_left);
 					data_loading::data_reader_le r(w.data(), w.data() + w.size());
+					if (sync_st.save_replay) replay_saver_functions(*sync_st.save_replay).add_action(st.current_frame, client->player_slot, w.data(), w.size());
 					funcs.read_action(client->player_slot, r);
 				} else {
 					st.players[client->player_slot].controller = player_t::controller_open;
@@ -650,6 +649,29 @@ struct sync_functions: action_functions {
 			});
 			send_game_started();
 			
+			
+			if (sync_st.save_replay) {
+				auto& r = *sync_st.save_replay;
+				r.random_seed = st.lcg_rand_state;
+				r.player_name = sync_st.local_client->name;
+				r.map_tile_width = st.game->map_tile_width;
+				r.map_tile_height = st.game->map_tile_height;
+				r.active_player_count = 1;
+				r.slot_count = range_size(funcs.active_players());
+				r.game_type = sync_st.game_type_melee ? 2 : 10;
+				r.tileset = st.game->tileset_index;
+				
+				r.game_name = "openbw game";
+				r.map_name = st.game->scenario_name;
+				r.setup_info = *sync_st.setup_info;
+				r.players = st.players;
+				r.player_names = {};
+				for (auto* c : ptr(sync_st.clients)) {
+					if (c->player_slot != -1) r.player_names.at(c->player_slot) = c->name;
+				}
+				
+			}
+			
 		}
 		
 		void process_messages() {
@@ -665,6 +687,12 @@ struct sync_functions: action_functions {
 				funcs.execute_scheduled_actions([this](sync_state::client_t* client, auto& r) {
 					if (client->game_started) {
 						if (client->player_slot != -1) {
+							if (sync_st.save_replay) {
+								size_t t = r.tell();
+								size_t n = r.left();
+								replay_saver_functions(*sync_st.save_replay).add_action(st.current_frame, client->player_slot, r.get_n(n), n);
+								r.seek(t);
+							}
 							funcs.read_action(client->player_slot, r);
 							if (st.players.at(client->player_slot).controller != player_t::controller_occupied) {
 								if (client != sync_st.local_client) this->kill_client(client);
@@ -758,6 +786,7 @@ struct sync_functions: action_functions {
 		
 		void sync_next_frame() {
 			if (!sync_st.has_initialized) {
+				if (!sync_st.setup_info) error("sync_state::setup_info is null");
 				sync_st.has_initialized = true;
 				for (int i = 0; i != 12; ++i) {
 					sync_st.initial_slot_races[i] = st.players[i].race;
