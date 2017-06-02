@@ -831,12 +831,18 @@ struct sync_functions: action_functions {
 				if (!timed_out) process_messages();
 			}
 		}
+		
+		void leave_game() {
+			send_leave_game();
+			final_sync();
+		}
 	};
 	
 	struct syncer_container_t {
 		static const size_t size = 0x40;
 		static const size_t alignment = alignof(std::max_align_t);
 		const std::type_info* type = nullptr;
+		const void* server_ptr = nullptr;
 		std::aligned_storage<size, alignment>::type obj;
 		void (syncer_container_t::* destroy_f)();
 		
@@ -851,11 +857,12 @@ struct sync_functions: action_functions {
 			if (type) (this->*destroy_f)();
 		}
 		
-		template<typename T, typename... args_T>
-		void construct(args_T&&... args) {
+		template<typename T, typename server_T>
+		void construct(sync_functions& funcs, server_T& server) {
 			static_assert(sizeof(T) <= size || alignof(T) <= alignment, "syncer_container_t size or alignment too small");
-			new ((T*)&obj) T(std::forward<args_T>(args)...);
+			new ((T*)&obj) T(funcs, server);
 			type = &typeid(T);
+			server_ptr = &server;
 			destroy_f = &syncer_container_t::destroy<T>;
 		}
 		template<typename T>
@@ -869,13 +876,15 @@ struct sync_functions: action_functions {
 			return (T&)obj;
 		}
 		
-		template<typename T, typename... args_T>
-		T& try_emplace(args_T&&... args) {
+		template<typename T, typename server_T>
+		T& get(sync_functions& funcs, server_T& server) {
 			if (type) {
-				if (type == &typeid(T) || *type == typeid(T)) return as<T>();
-				(this->*destroy_f)();
+				if (type == &typeid(T) || *type == typeid(T)) {
+					if (server_ptr == &server) return as<T>();
+				}
+				error("sync_functions::syncer_container_t: attempt to use multiple servers in the same instance");
 			}
-			construct<T>(std::forward<args_T>(args)...);
+			construct<T>(funcs, server);
 			return as<T>();
 		}
 	};
@@ -884,24 +893,24 @@ struct sync_functions: action_functions {
 	
 	template<typename server_T>
 	syncer_t<server_T>& get_syncer(server_T& server) {
-		return syncer_container.try_emplace<syncer_t<server_T>>(*this, server);
+		return syncer_container.get<syncer_t<server_T>>(*this, server);
 	}
 	
 	template<typename server_T>
 	void sync(server_T& server) {
-		get_syncer<server_T>(server).sync();
+		get_syncer(server).sync();
 	}
 	
 	template<typename server_T>
 	void start_game(server_T& server) {
 		if (sync_st.game_started) return;
-		get_syncer<server_T>(server).send_start_game();
+		get_syncer(server).send_start_game();
 	}
 	
 	template<typename server_T>
 	void switch_to_slot(server_T& server, int n) {
 		if (sync_st.game_started) return;
-		get_syncer<server_T>(server).send_switch_to_slot(n);
+		get_syncer(server).send_switch_to_slot(n);
 	}
 	
 	template<typename server_T>
@@ -913,16 +922,17 @@ struct sync_functions: action_functions {
 	template<typename server_T>
 	void set_local_client_race(server_T& server, race_t race) {
 		if (sync_st.game_started) return;
-		get_syncer<server_T>(server).send_set_race(race);
+		get_syncer(server).send_set_race(race);
 	}
 	
 	template<typename server_T>
 	void input_action(server_T& server, const uint8_t* data, size_t size) {
-		get_syncer<server_T>(server).send(data, size);
+		get_syncer(server).send(data, size);
 	}
 	
-	void leave_game() {
-		syncer_container.destroy();
+	template<typename server_T>
+	void leave_game(server_T& server) {
+		get_syncer(server).leave_game();
 	}
 
 };
