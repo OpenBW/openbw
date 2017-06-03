@@ -238,7 +238,7 @@ struct tile_t {
 		flag_unk0 = 2,
 		flag_unwalkable = 4,
 		flag_unk1 = 8,
-		flag_unk2 = 0x10,
+		flag_provides_cover = 0x10,
 		flag_unk3 = 0x20,
 		flag_has_creep = 0x40,
 		flag_unbuildable = 0x80,

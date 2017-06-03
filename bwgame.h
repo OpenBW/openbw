@@ -14369,7 +14369,7 @@ struct state_functions {
 	fp8 unit_dodge_chance(const unit_t* u) const {
 		if (u_flying(u)) return 0_fp8;
 		if (unit_is_under_dark_swarm(u)) return 255_fp8;
-		if (st.tiles[tile_index(u->sprite->position)].flags & tile_t::flag_unk2) return 119_fp8;
+		if (st.tiles[tile_index(u->sprite->position)].flags & tile_t::flag_provides_cover) return 119_fp8;
 		return 0_fp8;
 	}
 
