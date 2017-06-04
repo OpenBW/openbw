@@ -432,11 +432,16 @@ public:
 		--m_end;
 	}
 	iterator erase(const iterator pos) {
-		for (pointer i = pos.ptr; i != ptr_end(); ++i) {
-			*i = std::move(*(i + 1));
+		for (pointer i = pos.ptr;;) {
+			pointer ni = i + 1;
+			if (ni == m_end) {
+				m_destroy(i);
+				m_end = i;
+				return pos;
+			}
+			*i = std::move(*ni);
+			i = ni;
 		}
-		--m_end;
-		return pos;
 	}
 };
 
