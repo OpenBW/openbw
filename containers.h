@@ -14,6 +14,7 @@
 
 #include "static_vector.h"
 #include "intrusive_list.h"
+#include "circular_vector.h"
 
 namespace bwgame {
 
@@ -49,6 +50,9 @@ template<typename key_T, typename value_T, typename hash_t = std::hash<key_T>, t
 using a_unordered_multimap = std::unordered_multimap<key_T, value_T, hash_t, equal_to_t, alloc<std::pair<const key_T, value_T>>>;
 
 using a_string = std::basic_string<char, std::char_traits<char>, alloc<char>>;
+
+template<typename T>
+using a_circular_vector = circular_vector<T, alloc<T>>;
 
 }
 
