@@ -536,7 +536,7 @@ struct replay_saver_functions {
 	
 	void add_action(int current_frame, int owner, const uint8_t* data, size_t data_size) {
 		auto w = data_loading::make_buffers_writer(replay_saver_st.history);
-		if (current_frame != replay_saver_st.current_history_frame || replay_saver_st.current_actions_size + data_size >= 0x100) {
+		if (current_frame != replay_saver_st.current_history_frame || replay_saver_st.current_actions_size + 1 + data_size >= 0x100) {
 			replay_saver_st.current_history_frame = current_frame;
 			replay_saver_st.current_actions_size = 1 + data_size;
 			w.template put<uint32_t>(current_frame);
