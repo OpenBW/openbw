@@ -150,7 +150,7 @@ struct bit_writer {
 			if (n > 8) {
 				w.template put<uint8_t>(v);
 				n -= 8;
-				v >>= 8;
+				v = sizeof(v) <= 8 ? 0 : v >> 8;
 			} else {
 				data = v;
 				w.template put<uint8_t>(v);
@@ -534,7 +534,7 @@ struct replay_saver_functions {
 	replay_saver_state& replay_saver_st;
 	explicit replay_saver_functions(replay_saver_state& replay_saver_st) : replay_saver_st(replay_saver_st) {}
 	
-	bool add_action(int current_frame, int owner, const uint8_t* data, size_t data_size) {
+	void add_action(int current_frame, int owner, const uint8_t* data, size_t data_size) {
 		auto w = data_loading::make_buffers_writer(replay_saver_st.history);
 		if (current_frame != replay_saver_st.current_history_frame || replay_saver_st.current_actions_size + data_size >= 0x100) {
 			replay_saver_st.current_history_frame = current_frame;
