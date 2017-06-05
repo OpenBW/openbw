@@ -9162,9 +9162,9 @@ struct state_functions {
 		rect target_unit_bb;
 		xy destination;
 
-		a_deque<const regions_t::region*> long_path;
+		a_circular_vector<const regions_t::region*> long_path;
 		size_t full_long_path_size;
-		a_deque<xy> short_path;
+		a_circular_vector<xy> short_path;
 
 		size_t current_long_path_index = 0;
 		size_t current_short_path_index = 0;
@@ -22072,7 +22072,7 @@ void global_init(global_state& st, load_data_file_F&& load_data_file) {
 			a_unordered_map<size_t, size_t> decode_map;
 
 			auto decode_at = [&](size_t initial_address) {
-				a_deque<std::tuple<size_t, size_t>> branches;
+				a_circular_vector<std::tuple<size_t, size_t>> branches;
 				std::function<size_t(size_t)> decode = [&](size_t initial_address) {
 					if (!initial_address) error("iscript load: attempt to decode instruction at null address");
 					auto in = decode_map.emplace(initial_address, 0);

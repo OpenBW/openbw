@@ -79,7 +79,7 @@ struct sync_state {
 		a_vector<uint8_t> buffer;
 		size_t buffer_begin = 0;
 		size_t buffer_end = 0;
-		a_deque<scheduled_action> scheduled_actions;
+		a_circular_vector<scheduled_action> scheduled_actions;
 		uint8_t frame = 0;
 		a_string name;
 		bool game_started = false;

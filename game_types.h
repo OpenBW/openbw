@@ -529,9 +529,9 @@ struct path_t: link_base {
 	int creation_frame = 0;
 	int state_flags = 0;
 
-	a_deque<const regions_t::region*> long_path;
+	a_circular_vector<const regions_t::region*> long_path;
 	size_t full_long_path_size;
-	a_deque<xy> short_path;
+	a_circular_vector<xy> short_path;
 
 	size_t current_long_path_index = 0;
 	size_t current_short_path_index = 0;
