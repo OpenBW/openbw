@@ -536,7 +536,7 @@ struct fixed_point {
 
 	template<typename T, typename std::enable_if<std::is_integral<T>::value>::type* = nullptr>
 	static fixed_point integer(T integer_value) {
-		return from_raw((raw_type)integer_value << fractional_bits);
+		return from_raw((raw_type)((raw_unsigned_type)integer_value << fractional_bits));
 	}
 
 	static fixed_point zero() {
