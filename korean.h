@@ -1805,6 +1805,7 @@ uint32_t cp949_to_unicode(const char*& ptr, const char* end) {
 	case 0xfe: return 0xffff;
 	case 0xff: return 0xffff;
 	}
+	return 0xffff;
 }
 
 
