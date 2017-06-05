@@ -43,6 +43,13 @@ struct data_writer {
 	size_t left() const {
 		return end - ptr;
 	}
+	size_t tell() const {
+		return ptr - begin;
+	}
+	void seek(size_t pos) {
+		if (pos > end - begin) error("data_writer: attempt to seek beyond end");
+		ptr = begin + pos;
+	}
 };
 
 template<typename dst_T, bool default_little_endian = true>
@@ -436,9 +443,9 @@ struct replay_file_writer {
 	}
 };
 
-template<typename base_reader_T>
-auto make_replay_file_writer(base_reader_T& reader) {
-	return replay_file_writer<base_reader_T>(reader);
+template<typename base_writer_T>
+auto make_replay_file_writer(base_writer_T& writer) {
+	return replay_file_writer<base_writer_T>(writer);
 }
 
 template<bool default_little_endian = true>
