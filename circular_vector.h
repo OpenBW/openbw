@@ -421,7 +421,7 @@ private:
 	void m_clear() {
 		pointer e = m_begin;
 		for (pointer i = m_end; i != e;) {
-			--i;
+			i = prev(i);
 			m_destroy(i);
 		}
 		m_end = e;
