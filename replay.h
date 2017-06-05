@@ -3,6 +3,7 @@
 
 #include "actions.h"
 #include "data_loading.h"
+#include "korean.h"
 #include "bwgame.h"
 
 namespace bwgame {
@@ -160,11 +161,13 @@ struct replay_functions: action_functions {
 			a_string r;
 			for (auto& v : str) {
 				if (!v) break;
-				if (v >= 21) r += v;
+				if ((unsigned char)v >= 21) r += v;
 			}
 			return r;
 		};
 		replay_st.map_name = arr_str(map_name);
+		a_string kn;
+		if (korean::korean_locale_to_utf8(replay_st.map_name, kn)) replay_st.map_name = kn;
 		
 		std::array<int, 12> slot_player_id;
 		std::array<int, 12> slot_controller;

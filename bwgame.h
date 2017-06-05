@@ -6,6 +6,7 @@
 #include "game_types.h"
 #include "data_loading.h"
 #include "bwenums.h"
+#include "korean.h"
 
 #include <algorithm>
 #include <utility>
@@ -21181,7 +21182,10 @@ struct game_load_functions : state_functions {
 		if (index == 0) return "<null string>";
 		--index;
 		if (index >= game_st.map_strings.size()) return "<invalid string index>";
-		return game_st.map_strings[index];
+		const a_string& str = game_st.map_strings[index];
+		a_string kn;
+		if (korean::korean_locale_to_utf8(str, kn)) return kn;
+		return str;
 	}
 
 	struct tag_t {
