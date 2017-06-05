@@ -150,7 +150,7 @@ struct bit_writer {
 			if (n > 8) {
 				w.template put<uint8_t>(v);
 				n -= 8;
-				v = sizeof(v) <= 8 ? 0 : v >> 8;
+				v = sizeof(v) <= 1 ? 0 : v >> 8;
 			} else {
 				data = v;
 				w.template put<uint8_t>(v);
@@ -640,7 +640,6 @@ struct replay_saver_functions {
 		if (!replay_saver_st.map_data) error("replay_saver_functions::save_replay: replay_saver_state::map_data is null");
 		rw.template put<uint32_t>(replay_saver_st.map_data_size);
 		rw.put_bytes(replay_saver_st.map_data, replay_saver_st.map_data_size);
-		
 	}
 	
 };
