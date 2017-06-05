@@ -21768,6 +21768,11 @@ struct game_load_functions : state_functions {
 					st.alliances[i2][i] = 1;
 				}
 			}
+			if (!use_map_settings) {
+				if (st.players[i].controller == player_t::controller_open || st.players[i].controller == player_t::controller_computer) {
+					st.players[i].race = (race_t)5;
+				}
+			}
 		}
 
 		if (setup_f) {
