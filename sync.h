@@ -382,6 +382,14 @@ struct sync_functions: action_functions {
 						client->uid = uid;
 						client->has_uid = true;
 						
+						client->name.clear();
+						client->name.reserve(31);
+						while (client->name.size() < 31) {
+							char c = r.template get<uint8_t>();
+							if (!c) break;
+							client->name += c;
+						}
+						
 						for (int i = 0; i != 12; ++i) {
 							st.players[i].controller = sync_st.initial_slot_controllers[i];
 							st.players[i].race = sync_st.initial_slot_races[i];
@@ -468,9 +476,16 @@ struct sync_functions: action_functions {
 			return &sync_st.clients.back();
 		}
 		void send_uid(const void* h) {
-			writer<1 + 32> w;
+			writer<1 + 32 + 32> w;
 			w.put<uint8_t>(sync_messages::id_client_uid);
 			for (auto& v : sync_st.local_client->uid.vals) w.put<uint32_t>(v);
+			size_t n = 0;
+			for (char c : sync_st.local_client->name) {
+				if (n >= 31) break;
+				++n;
+				w.put<uint8_t>(c);
+			}
+			w.put<uint8_t>(0);
 			send(w, h);
 		}
 		
