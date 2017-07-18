@@ -43,7 +43,7 @@ struct replay_file_reader {
 		size_t segments = r.template get<uint32_t>();
 		
 		a_vector<uint8_t> compressed_data;
-		
+
 		size_t output_pos = 0;
 		for (size_t i = 0; i != segments; ++i) {
 			size_t segment_input_size = r.template get<uint32_t>();
@@ -86,26 +86,27 @@ struct replay_state {
 	int end_frame = 0;
 	a_string map_name;
 	std::array<a_string, 12> player_name;
+	int game_type = 0;
 };
 
 struct replay_functions: action_functions {
 	replay_state& replay_st;
 	explicit replay_functions(state& st, action_state& action_st, replay_state& replay_st) : action_functions(st, action_st), replay_st(replay_st) {}
 	
-	void load_replay_file(a_string filename, bool initial_processing = true) {
+	void load_replay_file(a_string filename, bool initial_processing = true, std::vector<uint8_t>* get_map_data = nullptr) {
 		auto file_r = data_loading::file_reader<>(std::move(filename));
-		load_replay(data_loading::make_replay_file_reader(file_r), initial_processing);
+		load_replay(data_loading::make_replay_file_reader(file_r), initial_processing, get_map_data);
 	}
-	void load_replay_data(const uint8_t* data, size_t data_size, bool initial_processing = true) {
+	void load_replay_data(const uint8_t* data, size_t data_size, bool initial_processing = true, std::vector<uint8_t>* get_map_data = nullptr) {
 		auto r = data_loading::data_reader_le(data, data + data_size);
-		load_replay(data_loading::make_replay_file_reader(r), initial_processing);
+		load_replay(data_loading::make_replay_file_reader(r), initial_processing, get_map_data);
 	}
 	template<typename reader_T>
-	void load_replay(reader_T&& r, bool initial_processing = true) {
+	void load_replay(reader_T&& r, bool initial_processing = true, std::vector<uint8_t>* get_map_data = nullptr) {
 		
 		uint32_t identifier = r.template get<uint32_t>();
 		if (identifier != 0x53526572) error("load_replay: invalid identifier %#x", identifier);
-		
+
 		std::array<uint8_t, 633> game_info_buffer;
 		r.get_bytes(game_info_buffer.data(), game_info_buffer.size());
 		
@@ -126,7 +127,7 @@ struct replay_functions: action_functions {
 		gir.get<uint8_t>(); // slot count
 		gir.get<uint8_t>(); // game speed
 		gir.get<uint8_t>(); // game state ?
-		gir.get<uint16_t>(); // game type ?
+		auto game_type = gir.get<uint16_t>(); // game type ?
 		gir.get<uint16_t>(); // game sub type ?
 		gir.get<uint32_t>(); // ?
 		gir.get<uint16_t>(); // tileset
@@ -190,6 +191,7 @@ struct replay_functions: action_functions {
 		auto create_melee_units_for_player = gir.get<std::array<uint8_t, 8>>();
 		
 		replay_st.end_frame = frame_count;
+		replay_st.game_type = game_type;
 		
 		replay_st.actions_data_buffer.resize(r.template get<uint32_t>());
 		r.get_bytes(replay_st.actions_data_buffer.data(), replay_st.actions_data_buffer.size());
@@ -197,6 +199,8 @@ struct replay_functions: action_functions {
 		a_vector<uint8_t> map_buffer;
 		map_buffer.resize(r.template get<uint32_t>());
 		r.get_bytes(map_buffer.data(), map_buffer.size());
+
+		if (get_map_data) *get_map_data = map_buffer;
 		
 		game_load_functions game_load_funcs(st);
 		game_load_funcs.load_map_data(map_buffer.data(), map_buffer.size(), [&]() {

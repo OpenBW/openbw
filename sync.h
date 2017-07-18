@@ -101,6 +101,8 @@ struct sync_state {
 	
 	game_load_functions::setup_info_t* setup_info = nullptr;
 	replay_saver_state* save_replay = nullptr;
+
+	std::array<a_string, 12> player_names;
 	
 };
 
@@ -953,12 +955,10 @@ struct sync_functions: action_functions {
 	
 	template<typename server_T>
 	void switch_to_slot(server_T& server, int n) {
-		if (sync_st.game_started) return;
 		get_syncer(server).send_switch_to_slot(n);
 	}
 	
-	template<typename server_T>
-	void set_local_client_name(server_T& server, a_string name) {
+	void set_local_client_name(a_string name) {
 		if (sync_st.game_started) return;
 		sync_st.local_client->name = std::move(name);
 	}
@@ -977,6 +977,14 @@ struct sync_functions: action_functions {
 	template<typename server_T>
 	void leave_game(server_T& server) {
 		get_syncer(server).leave_game();
+	}
+
+	int connected_player_count() {
+		int clients_with_uid = 0;
+		for (auto* c : ptr(sync_st.clients)) {
+			if (c->has_uid) ++clients_with_uid;
+		}
+		return clients_with_uid;
 	}
 
 };
