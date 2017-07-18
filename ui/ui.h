@@ -1430,6 +1430,9 @@ struct ui_functions: ui_util_functions {
 		line_rectangle(data, data_pitch, rect{area.from + xy(ox, 0), area.from + xy(ox, 0) + xy(button_w, button_h)}, 51);
 		
 	}
+
+	virtual void draw_callback(uint8_t* data, size_t data_pitch) {
+	}
 	
 	a_vector<const image_t*> image_draw_queue;
 	
@@ -1931,6 +1934,9 @@ struct ui_functions: ui_util_functions {
 		uint8_t* data = (uint8_t*)indexed_surface->lock();
 		draw_tiles(data, indexed_surface->pitch);
 		draw_sprites(data, indexed_surface->pitch);
+
+		draw_callback(data, indexed_surface->pitch);
+
 		draw_minimap(data, indexed_surface->pitch);
 		draw_ui(data, indexed_surface->pitch);
 		indexed_surface->unlock();
