@@ -142,7 +142,7 @@ struct bit_writer {
 		if (bits_n) {
 			w.seek(w.tell() - 1);
 			data |= (uint8_t)v << (8 - bits_n);
-			w.template put(data);
+			w.put(data);
 			if (n <= bits_n) {
 				bits_n -= n;
 				n = 0;
@@ -155,12 +155,12 @@ struct bit_writer {
 		}
 		while (true) {
 			if (n > 8) {
-				w.template put<uint8_t>(v);
+				w.template put<uint8_t>((uint8_t)v);
 				n -= 8;
-				v = sizeof(v) <= 1 ? 0 : v >> 8;
+				v >>= std::conditional<sizeof(v) <= 1, std::integral_constant<int, 0>, std::integral_constant<int, 8>>::type::value;
 			} else {
-				data = v;
-				w.template put<uint8_t>(v);
+				data = (uint8_t)v;
+				w.template put<uint8_t>((uint8_t)v);
 				bits_n = 8 - n;
 				return;
 			}
@@ -374,7 +374,7 @@ void compress(const uint8_t* input, size_t input_size, writer_T& writer) {
 		
 		if (best_length < 2) {
 			w.template put_bits<1>(0);
-			w.template put(c);
+			w.put(c);
 		} else {
 			w.template put_bits<1>(1);
 			write_length(w, best_length - 2);
@@ -548,12 +548,12 @@ struct replay_saver_functions {
 			replay_saver_st.current_actions_size = 1 + data_size;
 			w.template put<uint32_t>(current_frame);
 			if (data_size >= 0x100) error("replay_saver_functions::add_action: data_size (%d) > 0x100", data_size);
-			w.template put<uint8_t>(1 + data_size);
+			w.template put<uint8_t>((uint8_t)(1 + data_size));
 			replay_saver_st.current_actions_size_index = replay_saver_st.history.size() - 1;
 			replay_saver_st.current_actions_size_offset = replay_saver_st.history.back().size() - 1;
 		} else {
 			replay_saver_st.current_actions_size += 1 + data_size;
-			replay_saver_st.history.at(replay_saver_st.current_actions_size_index).at(replay_saver_st.current_actions_size_offset) = replay_saver_st.current_actions_size;
+			replay_saver_st.history.at(replay_saver_st.current_actions_size_index).at(replay_saver_st.current_actions_size_offset) = (uint8_t)replay_saver_st.current_actions_size;
 		}
 		w.template put<uint8_t>(owner);
 		w.put_bytes(data, data_size);
@@ -579,8 +579,8 @@ struct replay_saver_functions {
 		giw.put<uint32_t>(0); // ?
 		put_string(replay_saver_st.player_name, 24);
 		giw.put<uint32_t>(0); // game flags?
-		giw.put<uint16_t>(replay_saver_st.map_tile_width); // map width
-		giw.put<uint16_t>(replay_saver_st.map_tile_height); // map height
+		giw.put<uint16_t>((uint16_t)replay_saver_st.map_tile_width); // map width
+		giw.put<uint16_t>((uint16_t)replay_saver_st.map_tile_height); // map height
 		giw.put<uint8_t>(replay_saver_st.active_player_count); // active player acount
 		giw.put<uint8_t>(replay_saver_st.slot_count); // slot count
 		giw.put<uint8_t>(replay_saver_st.game_speed); // game speed
