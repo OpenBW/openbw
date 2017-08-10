@@ -576,7 +576,7 @@ struct sync_functions: action_functions {
 			for (auto i = sync_st.clients.begin(); i != sync_st.clients.end();) {
 				auto* c = &*i;
 				++i;
-				if (now - c->last_synced >= std::chrono::seconds(10)) {
+				if (now - c->last_synced >= std::chrono::seconds(60)) {
 					if ((int8_t)(sync_st.sync_frame - c->frame) >= (int8_t)sync_st.latency) {
 						kill_client(c);
 					}
