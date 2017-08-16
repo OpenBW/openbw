@@ -219,7 +219,7 @@ struct replay_functions: action_functions {
 				}
 			}
 			st.lcg_rand_state = random_seed;
-		});
+		}, initial_processing);
 		
 		std::array<int, 8> source_colors;
 		for (size_t i = 0; i != 8; ++i) {
@@ -227,11 +227,6 @@ struct replay_functions: action_functions {
 		}
 		for (size_t i = 0; i != 8; ++i) {
 			st.players[i].color = source_colors.at(player_color[i]);
-		}
-		
-		if (initial_processing) {
-			process_frame();
-			process_frame();
 		}
 	}
 	
