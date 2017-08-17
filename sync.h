@@ -666,6 +666,9 @@ struct sync_functions: action_functions {
 			});
 			send_game_started();
 			
+			for (auto* c : ptr(sync_st.clients)) {
+				if (c->player_slot != -1) sync_st.player_names.at(c->player_slot) = c->name;
+			}
 			
 			if (sync_st.save_replay) {
 				auto& r = *sync_st.save_replay;
@@ -682,10 +685,7 @@ struct sync_functions: action_functions {
 				r.map_name = st.game->scenario_name;
 				r.setup_info = *sync_st.setup_info;
 				r.players = st.players;
-				r.player_names = {};
-				for (auto* c : ptr(sync_st.clients)) {
-					if (c->player_slot != -1) r.player_names.at(c->player_slot) = c->name;
-				}
+				r.player_names = sync_st.player_names;
 				
 			}
 			
