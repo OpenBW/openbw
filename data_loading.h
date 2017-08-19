@@ -1183,8 +1183,8 @@ struct mpq_archive_reader {
 		size_t hash_table_offset = (size_t)r.template get<uint32_t>();
 		size_t block_table_offset = (size_t)r.template get<uint32_t>();
 
-		size_t hash_table_size = (size_t)r.template get<uint32_t>();
-		size_t block_table_size = (size_t)r.template get<uint32_t>();
+		size_t hash_table_size = (size_t)(r.template get<uint32_t>() * 16 / 16);
+		size_t block_table_size = (size_t)(r.template get<uint32_t>() * 16 / 16);
 
 		r.seek(hash_table_offset);
 
