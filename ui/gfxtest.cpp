@@ -1,4 +1,8 @@
 
+#ifdef EMSCRIPTEN
+#include <emscripten.h>
+#endif
+
 #include "ui.h"
 #include "common.h"
 #include "bwgame.h"
@@ -7,11 +11,9 @@
 #include <chrono>
 #include <thread>
 
-#ifdef EMSCRIPTEN
-#include <emscripten.h>
-#endif
-
 using namespace bwgame;
+
+using ui::log;
 
 FILE* log_file = nullptr;
 
@@ -50,33 +52,33 @@ struct saved_state {
 
 struct main_t {
 	ui_functions ui;
-	
+
 	main_t(game_player player) : ui(std::move(player)) {}
-	
+
 	std::chrono::high_resolution_clock clock;
 	std::chrono::high_resolution_clock::time_point last_tick;
-	
+
 	std::chrono::high_resolution_clock::time_point last_fps;
 	int fps_counter = 0;
-	
+
 	a_map<int, std::unique_ptr<saved_state>> saved_states;
-	
+
 	void reset() {
 		saved_states.clear();
 		ui.reset();
 	}
-	
+
 	void update() {
 		auto now = clock.now();
-		
+
 		auto tick_speed = std::chrono::milliseconds((fp8::integer(42) / ui.game_speed).integer_part());
-		
+
 		if (now - last_fps >= std::chrono::seconds(1)) {
 			//log("game fps: %g\n", fps_counter / std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1>>>(now - last_fps).count());
 			last_fps = now;
 			fps_counter = 0;
 		}
-		
+
 		auto next = [&]() {
 			int save_interval = 10 * 1000 / 42;
 			if (ui.st.current_frame == 0 || ui.st.current_frame % save_interval == 0) {
@@ -86,7 +88,7 @@ struct main_t {
 					v->st = copy_state(ui.st);
 					v->action_st = copy_state(ui.action_st, ui.st, v->st);
 					v->apm = ui.apm;
-					
+
 					a_map<int, std::unique_ptr<saved_state>> new_saved_states;
 					new_saved_states[ui.st.current_frame] = std::move(v);
 					while (!saved_states.empty()) {
@@ -101,7 +103,7 @@ struct main_t {
 			ui.replay_functions::next_frame();
 			for (auto& v : ui.apm) v.update(ui.st.current_frame);
 		};
-		
+
 		if (!ui.is_done() || ui.st.current_frame != ui.replay_frame) {
 			if (ui.st.current_frame != ui.replay_frame) {
 				if (ui.st.current_frame != ui.replay_frame) {
@@ -112,7 +114,7 @@ struct main_t {
 						ui.st = copy_state(v->st);
 						ui.action_st = copy_state(v->action_st, v->st, ui.st);
 						ui.apm = v->apm;
-					}	
+					}
 				}
 				if (ui.st.current_frame < ui.replay_frame) {
 					for (size_t i = 0; i != 32 && ui.st.current_frame != ui.replay_frame; ++i) {
@@ -137,7 +139,7 @@ struct main_t {
 						--i;
 						++fps_counter;
 						last_tick += tick_speed;
-						
+
 						if (!ui.is_done()) next();
 						else break;
 						if (i % 4 == 3 && clock.now() - now >= std::chrono::milliseconds(50)) break;
@@ -146,7 +148,7 @@ struct main_t {
 				}
 			}
 		}
-		
+
 		ui.update();
 	}
 };
@@ -260,7 +262,7 @@ struct js_file_reader {
 		if (filename == "StarDat.mpq") index = 0;
 		else if (filename == "BrooDat.mpq") index = 1;
 		else if (filename == "Patch_rt.mpq") index = 2;
-		else xcept("js_file_reader: unknown filename '%s'", filename);
+		else ui::xcept("js_file_reader: unknown filename '%s'", filename);
 		this->filename = std::move(filename);
 	}
 
@@ -275,7 +277,7 @@ struct js_file_reader {
 	size_t tell() const {
 		file_pointer;
 	}
-	
+
 	size_t size() {
 		return EM_ASM_INT({return js_file_size($0);}, index);
 	}
@@ -347,8 +349,8 @@ extern "C" void replay_set_value(int index, double value) {
 	}
 }
 
-#include <bind.h>
-#include <val.h>
+#include <emscripten/bind.h>
+#include <emscripten/val.h>
 using namespace emscripten;
 
 struct js_unit_type {
@@ -372,7 +374,7 @@ struct js_unit {
 
 struct util_functions: state_functions {
 	util_functions(state& st) : state_functions(st) {}
-	
+
 	double worker_supply(int owner) {
 		double r = 0.0;
 		for (const unit_t* u : ptr(st.player_units.at(owner))) {
@@ -382,7 +384,7 @@ struct util_functions: state_functions {
 		}
 		return r;
 	}
-	
+
 	double army_supply(int owner) {
 		double r = 0.0;
 		for (const unit_t* u : ptr(st.player_units.at(owner))) {
@@ -392,7 +394,7 @@ struct util_functions: state_functions {
 		}
 		return r;
 	}
-	
+
 	auto get_all_incomplete_units() {
 		val r = val::array();
 		size_t i = 0;
@@ -406,7 +408,7 @@ struct util_functions: state_functions {
 		}
 		return r;
 	}
-	
+
 	auto get_all_completed_units() {
 		val r = val::array();
 		size_t i = 0;
@@ -420,7 +422,7 @@ struct util_functions: state_functions {
 		}
 		return r;
 	}
-	
+
 	auto get_all_units() {
 		val r = val::array();
 		size_t i = 0;
@@ -435,7 +437,7 @@ struct util_functions: state_functions {
 		}
 		return r;
 	}
-	
+
 	auto get_completed_upgrades(int owner) {
 		val r = val::array();
 		size_t n = 0;
@@ -450,7 +452,7 @@ struct util_functions: state_functions {
 		}
 		return r;
 	}
-	
+
 	auto get_completed_research(int owner) {
 		val r = val::array();
 		size_t n = 0;
@@ -463,7 +465,7 @@ struct util_functions: state_functions {
 		}
 		return r;
 	}
-	
+
 	auto get_incomplete_upgrades(int owner) {
 		val r = val::array();
 		size_t i = 0;
@@ -480,7 +482,7 @@ struct util_functions: state_functions {
 		}
 		return r;
 	}
-	
+
 	auto get_incomplete_research(int owner) {
 		val r = val::array();
 		size_t i = 0;
@@ -496,7 +498,7 @@ struct util_functions: state_functions {
 		}
 		return r;
 	}
-	
+
 };
 
 optional<util_functions> m_util_funcs;
@@ -540,15 +542,15 @@ EMSCRIPTEN_BINDINGS(openbw) {
 		.function("get_incomplete_research", &util_functions::get_incomplete_research)
 		;
 	function("get_util_funcs", &get_util_funcs);
-	
+
 	function("set_volume", &set_volume);
 	function("get_volume", &get_volume);
-	
+
 	class_<unit_type_t>("unit_type_t")
 		.property("id", &unit_type_t_id)
 		.property("build_time", &unit_type_t::build_time)
 		;
-	
+
 	class_<unit_t>("unit_t")
 		.property("owner", &unit_t::owner)
 		.property("remaining_build_time", &unit_t::remaining_build_time)
@@ -600,7 +602,7 @@ bool any_replay_loaded = false;
 extern "C" void load_replay(const uint8_t* data, size_t len) {
 	m->reset();
 	m->ui.load_replay_data(data, len);
-	m->set_image_data();
+	m->ui.set_image_data();
 	any_replay_loaded = true;
 }
 
@@ -614,7 +616,7 @@ int main() {
 
 	size_t screen_width = 1280;
 	size_t screen_height = 800;
-	
+
 	std::chrono::high_resolution_clock clock;
 	auto start = clock.now();
 
@@ -627,18 +629,18 @@ int main() {
 #else
 	auto load_data_file = data_loading::data_files_directory("");
 #endif
-	
+
 	game_player player(load_data_file);
 
 	main_t m(std::move(player));
 	auto& ui = m.ui;
-	
-	m.load_all_image_data(load_data_file);
-	
+
+	m.ui.load_all_image_data(load_data_file);
+
 	ui.load_data_file = [&](a_vector<uint8_t>& data, a_string filename) {
 		load_data_file(data, std::move(filename));
 	};
-	
+
 	ui.init();
 
 #ifndef EMSCRIPTEN
@@ -647,14 +649,14 @@ int main() {
 
 	auto& wnd = ui.wnd;
 	wnd.create("test", 0, 0, screen_width, screen_height);
-	
+
 	ui.resize(screen_width, screen_height);
 	ui.screen_pos = {(int)ui.game_st.map_width / 2 - (int)screen_width / 2, (int)ui.game_st.map_height / 2 - (int)screen_height / 2};
-	
+
 	ui.set_image_data();
-	
+
 	log("loaded in %dms\n", std::chrono::duration_cast<std::chrono::milliseconds>(clock.now() - start).count());
-	
+
 	//set_malloc_fail_handler(malloc_fail_handler);
 
 #ifdef EMSCRIPTEN

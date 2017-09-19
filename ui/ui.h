@@ -119,10 +119,10 @@ static inline std::unique_ptr<native_window_drawing::surface> flip_image(native_
 
 template<typename load_data_file_F>
 void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
-	
+
 	std::array<int, 0x100> creep_edge_neighbors_index{};
 	std::array<int, 128> creep_edge_neighbors_index_n{};
-	
+
 	for (size_t i = 0; i != 0x100; ++i) {
 		int v = 0;
 		if (i & 2) v |= 0x10;
@@ -137,7 +137,7 @@ void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
 		if ((v & 0xc) == 0xc) v |= 0x40;
 		creep_edge_neighbors_index[i] = v;
 	}
-	
+
 	int n = 0;
 	for (int i = 0; i != 128; ++i) {
 		auto it = std::find(creep_edge_neighbors_index.begin(), creep_edge_neighbors_index.end(), i);
@@ -145,17 +145,17 @@ void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
 		creep_edge_neighbors_index_n[i] = n;
 		++n;
 	}
-	
+
 	for (size_t i = 0; i != 0x100; ++i) {
 		img.creep_edge_frame_index[i] = creep_edge_neighbors_index_n[creep_edge_neighbors_index[i]];
 	}
-	
+
 	a_vector<uint8_t> tmp_data;
 	auto load_pcx_file = [&](a_string filename) {
 		load_data_file(tmp_data, std::move(filename));
 		return load_pcx_data(tmp_data);
 	};
-	
+
 	auto tunit_pcx = load_pcx_file("game/tunit.pcx");
 	if (tunit_pcx.width != 128 || tunit_pcx.height != 1) error("tunit.pcx dimensions are %dx%d (128x1 required)", tunit_pcx.width, tunit_pcx.height);
 	for (size_t i = 0; i != 16; ++i) {
@@ -178,7 +178,7 @@ void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
 	for (size_t i = 0; i != 19; ++i) {
 		img.hp_bar_colors[i] = thpbar_pcx.data[i];
 	}
-	
+
 }
 
 template<typename load_data_file_F>
@@ -197,7 +197,7 @@ void load_tileset_image_data(tileset_image_data& img, size_t tileset_index, load
 	load_data_file(vr4_data, format("Tileset/%s.vr4", tileset_name));
 	load_data_file(vx4_data, format("Tileset/%s.vx4", tileset_name));
 	load_data_file(img.wpe, format("Tileset/%s.wpe", tileset_name));
-	
+
 	a_vector<uint8_t> grp_data;
 	load_data_file(grp_data, format("Tileset/%s.grp", tileset_name));
 	img.creep_grp = read_grp(data_loading::data_reader_le(grp_data.data(), grp_data.data() + grp_data.size()));
@@ -237,14 +237,14 @@ void load_tileset_image_data(tileset_image_data& img, size_t tileset_index, load
 	for (size_t x = 0; x != 256; ++x) {
 		img.dark_pcx.data[256 * 31 + x] = (uint8_t)x;
 	}
-	
+
 	std::array<const char*, 7> light_names = {"ofire", "gfire", "bfire", "bexpl", "trans50", "red", "green"};
 	for (size_t i = 0; i != 7; ++i) {
 		img.light_pcx[i] = load_pcx_file(format("Tileset/%s/%s.pcx", tileset_name, light_names[i]));
 	}
-	
+
 	if (img.wpe.size() != 256 * 4) error("wpe size invalid (%d)", img.wpe.size());
-	
+
 	auto get_nearest_color = [&](int r, int g, int b) {
 		size_t best_index = -1;
 		int best_score{};
@@ -261,7 +261,7 @@ void load_tileset_image_data(tileset_image_data& img, size_t tileset_index, load
 		return best_index;
 	};
 	img.resource_minimap_color = get_nearest_color(0, 255, 255);
-	
+
 	for (size_t i = 0; i != 256; ++i) {
 		int r = img.wpe[4 * i + 0];
 		int g = img.wpe[4 * i + 1];
@@ -269,7 +269,7 @@ void load_tileset_image_data(tileset_image_data& img, size_t tileset_index, load
 		int strength = (r * 28 + g * 77 + b * 151 + 4096) / 8192;
 		img.cloak_fade_selector[i] = strength;
 	}
-	
+
 }
 
 template<bool bounds_check>
@@ -436,9 +436,9 @@ struct apm_t {
 };
 
 struct ui_util_functions: replay_functions {
-	
+
 	explicit ui_util_functions(state& st, action_state& action_st, replay_state& replay_st) : replay_functions(st, action_st, replay_st) {}
-	
+
 	rect sprite_clickable_bounds(const sprite_t* sprite) const {
 		rect r{{(int)game_st.map_width - 1, (int)game_st.map_height - 1}, {0, 0}};
 		for (const image_t* image : ptr(sprite->images)) {
@@ -453,7 +453,7 @@ struct ui_util_functions: replay_functions {
 		}
 		return r;
 	}
-	
+
 	bool unit_can_be_selected(const unit_t* u) const {
 		if (unit_is(u, UnitTypes::Terran_Nuclear_Missile)) return false;
 		if (unit_is(u, UnitTypes::Protoss_Scarab)) return false;
@@ -465,7 +465,7 @@ struct ui_util_functions: replay_functions {
 		if (unit_is(u, UnitTypes::Special_Right_Pit_Door)) return false;
 		return true;
 	}
-	
+
 	bool image_has_data_at(const image_t* image, xy pos) const {
 		auto& frame = image->grp->frames.at(image->frame_index);
 		xy map_pos = get_image_map_position(image);
@@ -474,7 +474,7 @@ struct ui_util_functions: replay_functions {
 		int y = pos.y - map_pos.y;
 		if ((size_t)x >= frame.size.x) return false;
 		if ((size_t)y >= frame.size.y) return false;
-		
+
 		const uint8_t* d = frame.data_container.data() + frame.line_data_offset.at(y);
 		while (x > 0) {
 			int v = *d++;
@@ -492,7 +492,7 @@ struct ui_util_functions: replay_functions {
 		}
 		return true;
 	}
-	
+
 	bool unit_has_clickable_image_data_at(const unit_t* u, xy pos) const {
 		if (!is_in_bounds(pos, sprite_clickable_bounds(u->sprite))) return false;
 		if (ut_flag(u, unit_type_t::flag_100)) {
@@ -537,7 +537,7 @@ struct ui_util_functions: replay_functions {
 		}
 		return best_unit;
 	}
-	
+
 	uint32_t sprite_depth_order(const sprite_t* sprite) const {
 		uint32_t score = 0;
 		score |= sprite->elevation_level;
@@ -547,14 +547,14 @@ struct ui_util_functions: replay_functions {
 		score |= s_flag(sprite, sprite_t::flag_turret) ? 1 : 0;
 		return score;
 	}
-	
+
 };
 
 struct ui_functions: ui_util_functions {
 	image_data img;
 	tileset_image_data tileset_img;
 	native_window::window wnd;
-	
+
 	bool exit_on_close = true;
 	bool window_closed = false;
 
@@ -562,30 +562,30 @@ struct ui_functions: ui_util_functions {
 
 	size_t screen_width;
 	size_t screen_height;
-	
+
 	game_player player;
 	replay_state current_replay_state;
 	action_state current_action_state;
 	std::array<apm_t, 12> apm;
 	ui_functions(game_player player) : ui_util_functions(player.st(), current_action_state, current_replay_state), player(std::move(player)) {
 	}
-	
+
 	std::function<void(a_vector<uint8_t>&, a_string)> load_data_file;
-	
+
 	sound_types_t sound_types;
 	a_vector<a_string> sound_filenames;
-	
+
 	const sound_type_t* get_sound_type(Sounds id) const {
 		if ((size_t)id >= (size_t)Sounds::None) error("invalid sound id %d", (size_t)id);
 		return &sound_types.vec[(size_t)id];
 	}
-	
+
 	a_vector<bool> has_loaded_sound;
 	a_vector<std::unique_ptr<native_sound::sound>> loaded_sounds;
 	a_vector<std::chrono::high_resolution_clock::time_point> last_played_sound;
-	
+
 	int global_volume = 50;
-	
+
 	struct sound_channel {
 		bool playing = false;
 		const sound_type_t* sound_type = nullptr;
@@ -595,7 +595,7 @@ struct ui_functions: ui_util_functions {
 		int volume = 0;
 	};
 	a_vector<sound_channel> sound_channels;
-	
+
 	void set_volume(int volume) {
 		if (volume < 0) volume = 0;
 		else if (volume > 100) volume = 100;
@@ -606,7 +606,7 @@ struct ui_functions: ui_util_functions {
 			}
 		}
 	}
-	
+
 	sound_channel* get_sound_channel(int priority) {
 		sound_channel* r = nullptr;
 		for (auto& c : sound_channels) {
@@ -628,7 +628,7 @@ struct ui_functions: ui_util_functions {
 		}
 		return r;
 	}
-	
+
 	virtual void play_sound(int id, xy position, const unit_t* source_unit, bool add_race_index) override {
 		if (global_volume == 0) return;
 		if (add_race_index) id += 1;
@@ -641,27 +641,27 @@ struct ui_functions: ui_util_functions {
 		}
 		auto& s = loaded_sounds[id];
 		if (!s) return;
-		
+
 		auto now = clock.now();
 		if (now - last_played_sound[id] <= std::chrono::milliseconds(80)) return;
 		last_played_sound[id] = now;
-		
+
 		const sound_type_t* sound_type = get_sound_type((Sounds)id);
-		
+
 		int volume = sound_type->min_volume;
-		
+
 		if (position != xy()) {
 			int distance = 0;
 			if (position.x < screen_pos.x) distance += screen_pos.x - position.x;
 			else if (position.x > screen_pos.x + (int)screen_width) distance += position.x - (screen_pos.x + (int)screen_width);
 			if (position.y < screen_pos.y) distance += screen_pos.y - position.y;
 			else if (position.y > screen_pos.y + (int)screen_height) distance += position.y - (screen_pos.y + (int)screen_height);
-			
+
 			int distance_volume = 99 - 99 * distance / 512;
-			
+
 			if (distance_volume > volume) volume = distance_volume;
 		}
-		
+
 		if (volume > 10) {
 			int pan = 0;
 //			if (position != xy()) {
@@ -676,9 +676,9 @@ struct ui_functions: ui_util_functions {
 //				else pan = 255;
 //				if (left) pan = -pan;
 //			}
-			
+
 			const unit_type_t* unit_type = source_unit ? source_unit->unit_type : nullptr;
-			
+
 			if (sound_type->flags & 0x10) {
 				for (auto& c : sound_channels) {
 					if (c.playing && c.sound_type == sound_type) {
@@ -694,7 +694,7 @@ struct ui_functions: ui_util_functions {
 					}
 				}
 			}
-			
+
 			auto* c = get_sound_channel(sound_type->priority);
 			if (c) {
 				native_sound::play(c - sound_channels.data(), &*s, (128 - 4) * (volume * global_volume / 100) / 100, pan);
@@ -707,7 +707,7 @@ struct ui_functions: ui_util_functions {
 			}
 		}
 	}
-	
+
 	a_vector<uint8_t> creep_random_tile_indices = a_vector<uint8_t>(256 * 256);
 	void init() {
 		uint32_t rand_state = (uint32_t)clock.now().time_since_epoch().count();
@@ -719,16 +719,16 @@ struct ui_functions: ui_util_functions {
 			if (rand() % 100 < 4) v = 6 + rand() % 7;
 			else v = rand() % 6;
 		}
-		
+
 		a_vector<uint8_t> data;
 		load_data_file(data, "arr/sfxdata.dat");
 		sound_types = data_loading::load_sfxdata_dat(data);
-		
+
 		sound_filenames.resize(sound_types.vec.size());
 		has_loaded_sound.resize(sound_filenames.size());
 		loaded_sounds.resize(has_loaded_sound.size());
 		last_played_sound.resize(loaded_sounds.size());
-		
+
 		string_table_data tbl;
 		load_data_file(tbl.data, "arr/sfxdata.tbl");
 		for (size_t i = 0; i != sound_types.vec.size(); ++i) {
@@ -738,18 +738,18 @@ struct ui_functions: ui_util_functions {
 		native_sound::frequency = 44100;
 		native_sound::channels = 8;
 		native_sound::init();
-		
+
 		sound_channels.resize(8);
-		
+
 		load_data_file(images_tbl.data, "arr/images.tbl");
-		
+
 		load_all_image_data(load_data_file);
 	}
-	
+
 	virtual void on_action(int owner, int action) override {
 		apm.at(owner).add_action(st.current_frame);
 	}
-	
+
 	size_t view_width;
 	size_t view_height;
 	fp16 view_scale;
@@ -766,7 +766,7 @@ struct ui_functions: ui_util_functions {
 
 		return {{from_tile_x, from_tile_y}, {to_tile_x, to_tile_y}};
 	}
-	
+
 
 	void draw_tiles(uint8_t* data, size_t data_pitch) {
 
@@ -776,7 +776,7 @@ struct ui_functions: ui_util_functions {
 		auto* megatile_index = &st.tiles_mega_tile_index[tile_index];
 		auto* tile = &st.tiles[tile_index];
 		size_t width = screen_tile.to.x - screen_tile.from.x;
-		
+
 		xy dirs[9] = {{1, 1}, {0, 1}, {-1, 1}, {1, 0}, {-1, 0}, {1, -1}, {0, -1}, {-1, -1}, {0, 0}};
 
 		for (size_t tile_y = screen_tile.from.y; tile_y != screen_tile.to.y; ++tile_y) {
@@ -807,7 +807,7 @@ struct ui_functions: ui_util_functions {
 					index = game_st.cv5.at(1).mega_tile_index[creep_random_tile_indices[tile_x + tile_y * game_st.map_tile_width]];
 				}
 				draw_tile(tileset_img, index, dst, data_pitch, offset_x, offset_y, width, height);
-				
+
 				if (~tile->flags & tile_t::flag_has_creep) {
 					size_t creep_index = 0;
 					for (size_t i = 0; i != 9; ++i) {
@@ -818,20 +818,20 @@ struct ui_functions: ui_util_functions {
 						if (st.tiles[tile_x + add_x + (tile_y + add_y) * game_st.map_tile_width].flags & tile_t::flag_has_creep) creep_index |= 1 << i;
 					}
 					size_t creep_frame = img.creep_edge_frame_index[creep_index];
-					
+
 					if (creep_frame) {
-						
+
 						auto& frame = tileset_img.creep_grp.frames.at(creep_frame - 1);
-						
+
 						screen_x += frame.offset.x;
 						screen_y += frame.offset.y;
-						
+
 						size_t width = frame.size.x;
 						size_t height = frame.size.y;
-				
+
 						if (screen_x < (int)screen_width && screen_y < (int)screen_height) {
 							if (screen_x + (int)width > 0 && screen_y + (int)height > 0) {
-								
+
 								size_t offset_x = 0;
 								size_t offset_y = 0;
 								if (screen_x < 0) {
@@ -840,12 +840,12 @@ struct ui_functions: ui_util_functions {
 								if (screen_y < 0) {
 									offset_y = -screen_y;
 								}
-								
+
 								uint8_t* dst = data + screen_y * data_pitch + screen_x;
-					
+
 								width = std::min(width, screen_width - screen_x);
 								height = std::min(height, screen_height - screen_y);
-								
+
 								draw_frame(frame, false, dst, data_pitch, offset_x, offset_y, width, height);
 							}
 						}
@@ -861,16 +861,16 @@ struct ui_functions: ui_util_functions {
 			tile += game_st.map_tile_width;
 		}
 	}
-	
+
 	a_vector<uint8_t> temporary_warp_texture_buffer;
 
 	void draw_image(const image_t* image, uint8_t* data, size_t data_pitch, size_t color_index) {
-		
+
 		if (is_new_image(image)) {
 			image_draw_queue.push_back(image);
 			return;
 		}
-		
+
 		xy map_pos = get_image_map_position(image);
 
 		int screen_x = map_pos.x - screen_pos.x;
@@ -898,7 +898,7 @@ struct ui_functions: ui_util_functions {
 
 		width = std::min(width, screen_width - screen_x);
 		height = std::min(height, screen_height - screen_y);
-		
+
 		auto draw_alpha = [&](size_t index, auto remap_f) {
 			auto& data = tileset_img.light_pcx.at(index).data;
 			uint8_t* ptr = data.data();
@@ -918,7 +918,7 @@ struct ui_functions: ui_util_functions {
 				if (new_value >= 8 && new_value < 16) return ptr[new_value - 8];
 				return new_value;
 			};
-			draw_frame(frame, i_flag(image, image_t::flag_horizontally_flipped), dst, data_pitch, offset_x, offset_y, width, height, player_color);	
+			draw_frame(frame, i_flag(image, image_t::flag_horizontally_flipped), dst, data_pitch, offset_x, offset_y, width, height, player_color);
 		} else if (image->modifier == 2 || image->modifier == 4) {
 			uint8_t* color_ptr = img.player_unit_colors.at(color_index).data();
 			draw_alpha(4, [color_ptr](uint8_t new_value, uint8_t) {
@@ -932,7 +932,7 @@ struct ui_functions: ui_util_functions {
 				if (new_value >= 8 && new_value < 16) return color_ptr[new_value - 8];
 				return new_value;
 			};
-			draw_frame(frame, i_flag(image, image_t::flag_horizontally_flipped), dst, data_pitch, offset_x, offset_y, width, height, cloaking);	
+			draw_frame(frame, i_flag(image, image_t::flag_horizontally_flipped), dst, data_pitch, offset_x, offset_y, width, height, cloaking);
 		} else if (image->modifier == 3) {
 			uint8_t* color_ptr = img.player_unit_colors.at(color_index).data();
 			draw_alpha(4, [color_ptr](uint8_t new_value, uint8_t) {
@@ -972,18 +972,18 @@ struct ui_functions: ui_util_functions {
 		} else error("don't know how to draw image modifier %d", image->modifier);
 
 	}
-	
+
 	a_vector<const unit_t*> current_selection_sprites_set = a_vector<const unit_t*>(2500);
 	a_vector<const sprite_t*> current_selection_sprites;
-	
+
 	void draw_selection_circle(const sprite_t* sprite, const unit_t* u, uint8_t* data, size_t data_pitch) {
 		auto* image_type = get_image_type((ImageTypes)((int)ImageTypes::IMAGEID_Selection_Circle_22pixels + sprite->sprite_type->selection_circle));
-		
+
 		xy map_pos = sprite->position + xy(0, sprite->sprite_type->selection_circle_vpos);
-		
+
 		auto* grp = global_st.image_grp[(size_t)image_type->id];
 		auto& frame = grp->frames.at(0);
-		
+
 		map_pos.x += int(frame.offset.x - grp->width / 2);
 		map_pos.y += int(frame.offset.y - grp->height / 2);
 
@@ -1010,7 +1010,7 @@ struct ui_functions: ui_util_functions {
 
 		width = std::min(width, screen_width - screen_x);
 		height = std::min(height, screen_height - screen_y);
-		
+
 		size_t color_index = st.players[sprite->owner].color;
 		uint8_t color = img.player_unit_colors.at(color_index)[0];
 		if (unit_is_mineral_field(u) || unit_is(u, UnitTypes::Resource_Vespene_Geyser)) {
@@ -1021,21 +1021,21 @@ struct ui_functions: ui_util_functions {
 			return new_value;
 		};
 		draw_frame(frame, false, dst, data_pitch, offset_x, offset_y, width, height, player_color);
-		
+
 	}
 
 	void draw_health_bars(const sprite_t* sprite, const unit_t* u, uint8_t* data, size_t data_pitch) {
-		
+
 		auto* selection_circle_image_type = get_image_type((ImageTypes)((int)ImageTypes::IMAGEID_Selection_Circle_22pixels + sprite->sprite_type->selection_circle));
-		
+
 		auto* selection_circle_grp = global_st.image_grp[(size_t)selection_circle_image_type->id];
 		auto& selection_circle_frame = selection_circle_grp->frames.at(0);
-		
+
 		int offsety = sprite->sprite_type->selection_circle_vpos + selection_circle_frame.size.y / 2 + 8;
-		
+
 		bool has_shield = u->unit_type->has_shield;
 		bool has_energy = ut_has_energy(u) || u_hallucination(u) || unit_is(u, UnitTypes::Zerg_Broodling);
-		
+
 		int width = sprite->sprite_type->health_bar_size;
 		width -= (width - 1) % 3;
 		if (width < 19) width = 19;
@@ -1043,9 +1043,9 @@ struct ui_functions: ui_util_functions {
 		int height = 5;
 		if (has_shield) height += 2;
 		if (has_energy) height += 6;
-		
+
 		xy map_pos = sprite->position + xy(0, offsety);
-		
+
 		map_pos.x += int(0 - width / 2);
 		map_pos.y += int(0 - height / 2);
 
@@ -1054,7 +1054,7 @@ struct ui_functions: ui_util_functions {
 
 		if (screen_x >= (int)screen_width || screen_y >= (int)screen_height) return;
 		if (screen_x + width <= 0 || screen_y + height <= 0) return;
-		
+
 		auto filled_width = [&](int percent) {
 			int r = percent * width / 100;
 			if (r < 3) r = 3;
@@ -1064,16 +1064,16 @@ struct ui_functions: ui_util_functions {
 			}
 			return r;
 		};
-		
+
 		int hp_percent = unit_hp_percent(u);
 		int dw = filled_width(hp_percent);
-		
+
 		int shield_dw = 0;
 		if (has_shield) {
 			int shield_percent = (int)u->shield_points.integer_part() * 100 / std::max(u->unit_type->shield_points, 1);
 			shield_dw = filled_width(shield_percent);
 		}
-		
+
 		int energy_dw = 0;
 		if (has_energy) {
 			int energy_percent;
@@ -1114,20 +1114,20 @@ struct ui_functions: ui_util_functions {
 		}
 
 		uint8_t* dst = data + screen_y * data_pitch + screen_x;
-		
+
 		width = std::min(width, (int)screen_width - screen_x);
 		height = std::min(height, (int)screen_height - screen_y);
-		
+
 		if (dw > width) dw = width;
 		if (shield_dw > width) shield_dw = width;
 		if (energy_dw > width) energy_dw = width;
-		
+
 		int hp_height = std::min(std::max((has_shield ? 7 : 5) - offset_y, 0), height);
-		
+
 		for (int i = offset_y; i < offset_y + hp_height; ++i) {
 			int ci = hp_percent >= 66 ? colors_66[i] : hp_percent >= 33 ? colors_33[i] : colors_0[i];
 			int c = img.hp_bar_colors.at(ci);
-			
+
 			if (dw > 0) memset(dst, c, dw);
 			if (width - dw > 0) {
 				c = img.hp_bar_colors.at(colors_bg[i]);
@@ -1135,16 +1135,16 @@ struct ui_functions: ui_util_functions {
 			}
 			dst += data_pitch;
 		}
-		
+
 		if (has_shield) {
 			int shield_colors[] = {18, 10, 11, 18};
 			int shield_colors_bg[] = {18, 16, 17, 18};
 			
 			dst = data + screen_y * data_pitch + screen_x;
-			
+
 			for (int i = offset_y; i < std::min(4, height); ++i) {
 				int c = img.hp_bar_colors.at(shield_colors[i]);
-				
+
 				if (shield_dw > 0) memset(dst, c, shield_dw);
 				if (width - shield_dw > 0) {
 					c = img.hp_bar_colors.at(shield_colors_bg[i]);
@@ -1153,17 +1153,17 @@ struct ui_functions: ui_util_functions {
 				dst += data_pitch;
 			}
 		}
-		
+
 		int energy_offset = std::max((has_shield ? 8 : 6) - offset_y, 0);
 		int energy_begin = std::max(offset_y - (has_shield ? 8 : 6), 0);
 		int energy_end = std::min(5, offset_y + height - (has_shield ? 8 : 6));
-		
+
 		if (has_energy ) {
 			dst = data + (screen_y + energy_offset) * data_pitch + screen_x;
 			int energy_colors[] = {18, 12, 13, 14, 18};
 			for (int i = energy_begin; i < energy_end; ++i) {
 				int c = img.hp_bar_colors.at(energy_colors[i]);
-				
+
 				if (energy_dw > 0) memset(dst, c, energy_dw);
 				if (width - energy_dw > 0) {
 					c = img.hp_bar_colors.at(no_shield_colors_bg[i]);
@@ -1172,10 +1172,10 @@ struct ui_functions: ui_util_functions {
 				dst += data_pitch;
 			}
 		}
-		
+
 		dst = data + screen_y * data_pitch + screen_x;
 		if (offset_x % 3) dst += 3 - offset_x % 3;
-		
+
 		int c = img.hp_bar_colors.at(18);
 		for (int x = 0; x < orig_width; x += 3) {
 			if (x < offset_x || x >= offset_x + width) continue;
@@ -1195,7 +1195,7 @@ struct ui_functions: ui_util_functions {
 			dst -= hp_height * data_pitch;
 			dst += 3;
 		}
-		
+
 	}
 
 	void draw_sprite(const sprite_t* sprite, uint8_t* data, size_t data_pitch) {
@@ -1213,15 +1213,15 @@ struct ui_functions: ui_util_functions {
 			draw_health_bars(sprite, draw_health_bars_u, data, data_pitch);
 		}
 	}
-	
+
 	a_vector<std::pair<uint32_t, const sprite_t*>> sorted_sprites;
 
 	void draw_sprites(uint8_t* data, size_t data_pitch) {
-		
+
 		image_draw_queue.clear();
-		
+
 		sorted_sprites.clear();
-		
+
 		auto screen_tile = screen_tile_bounds();
 
 		size_t from_y = screen_tile.from.y;
@@ -1238,7 +1238,7 @@ struct ui_functions: ui_util_functions {
 		}
 
 		std::sort(sorted_sprites.begin(), sorted_sprites.end());
-		
+
 		for (auto uid : current_selection) {
 			auto* u = get_unit(uid);
 			if (!u) continue;
@@ -1255,7 +1255,7 @@ struct ui_functions: ui_util_functions {
 		}
 		current_selection_sprites.clear();
 	}
-	
+
 	void fill_rectangle(uint8_t* data, size_t data_pitch, rect area, uint8_t index) {
 		if (area.from.x < 0) area.from.x = 0;
 		if (area.from.y < 0) area.from.y = 0;
@@ -1272,7 +1272,7 @@ struct ui_functions: ui_util_functions {
 			ptr += pitch;
 		}
 	}
-	
+
 	void line_rectangle(uint8_t* data, size_t data_pitch, rect area, uint8_t index) {
 		if (area.from.x < 0) area.from.x = 0;
 		if (area.from.y < 0) area.from.y = 0;
@@ -1289,7 +1289,7 @@ struct ui_functions: ui_util_functions {
 			p[data_pitch * y + width - 1] = index;
 		}
 	}
-	
+
 	void line_rectangle_rgba(uint32_t* data, size_t data_pitch, rect area, uint32_t color) {
 		if (area.from.x < 0) area.from.x = 0;
 		if (area.from.y < 0) area.from.y = 0;
@@ -1308,7 +1308,7 @@ struct ui_functions: ui_util_functions {
 			p[data_pitch * y + width - 1] = color;
 		}
 	}
-	
+
 	bool unit_visble_on_minimap(unit_t* u) {
 		if (u->owner < 8 && u->sprite->visibility_flags == 0) return false;
 		if (ut_turret(u)) return false;
@@ -1317,7 +1317,7 @@ struct ui_functions: ui_util_functions {
 		if (unit_is(u, UnitTypes::Spell_Disruption_Web)) return false;
 		return true;
 	}
-	
+
 	rect get_minimap_area() {
 		size_t minimap_width = std::max(game_st.map_tile_width, game_st.map_tile_height);
 		size_t minimap_height = std::max(game_st.map_tile_width, game_st.map_tile_height);
@@ -1343,9 +1343,9 @@ struct ui_functions: ui_util_functions {
 		if (minimap_height != game_st.map_tile_height) return;
 		fill_rectangle(data, data_pitch, area, 0);
 		line_rectangle(data, data_pitch, {area.from - xy(1, 1), area.to + xy(1, 1)}, 0);
-		
+
 		uint8_t* p = data + data_pitch * (size_t)area.from.y + (size_t)area.from.x;
-		
+
 		size_t pitch = data_pitch - game_st.map_tile_width;
 		for (size_t y = 0; y != game_st.map_tile_height; ++y) {
 			for (size_t x = 0; x != game_st.map_tile_width; ++x) {
@@ -1361,7 +1361,7 @@ struct ui_functions: ui_util_functions {
 			}
 			p += pitch;
 		}
-		
+
 		for (size_t i = 12; i != 0;) {
 			--i;
 			for (unit_t* u : ptr(st.player_units[i])) {
@@ -1384,16 +1384,16 @@ struct ui_functions: ui_util_functions {
 				fill_rectangle(data, data_pitch, unit_area, color);
 			}
 		}
-		
+
 		rect view_rect;
 		view_rect.from = area.from + xy(screen_pos.x / 32u, screen_pos.y / 32u);
 		view_rect.to = view_rect.from + xy((view_width + 31) / 32u, (view_height + 31) / 32u);
 		line_rectangle(data, data_pitch, view_rect, 255);
-		
+
 	}
-	
+
 	int replay_frame = 0;
-	
+
 	rect get_replay_slider_area() {
 #ifdef EMSCRIPTEN
 		return {};
@@ -1408,45 +1408,45 @@ struct ui_functions: ui_util_functions {
 		if (r.from.x < 0 || r.from.y < 0) return {};
 		return r;
 	}
-	
+
 	void draw_ui(uint8_t* data, size_t data_pitch) {
 		auto area = get_replay_slider_area();
 		if (area == rect{}) return;
 		if (replay_st.end_frame == 0) return;
 		fill_rectangle(data, data_pitch, area, 1);
 		line_rectangle(data, data_pitch, area, 12);
-		
+
 		int button_w = 16;
 		int button_h = 32;
 		int ow = (area.to.x - area.from.x) - button_w;
 		int ox = replay_frame * ow / replay_st.end_frame;
-		
+
 		if (st.current_frame != replay_frame) {
 			int cox = st.current_frame * ow / replay_st.end_frame;
 			line_rectangle(data, data_pitch, rect{area.from + xy(cox + button_w / 2, 0), area.from + xy(cox + button_w / 2 + 1, button_h)}, 50);
 		}
-		
+
 		fill_rectangle(data, data_pitch, rect{area.from + xy(ox, 0), area.from + xy(ox, 0) + xy(button_w, button_h)}, 10);
 		line_rectangle(data, data_pitch, rect{area.from + xy(ox, 0), area.from + xy(ox, 0) + xy(button_w, button_h)}, 51);
-		
+
 	}
 
 	virtual void draw_callback(uint8_t* data, size_t data_pitch) {
 	}
-	
+
 	a_vector<const image_t*> image_draw_queue;
-	
+
 	bool use_new_images = false;
-	
+
 	bool new_images_index_loaded = false;
-	
+
 	a_vector<char> grp_new_image_state = a_vector<char>((size_t)ImageTypes::None);
 	a_unordered_set<a_string> new_images_index;
 	string_table_data images_tbl;
-	
+
 	a_vector<a_vector<std::unique_ptr<native_window_drawing::surface>>> new_images;
 	a_vector<a_vector<std::unique_ptr<native_window_drawing::surface>>> new_images_flipped;
-	
+
 	bool is_new_image(const image_t* image) {
 		if (!use_new_images) return false;
 		if (!new_images_index_loaded) {
@@ -1511,7 +1511,7 @@ struct ui_functions: ui_util_functions {
 						--*frames_left;
 						if (*frames_left == 0) {
 							grp_new_image_state.at(index) = 1;
-							
+
 							ui::log("grp %d successfully loaded %d frames\n", index, new_images.at(index).size());
 						}
 					});
@@ -1521,7 +1521,7 @@ struct ui_functions: ui_util_functions {
 		//ui::log("index %d state %d\n", index, state);
 		return state == 1;
 	}
-	
+
 	native_window_drawing::surface* get_new_image_surface(const image_t* image, bool flipped) {
 		size_t index = image->grp - global_st.grps.data();
 		size_t frame = image->frame_index;
@@ -1537,35 +1537,35 @@ struct ui_functions: ui_util_functions {
 			return new_images.at(index).at(frame).get();
 		}
 	}
-	
+
 	std::unique_ptr<native_window_drawing::surface> tmp_surface;
-	
+
 	void draw_new_image(const image_t* image) {
 		xy map_pos = get_image_center_map_position(image);
 
 		int screen_x = map_pos.x - screen_pos.x;
 		int screen_y = map_pos.y - screen_pos.y;
-		
+
 		auto* surface = get_new_image_surface(image, i_flag(image, image_t::flag_horizontally_flipped));
 		if (!surface) {
 			ui::log("ERROR: new image %d (grp %d) frame %d does not exist\n", (int)image->image_type->id, image->grp - global_st.grps.data(), image->frame_index);
 			return;
 		}
-		
+
 		auto scale = 114_fp8;
-		
+
 		size_t w = (fp8::integer(surface->w) * scale).integer_part();
 		size_t h = (fp8::integer(surface->w) * scale).integer_part();
-		
+
 		size_t orig_w = w;
 		size_t orig_h = h;
-		
+
 		screen_x -= w / 2;
 		screen_y -= w / 2;
-		
+
 		if (screen_x >= (int)screen_width || screen_y >= (int)screen_height) return;
 		if (screen_x + (int)w <= 0 || screen_y + (int)h <= 0) return;
-		
+
 		size_t offset_x = 0;
 		size_t offset_y = 0;
 		if (screen_x < 0) {
@@ -1581,27 +1581,27 @@ struct ui_functions: ui_util_functions {
 
 		w = std::min(w, screen_width - screen_x);
 		h = std::min(h, screen_height - screen_y);
-		
+
 		if (image->modifier == 10) {
 			if (!tmp_surface || (size_t)tmp_surface->w < orig_w || (size_t)tmp_surface->h < orig_h) {
 				tmp_surface = native_window_drawing::create_rgba_surface(orig_w, orig_h);
 			}
 			surface->set_blend_mode(native_window_drawing::blend_mode::none);
 			surface->blit_scaled(&*tmp_surface, 0, 0, orig_w, orig_h);
-			
+
 			size_t src_pitch = tmp_surface->pitch / 4;
 			size_t dst_pitch = rgba_surface->pitch / 4;
 			uint32_t* src = (uint32_t*)tmp_surface->lock();
 			uint32_t* dst = (uint32_t*)rgba_surface->lock();
-			
+
 			src += src_pitch * offset_y + offset_x;
 			dst += dst_pitch * screen_y + screen_x;
-			
+
 			size_t src_skip = src_pitch - w;
 			size_t dst_skip = dst_pitch - w;
-			
+
 			for (size_t y = h; y--;) {
-				
+
 				for (size_t x = w; x--;) {
 					uint32_t s = *src;
 					uint32_t d = *dst;
@@ -1609,26 +1609,26 @@ struct ui_functions: ui_util_functions {
 					++src;
 					++dst;
 				}
-				
+
 				src += src_skip;
 				dst += dst_skip;
 			}
-			
+
 			tmp_surface->unlock();
 			rgba_surface->unlock();
-			
+
 		} else {
 			surface->set_blend_mode(native_window_drawing::blend_mode::alpha);
 			surface->blit_scaled(&*rgba_surface, screen_x - offset_x, screen_y - offset_y, orig_w, orig_h);
 		}
 	}
-	
+
 	void draw_image_queue() {
 		for (auto* image : image_draw_queue) {
 			draw_new_image(image);
 		}
 	}
-	
+
 	fp8 game_speed = fp8::integer(1);
 
 	std::unique_ptr<native_window_drawing::surface> window_surface;
@@ -1641,7 +1641,7 @@ struct ui_functions: ui_util_functions {
 	std::chrono::high_resolution_clock::time_point last_fps;
 	int fps_counter = 0;
 	size_t scroll_speed_n = 0;
-	
+
 	void resize(int width, int height) {
 		if (!wnd) wnd.create("OpenBW", 0, 0, width, height);
 		screen_width = width;
@@ -1655,9 +1655,9 @@ struct ui_functions: ui_util_functions {
 		indexed_surface.reset();
 		rgba_surface.reset();
 	}
-	
+
 	a_vector<unit_id> current_selection;
-	
+
 	bool current_selection_is_selected(unit_t* u) {
 		auto uid = get_unit_id(u);
 		return std::find(current_selection.begin(), current_selection.end(), uid) != current_selection.end();
@@ -1672,13 +1672,13 @@ struct ui_functions: ui_util_functions {
 	void current_selection_clear() {
 		current_selection.clear();
 	}
-	
+
 	void current_selection_remove(const unit_t* u) {
 		auto uid = get_unit_id(u);
 		auto i = std::find(current_selection.begin(), current_selection.end(), uid);
 		if (i != current_selection.end()) current_selection.erase(i);
 	}
-	
+
 	bool is_moving_minimap = false;
 	bool is_moving_replay_slider = false;
 	bool is_paused = false;
@@ -1689,20 +1689,20 @@ struct ui_functions: ui_util_functions {
 	int drag_select_to_x = 0;
 	int drag_select_to_y = 0;
 	xy drag_screen_pos;
-	
+
 	void update() {
 		auto now = clock.now();
-		
+
 		if (now - last_fps >= std::chrono::seconds(1)) {
 			//ui::log("draw fps: %g\n", fps_counter / std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1>>>(now - last_fps).count());
 			last_fps = now;
 			fps_counter = 0;
 		}
 		++fps_counter;
-		
+
 		auto minimap_area = get_minimap_area();
 		auto replay_slider_area = get_replay_slider_area();
-		
+
 		auto move_minimap = [&](int mouse_x, int mouse_y) {
 			if (mouse_x < minimap_area.from.x) mouse_x = minimap_area.from.x;
 			else if (mouse_x >= minimap_area.to.x) mouse_x = minimap_area.to.x - 1;
@@ -1714,7 +1714,7 @@ struct ui_functions: ui_util_functions {
 			y = y * game_st.map_tile_height / (minimap_area.to.y - minimap_area.from.y);
 			screen_pos = xy(32 * x - view_width / 2, 32 * y - view_height / 2);
 		};
-		
+
 		auto check_move_minimap = [&](auto& e) {
 			if (e.mouse_x >= minimap_area.from.x && e.mouse_x < minimap_area.to.x) {
 				if (e.mouse_y >= minimap_area.from.y && e.mouse_y < minimap_area.to.y) {
@@ -1723,7 +1723,7 @@ struct ui_functions: ui_util_functions {
 				}
 			}
 		};
-		
+
 		auto move_replay_slider = [&](int mouse_x, int mouse_y) {
 			(void)mouse_y;
 			int x = mouse_x - replay_slider_area.from.x;
@@ -1734,7 +1734,7 @@ struct ui_functions: ui_util_functions {
 			if (x >= ow) x = ow - 1;
 			replay_frame = x * replay_st.end_frame / ow;
 		};
-		
+
 		auto check_move_replay_slider = [&](auto& e) {
 			if (e.mouse_x >= replay_slider_area.from.x && e.mouse_x < replay_slider_area.to.x) {
 				if (e.mouse_y >= replay_slider_area.from.y && e.mouse_y < replay_slider_area.to.y) {
@@ -1743,7 +1743,7 @@ struct ui_functions: ui_util_functions {
 				}
 			}
 		};
-		
+
 		auto end_drag_select = [&](bool double_clicked) {
 			bool shift = wnd.get_key_state(225) || wnd.get_key_state(229);
 			if (drag_select_from_x > drag_select_to_x) std::swap(drag_select_from_x, drag_select_to_x);
@@ -1796,7 +1796,7 @@ struct ui_functions: ui_util_functions {
 			}
 			is_drag_selecting = false;
 		};
-	
+
 		native_window::event_t e;
 		while (wnd.peek_message(e)) {
 			switch (e.type) {
@@ -1837,7 +1837,7 @@ struct ui_functions: ui_util_functions {
 						//screen_pos -= xy((fp16::integer(e.mouse_x - drag_screen_x) / view_scale).integer_part(), (fp16::integer(e.mouse_y - drag_screen_y) / view_scale).integer_part());
 					}
 				}
-				
+
 				if (is_drag_selecting && ~e.button_state & 1) end_drag_select(false);
 				break;
 			case native_window::event_t::type_mouse_button_up:
@@ -1874,14 +1874,14 @@ struct ui_functions: ui_util_functions {
 				break;
 			}
 		}
-		
+
 		if (!window_surface) {
 			window_surface = native_window_drawing::get_window_surface(&wnd);
 			rgba_surface = native_window_drawing::create_rgba_surface(window_surface->w, window_surface->h);
 			indexed_surface = native_window_drawing::convert_to_8_bit_indexed(&*rgba_surface);
 			if (!palette) set_image_data();
 			indexed_surface->set_palette(palette);
-			
+
 			indexed_surface->set_blend_mode(native_window_drawing::blend_mode::none);
 			rgba_surface->set_blend_mode(native_window_drawing::blend_mode::none);
 			rgba_surface->set_alpha(0);
@@ -1889,15 +1889,15 @@ struct ui_functions: ui_util_functions {
 			window_surface->set_blend_mode(native_window_drawing::blend_mode::none);
 			window_surface->set_alpha(0);
 		}
-		
+
 		auto input_poll_speed = std::chrono::milliseconds(12);
-		
+
 		auto input_poll_t = now - last_input_poll;
 		while (input_poll_t >= input_poll_speed) {
 			if (input_poll_t >= input_poll_speed * 20) last_input_poll = now - input_poll_speed;
 			else last_input_poll += input_poll_speed;
 			std::array<int, 6> scroll_speeds = {2, 2, 4, 6, 6, 8};
-			
+
 			if (!is_drag_selecting) {
 				int scroll_speed = scroll_speeds[scroll_speed_n];
 				auto prev_screen_pos = screen_pos;
@@ -1909,10 +1909,10 @@ struct ui_functions: ui_util_functions {
 					if (scroll_speed_n != scroll_speeds.size() - 1) ++scroll_speed_n;
 				} else scroll_speed_n = 0;
 			}
-			
+
 			input_poll_t = now - last_input_poll;
 		}
-		
+
 		if (is_moving_minimap) {
 			int x = -1;
 			int y = -1;
@@ -1925,7 +1925,7 @@ struct ui_functions: ui_util_functions {
 			wnd.get_cursor_pos(&x, &y);
 			if (x != -1) move_replay_slider(x, y);
 		}
-		
+
 		if (screen_pos.y + view_height > game_st.map_height) screen_pos.y = game_st.map_height - view_height;
 		else if (screen_pos.y < 0) screen_pos.y = 0;
 		if (screen_pos.x + view_width > game_st.map_width) screen_pos.x = game_st.map_width - view_width;
@@ -1940,29 +1940,29 @@ struct ui_functions: ui_util_functions {
 		draw_minimap(data, indexed_surface->pitch);
 		draw_ui(data, indexed_surface->pitch);
 		indexed_surface->unlock();
-		
+
 		rgba_surface->fill(0, 0, 0, 255);
 		indexed_surface->blit(&*rgba_surface, 0, 0);
-		
+
 		draw_image_queue();
-		
+
 		if (is_drag_selecting) {
 			uint32_t* data = (uint32_t*)rgba_surface->lock();
 			if (is_drag_selecting) {
 				auto r = rect{{drag_select_from_x, drag_select_from_y}, {drag_select_to_x, drag_select_to_y}};
 				if (r.from.x > r.to.x) std::swap(r.from.x, r.to.x);
 				if (r.from.y > r.to.y) std::swap(r.from.y, r.to.y);
-				
+
 				line_rectangle_rgba(data, rgba_surface->pitch / 4, r, 0xff18fc10);
 			}
 			rgba_surface->unlock();
 		}
-		
+
 		rgba_surface->blit(&*window_surface, 0, 0);
-		
+
 		wnd.update_surface();
 	}
-	
+
 	template<typename cb_F>
 	void async_read_file(a_string filename, cb_F cb) {
 #ifdef EMSCRIPTEN
@@ -1992,9 +1992,9 @@ struct ui_functions: ui_util_functions {
 		}
 #endif
 	}
-	
+
 	std::array<tileset_image_data, 8> all_tileset_img;
-	
+
 	template<typename load_data_file_F>
 	void load_all_image_data(load_data_file_F&& load_data_file) {
 		load_image_data(img, load_data_file);
@@ -2002,12 +2002,12 @@ struct ui_functions: ui_util_functions {
 			load_tileset_image_data(all_tileset_img[i], i, load_data_file);
 		}
 	}
-	
+
 	void set_image_data() {
 		tileset_img = all_tileset_img.at(game_st.tileset_index);
-		
+
 		if (!palette) palette = native_window_drawing::new_palette();
-		
+
 		native_window_drawing::color palette_colors[256];
 		if (tileset_img.wpe.size() != 256 * 4) error("wpe size invalid (%d)", tileset_img.wpe.size());
 		for (size_t i = 0; i != 256; ++i) {
@@ -2018,7 +2018,7 @@ struct ui_functions: ui_util_functions {
 		}
 		palette->set_colors(palette_colors);
 	}
-	
+
 	void reset() {
 		apm = {};
 		replay_frame = 0;
@@ -2027,7 +2027,7 @@ struct ui_functions: ui_util_functions {
 		game = game_state();
 		replay_st = replay_state();
 		action_st = action_state();
-		
+
 		st.global = &global_st;
 		st.game = &game;
 	}
