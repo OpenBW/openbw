@@ -611,8 +611,8 @@ extern "C" void load_replay(const uint8_t* data, size_t len) {
 int main() {
 
 	using namespace bwgame;
-	
-	log("v24\n");
+
+	log("v25\n");
 
 	size_t screen_width = 1280;
 	size_t screen_height = 800;

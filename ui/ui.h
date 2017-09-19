@@ -1081,30 +1081,30 @@ struct ui_functions: ui_util_functions {
 			else energy_percent = (int)u->remove_timer / std::max((int)default_remove_timer(u), 1);
 			energy_dw = filled_width(energy_percent);
 		}
-		
-		int no_shield_colors_66[] = {18, 0, 1, 2, 18};
-		int no_shield_colors_33[] = {18, 3, 4, 5, 18};
-		int no_shield_colors_0[] = {18, 6, 7, 8, 18};
-		int no_shield_colors_bg[] = {18, 15, 16, 17, 18};
-		
-		int with_shield_colors_66[] = {18, 0, 0, 1, 1, 2, 18};
-		int with_shield_colors_33[] = {18, 3, 3, 4, 4, 5, 18};
-		int with_shield_colors_0[] = {18, 6, 6, 7, 7, 8, 18};
-		int with_shield_colors_bg[] = {18, 15, 15, 16, 16, 17, 18};
-		
-		int* colors_66 = has_shield ? with_shield_colors_66 : no_shield_colors_66;
-		int* colors_33 = has_shield ? with_shield_colors_33 : no_shield_colors_33;
-		int* colors_0 = has_shield ? with_shield_colors_0 : no_shield_colors_0;
-		int* colors_bg = has_shield ? with_shield_colors_bg : no_shield_colors_bg;
-		
+
+		const int no_shield_colors_66[] = {18, 0, 1, 2, 18};
+		const int no_shield_colors_33[] = {18, 3, 4, 5, 18};
+		const int no_shield_colors_0[] = {18, 6, 7, 8, 18};
+		const int no_shield_colors_bg[] = {18, 15, 16, 17, 18};
+
+		const int with_shield_colors_66[] = {18, 0, 0, 1, 1, 2, 18};
+		const int with_shield_colors_33[] = {18, 3, 3, 4, 4, 5, 18};
+		const int with_shield_colors_0[] = {18, 6, 6, 7, 7, 8, 18};
+		const int with_shield_colors_bg[] = {18, 15, 15, 16, 16, 17, 18};
+
+		const int* colors_66 = has_shield ? with_shield_colors_66 : no_shield_colors_66;
+		const int* colors_33 = has_shield ? with_shield_colors_33 : no_shield_colors_33;
+		const int* colors_0 = has_shield ? with_shield_colors_0 : no_shield_colors_0;
+		const int* colors_bg = has_shield ? with_shield_colors_bg : no_shield_colors_bg;
+
 		int offset_x = 0;
 		int offset_y = 0;
 		if (screen_x < 0) {
 			offset_x = -screen_x;
-			dw += screen_x;
-			shield_dw += screen_x;
-			energy_dw += screen_x;
-			width += screen_x;
+			dw = std::max(dw + screen_x, 0);
+			shield_dw = std::max(shield_dw + screen_x, 0);
+			energy_dw = std::max(energy_dw + screen_x, 0);
+			width = std::max(width + screen_x, 0);
 			screen_x = 0;
 		}
 		if (screen_y < 0) {
@@ -1137,9 +1137,9 @@ struct ui_functions: ui_util_functions {
 		}
 
 		if (has_shield) {
-			int shield_colors[] = {18, 10, 11, 18};
-			int shield_colors_bg[] = {18, 16, 17, 18};
-			
+			const int shield_colors[] = {18, 10, 11, 18};
+			const int shield_colors_bg[] = {18, 16, 17, 18};
+
 			dst = data + screen_y * data_pitch + screen_x;
 
 			for (int i = offset_y; i < std::min(4, height); ++i) {
@@ -1160,7 +1160,7 @@ struct ui_functions: ui_util_functions {
 
 		if (has_energy ) {
 			dst = data + (screen_y + energy_offset) * data_pitch + screen_x;
-			int energy_colors[] = {18, 12, 13, 14, 18};
+			const int energy_colors[] = {18, 12, 13, 14, 18};
 			for (int i = energy_begin; i < energy_end; ++i) {
 				int c = img.hp_bar_colors.at(energy_colors[i]);
 
@@ -1852,9 +1852,9 @@ struct ui_functions: ui_util_functions {
 				}
 				break;
 			case native_window::event_t::type_key_down:
-				if (e.sym == 'q') {
-					use_new_images = !use_new_images;
-				}
+				//if (e.sym == 'q') {
+				//	use_new_images = !use_new_images;
+				//}
 #ifndef EMSCRIPTEN
 				if (e.sym == ' ' || e.sym == 'p') {
 					is_paused = !is_paused;
