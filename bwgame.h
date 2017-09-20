@@ -19068,6 +19068,7 @@ struct state_functions {
 			case 0x3469562b:
 				st.shared_vision[4] |= 1 << owner;
 				break;
+			case 0x3569562b:
 				st.shared_vision[5] |= 1 << owner;
 				break;
 			case 0x3669562b:
