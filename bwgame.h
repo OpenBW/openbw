@@ -122,7 +122,7 @@ struct global_state {
 	a_vector<uint8_t> weapons_dat;
 	a_vector<uint8_t> upgrades_dat;
 	a_vector<uint8_t> techdata_dat;
-	
+
 	a_vector<uint8_t> melee_trg;
 
 	std::array<a_vector<uint8_t>, 8> tileset_vf4;
@@ -330,16 +330,16 @@ struct state : state_base_copyable, state_base_non_copyable {
 };
 
 struct state_functions {
-	
+
 	virtual void play_sound(int id, xy position, const unit_t* source_unit = nullptr, bool add_race_index = false) {}
 	virtual void on_unit_deselect(unit_t* u) {}
-	
+
 	virtual void on_unit_destroy(unit_t* u) {}
 	virtual void on_kill_unit(unit_t* u) {}
-	
+
 	virtual void on_player_eliminated(int owner) {}
 	virtual void on_victory_state(int owner, int state) {}
-	
+
 	virtual ~state_functions() {}
 
 	state& st;
@@ -614,15 +614,15 @@ struct state_functions {
 		if ((size_t)id >= 209) error("invalid flingy id %d", (size_t)id);
 		return &global_st.flingy_types.vec[(size_t)id];
 	}
-	
+
 	void play_sound(int id, const unit_t* source_unit, bool add_race_index = false) {
 		play_sound(id, source_unit ? source_unit->sprite->position : xy(), source_unit, add_race_index);
 	}
-	
+
 	void play_sound(int id, bool add_race_index = false) {
 		play_sound(id, xy(), nullptr, add_race_index);
 	}
-	
+
 	unit_t* get_unit(size_t index) const {
 		unit_t* u = st.units_container.try_get(index);
 		if (!u) return nullptr;
@@ -644,7 +644,7 @@ struct state_functions {
 		if (!u) return unit_id{};
 		return unit_id(u->index + 1, u->unit_id_generation % (1u << 5));
 	}
-	
+
 	unit_id_32 get_unit_id_32(const unit_t* u) const {
 		if (!u) return unit_id_32{};
 		return unit_id_32(u->index + 1, u->unit_id_generation % (1u << 21));
@@ -977,7 +977,7 @@ struct state_functions {
 		}
 		return nullptr;
 	}
-	
+
 	image_t* find_image(unit_t* u, ImageTypes first_id, ImageTypes last_id) const {
 		image_t* r = find_image(u->sprite, first_id, last_id);
 		if (!r && u->subunit) r = find_image(u->subunit->sprite, first_id, last_id);
@@ -1441,13 +1441,13 @@ struct state_functions {
 	bool unit_is_zerg_building(unit_type_autocast ut) const {
 		return ut->id >= UnitTypes::Zerg_Infested_Command_Center && ut->id <= UnitTypes::Special_Cerebrate_Daggoth;
 	}
-	
+
 	bool unit_is_fighter(unit_type_autocast ut) const {
 		if (unit_is(ut, UnitTypes::Protoss_Interceptor)) return true;
 		if (unit_is(ut, UnitTypes::Protoss_Scarab)) return true;
 		return false;
 	}
-	
+
 	bool unit_is_undetected(const unit_t* u, int owner) const {
 		if (!u_cloaked(u) && !u_requires_detector(u)) return false;
 		if (u->detected_flags & (1 << owner)) return false;
@@ -1465,7 +1465,7 @@ struct state_functions {
 	bool unit_position_is_visible(const unit_t* u, xy position) const {
 		return (st.tiles[tile_index(position)].visible & (1 << u->owner)) == 0;
 	}
-	
+
 	bool unit_position_is_explored(const unit_t* u, xy position) const {
 		return (st.tiles[tile_index(position)].explored & (1 << u->owner)) == 0;
 	}
@@ -1492,7 +1492,7 @@ struct state_functions {
 	bool player_position_is_visible(int owner, xy position) const {
 		return (tile_visibility(position) & (1 << owner)) != 0;
 	}
-	
+
 	bool player_position_is_explored(int owner, xy position) const {
 		return (tile_explored(position) & (1 << owner)) != 0;
 	}
@@ -1817,7 +1817,7 @@ struct state_functions {
 		if (ut_hero(u)) return 10;
 		return player_has_upgrade(u->owner, UpgradeTypes::Reaver_Capacity) ? 10 : 5;
 	}
-	
+
 	size_t unit_queued_fighter_units(const unit_t* u) const {
 		size_t r = 0;
 		for (const unit_type_t* ut : u->build_queue) {
@@ -2480,7 +2480,7 @@ struct state_functions {
 		}
 		return nullptr;
 	}
-	
+
 	bool is_in_psionic_matrix_range(xy rel) const {
 		unsigned x = std::abs(rel.x);
 		unsigned y = std::abs(rel.y);
@@ -2490,7 +2490,7 @@ struct state_functions {
 		if (rel.y < 0) --y;
 		return psi_field_mask[y / 32u][x / 32u];
 	}
-	
+
 	bool is_in_psionic_matrix(int owner, xy pos) const {
 		for (const unit_t* u : ptr(st.psionic_matrix_units)) {
 			if (u->owner != owner) continue;
@@ -3173,7 +3173,7 @@ struct state_functions {
 		}
 		return true;
 	}
-	
+
 	bool trigger_give_unit_to(unit_t* u, int new_owner) {
 		if (u_hallucination(u)) return false;
 		if (unit_is_mineral_field(u)) return false;
@@ -3711,11 +3711,11 @@ struct state_functions {
 		try_follow_unit(u, target);
 		return false;
 	}
-	
+
 	void set_remove_timer(unit_t* u, int timer) {
 		if (u->remove_timer == 0 || timer < u->remove_timer) u->remove_timer = timer;
 	}
-	
+
 	int default_remove_timer(const unit_t* u) const {
 		if (u_hallucination(u)) return 1350;
 		if (unit_is(u, UnitTypes::Zerg_Broodling)) return 1800;
@@ -3831,7 +3831,7 @@ struct state_functions {
 		apply_unit_effects(to);
 		update_unit_speed(to);
 	}
-	
+
 	void merge_status_effects(unit_t* to, unit_t* from) {
 		to->defensive_matrix_hp = std::max(to->defensive_matrix_hp, from->defensive_matrix_hp);
 		to->defensive_matrix_timer = std::max(to->defensive_matrix_timer, from->defensive_matrix_timer);
@@ -3919,11 +3919,11 @@ struct state_functions {
 		st.creep_life.check_dead_unit_timer = 0;
 		return true;
 	}
-	
+
 	bool remove_creep_provider(const unit_t* u) {
 		return remove_creep_provider(u, u->position, u_completed(u));
 	}
-	
+
 	bool remove_extractor_creep(unit_type_autocast unit_type, xy pos, bool is_completed) {
 		bool spreads_creep = unit_type_spreads_creep(unit_type, is_completed);
 		auto area = get_max_creep_bb(unit_type, pos, is_completed);
@@ -4015,7 +4015,7 @@ struct state_functions {
 
 		set_unit_tiles_occupied(unit_type, pos);
 	}
-	
+
 	void refresh_unit_position(unit_t* u) {
 		unit_t* turret = unit_turret(u);
 		if (turret) {
@@ -4038,7 +4038,7 @@ struct state_functions {
 		reset_movement_state(u);
 		if (turret) reset_movement_state(turret);
 	}
-	
+
 	bool units_share_unions(unit_type_autocast a, unit_type_autocast b) const {
 		if (unit_is(a, UnitTypes::Protoss_Interceptor) != unit_is(b, UnitTypes::Protoss_Interceptor)) return false;
 		if (unit_is(a, UnitTypes::Protoss_Scarab) != unit_is(b, UnitTypes::Protoss_Scarab)) return false;
@@ -4053,7 +4053,7 @@ struct state_functions {
 		if (unit_is_hatchery(a) != unit_is_hatchery(b)) return false;
 		return true;
 	}
-	
+
 	void interceptors_attack(unit_t* u) {
 		if (!unit_is_carrier(u)) return;
 		for (unit_t* n : ptr(u->carrier.outside_units)) {
@@ -4061,7 +4061,7 @@ struct state_functions {
 			set_unit_order(n, n->unit_type->attack_unit, u->order_target.unit);
 		}
 	}
-	
+
 	bool carrier_reaver_attack(unit_t* u, int acquire_range, int max_ground_distance) {
 		bool can_move = u->order_type->id != Orders::CarrierHoldPosition && u->order_type->id != Orders::ReaverHoldPosition;
 		if (!can_move && u_movement_flag(u, 2)) stop_unit(u);
@@ -4138,7 +4138,7 @@ struct state_functions {
 			return true;
 		}
 	}
-	
+
 	unit_t* release_fighter(unit_t* u) {
 		if (!unit_is_carrier(u) && !unit_is_reaver(u)) return nullptr;
 		auto& inside_units = unit_is_reaver(u) ? u->reaver.inside_units : u->carrier.inside_units;
@@ -4173,7 +4173,7 @@ struct state_functions {
 		r->fighter.is_outside = true;
 		return r;
 	}
-	
+
 	unit_t* create_hallucination(unit_t* source_unit, int owner) {
 		unit_t* u = create_unit(source_unit->unit_type, source_unit->sprite->position, owner);
 		if (!u) {
@@ -6575,7 +6575,7 @@ struct state_functions {
 		sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
 		set_unit_order(u, get_order_type(Orders::IncompleteMorphing));
 	}
-	
+
 	void order_Burrowing(unit_t* u) {
 		if (u->order_state == 0) {
 			stop_unit(u);
@@ -6630,7 +6630,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_Burrowed(unit_t* u) {
 		if (unit_is(u, UnitTypes::Zerg_Lurker)) {
 			u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
@@ -6642,7 +6642,7 @@ struct state_functions {
 			order_done(u);
 		}
 	}
-	
+
 	void order_AttackFixedRange(unit_t* u) {
 		attack_unit_reacquire_target(u);
 		unit_t* target = u->order_target.unit;
@@ -6654,7 +6654,7 @@ struct state_functions {
 		set_next_target_waypoint(u, u->order_target.pos);
 		attack_unit_fire_weapon(u);
 	}
-	
+
 	void order_Unburrowing(unit_t* u) {
 		if (u->order_state == 0) {
 			u->sprite->elevation_level = u->unit_type->elevation_level;
@@ -6692,7 +6692,7 @@ struct state_functions {
 			order_done(u);
 		}
 	}
-	
+
 	void order_BuildNydusExit(unit_t* u) {
 		if (!can_place_building(u, u->owner, get_unit_type(UnitTypes::Zerg_Nydus_Canal), u->order_target.pos, true, false)) {
 			// todo: callback for error/sound
@@ -6713,7 +6713,7 @@ struct state_functions {
 			order_done(u);
 		}
 	}
-	
+
 	void order_EnterNydusCanal(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		if (!target || !unit_can_enter_nydus(u, target)) {
@@ -6751,7 +6751,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_CastInfestation(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		if (u->order_state == 0) {
@@ -6774,7 +6774,7 @@ struct state_functions {
 			} else if (target) try_follow_unit(u, target);
 		}
 	}
-	
+
 	void order_InfestingCommandCenter(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		if (u->order_state == 0) {
@@ -6809,7 +6809,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_InfestedCommandCenter(unit_t* u) {
 		unit_t* queen = u->order_target.unit;
 		if (!queen || !unit_can_be_infested(u)) {
@@ -6849,7 +6849,7 @@ struct state_functions {
 		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
 		order_done(u);
 	}
-	
+
 	void order_SuicideUnit(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		if (!target) {
@@ -6887,7 +6887,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_SuicideLocation(unit_t* u) {
 		if (u->order_state == 0) {
 			set_unit_move_target(u, u->order_target.pos);
@@ -6913,7 +6913,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_SuicideHoldPosition(unit_t* u) {
 		if (u->order_state == 0) {
 			stop_unit(u);
@@ -6922,11 +6922,11 @@ struct state_functions {
 		}
 		if (!u->order_queue.empty()) activate_next_order(u);
 	}
-	
+
 	void order_QueenHoldPosition(unit_t* u) {
 		order_SuicideHoldPosition(u);
 	}
-	
+
 	void order_PlaceProtossBuilding(unit_t* u) {
 		if (u->order_state == 0) {
 			set_unit_move_target(u, u->order_target.pos);
@@ -6986,7 +6986,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_IncompleteWarping(unit_t* u) {
 		if (u->order_state == 0) {
 			if (u->remaining_build_time == 0) {
@@ -6998,13 +6998,13 @@ struct state_functions {
 			if (u->order_signal & 1) {
 				u->order_signal &= ~1;
 				replace_sprite_images(u->sprite, u->sprite->sprite_type->image, 0_dir);
-				
+
 				iscript_set_script(u->sprite->main_image, 193);
 				iscript_run_anim(u->sprite->main_image, iscript_anims::Init);
 				iscript_set_script(u->sprite->main_image, u->sprite->main_image->image_type->iscript_id);
 				set_image_modifier(u->sprite->main_image, 12);
 				iscript_execute(u->sprite->main_image, u->sprite->main_image->iscript_state);
-				
+
 				u->order_state = 2;
 			}
 			return;
@@ -7037,7 +7037,7 @@ struct state_functions {
 			set_unit_shield_points(u, u->shield_points + u->shield_construction_rate);
 		}
 	}
-	
+
 	void order_InitializePsiProvider(unit_t* u) {
 		if (!unit_is(u, UnitTypes::Protoss_Pylon)) error("order_InitializePsiProvider: unit is not a pylon");
 		if (!u->building.pylon.psionic_matrix_link.first) {
@@ -7054,7 +7054,7 @@ struct state_functions {
 		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
 		order_done(u);
 	}
-	
+
 	void order_InitializeArbiter(unit_t* u) {
 		if (u->order_queue.empty()) {
 			set_unit_order(u, get_unit_type(UnitTypes::Protoss_Arbiter)->return_to_idle);
@@ -7065,7 +7065,7 @@ struct state_functions {
 		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
 		order_done(u);
 	}
-	
+
 	void order_ArchonWarp(unit_t* u) {
 		bool is_dark_archon = u->order_type->id == Orders::DarkArchonMeld;
 		unit_t* target = u->order_target.unit;
@@ -7112,7 +7112,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_CompletingArchonSummon(unit_t* u) {
 		if (u->order_state == 0) {
 			if (u->remaining_build_time) {
@@ -7137,7 +7137,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_CastRecall(unit_t* u) {
 		if (u->order_state == 0) {
 			if (u->energy < fp8::integer(get_tech_type(TechTypes::Recall)->energy_cost)) {
@@ -7169,11 +7169,11 @@ struct state_functions {
 				if (unit_is(target, UnitTypes::Zerg_Larva)) continue;
 				if (unit_is(target, UnitTypes::Zerg_Egg)) continue;
 				if (unit_is(target, UnitTypes::Zerg_Lurker_Egg)) continue;
-				
+
 				targets.push_back(target);
 			}
 			for (unit_t* target : targets) {
-				
+
 				xy target_pos = target->sprite->position;
 				move_unit(target, u->sprite->position);
 				auto r = find_unit_placement(target, u->sprite->position, false);
@@ -7181,7 +7181,7 @@ struct state_functions {
 					move_unit(target, target_pos);
 					continue;
 				}
-				
+
 				for (unit_t* n : ptr(st.visible_units)) {
 					remove_target_references(n, target);
 				}
@@ -7192,7 +7192,7 @@ struct state_functions {
 				if (u_grounded_building(target)) set_unit_tiles_unoccupied(target, target->sprite->position);
 				if (u_flying(target)) decrement_repulse_field(target);
 				reset_movement_state(target);
-				
+
 				move_unit(target, r.second);
 				refresh_unit_position(target);
 				if (!unit_is(target, UnitTypes::Zerg_Cocoon)) set_unit_order(target, target->unit_type->return_to_idle);
@@ -7213,7 +7213,7 @@ struct state_functions {
 			order_done(u);
 		}
 	}
-	
+
 	void order_Carrier(unit_t* u) {
 		if (carrier_reaver_attack(u, 32 * unit_target_acquisition_range(u), 0))  {
 			unit_t* fighter = release_fighter(u);
@@ -7225,14 +7225,14 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_CarrierStop(unit_t* u) {
 		stop_unit(u);
 		set_next_target_waypoint(u, u->move_target.pos);
 		return_interceptors(u);
 		set_unit_order(u, get_order_type(Orders::Carrier), u->order_target.unit);
 	}
-	
+
 	void order_CarrierAttack(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		if (!target) {
@@ -7251,7 +7251,7 @@ struct state_functions {
 		u_set_status_flag(u, unit_t::status_flag_ready_to_attack, ready_to_attack);
 		u_set_status_flag(u, unit_t::status_flag_8, flag_8);
 	}
-	
+
 	void order_InterceptorAttack(unit_t* u) {
 		if (!unit_is_fighter(u)) error("order_InterceptorAttack: unit is not a fighter");
 		unit_t* parent = u->fighter.parent;
@@ -7275,7 +7275,7 @@ struct state_functions {
 				return;
 			}
 		}
-		
+
 		auto set_interceptor_move_target = [&](int mult) {
 			int x = lcg_rand(11, -127, 128) * mult;
 			int y = lcg_rand(11, -127, 128) * mult;
@@ -7287,7 +7287,7 @@ struct state_functions {
 			set_unit_move_target(u, pos);
 			set_next_target_waypoint(u, pos);
 		};
-		
+
 		if (u->order_state == 0) {
 			if (!parent) {
 				kill_unit(u);
@@ -7325,7 +7325,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_InterceptorReturn(unit_t* u) {
 		if (!unit_is_fighter(u)) error("order_InterceptorReturn: unit is not a fighter");
 		unit_t* parent = u->fighter.parent;
@@ -7359,11 +7359,11 @@ struct state_functions {
 			set_next_target_waypoint(u, parent->sprite->position);
 		}
 	}
-	
+
 	void order_DarkArchonMeld(unit_t* u) {
 		order_ArchonWarp(u);
 	}
-	
+
 	void order_CastMindControl(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		if (!target || target->owner == u->owner) {
@@ -7385,7 +7385,7 @@ struct state_functions {
 			play_sound(1062, target);
 		}
 	}
-	
+
 	void order_Reaver(unit_t* u) {
 		if (!unit_is_reaver(u)) error("order_Reaver: unit is not a reaver");
 		int range = 32 * unit_target_acquisition_range(u);
@@ -7404,7 +7404,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_ReaverAttack(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		if (!target) {
@@ -7422,7 +7422,7 @@ struct state_functions {
 		u_set_status_flag(u, unit_t::status_flag_ready_to_attack, ready_to_attack);
 		u_set_status_flag(u, unit_t::status_flag_8, flag_8);
 	}
-	
+
 	void order_ScarabAttack(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		if (u->order_state == 0) {
@@ -7464,7 +7464,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void order_ReaverStop(unit_t* u) {
 		if (!unit_is_reaver(u)) error("order_ReaverStop: unit is not a reaver");
 		stop_unit(u);
@@ -7474,7 +7474,7 @@ struct state_functions {
 		}
 		set_unit_order(u, get_order_type(Orders::Reaver), u->order_target.unit);
 	}
-	
+
 	void order_RechargeShieldsUnit(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		if (!target || target->energy == 0_fp8 || unit_is_disabled(target)) {
@@ -7507,7 +7507,7 @@ struct state_functions {
 		}
 		if (u->order_state == 3) {
 			if (!target->order_target.unit) target->order_target.unit = u;
-			
+
 			fp8 shield_recharge = fp8::integer(u->unit_type->shield_points) - u->shield_points;
 			if (shield_recharge > fp8::integer(5)) shield_recharge = fp8::integer(5);
 			fp8 energy_cost = shield_recharge / 2;
@@ -7517,21 +7517,21 @@ struct state_functions {
 			}
 			set_unit_shield_points(u, u->shield_points + shield_recharge);
 			target->energy -= energy_cost;
-			
+
 			if (u->shield_points >= fp8::integer(u->unit_type->shield_points) || target->energy == 0_fp8) {
 				if (target->order_target.unit == u) target->order_target.unit = nullptr;
 				order_done(u);
 			}
 		}
 	}
-	
+
 	void order_RechargeShieldsUnitRemoveOverlay(unit_t* u) {
 		destroy_image_from_to(u, ImageTypes::IMAGEID_Recharge_Shields_Small, ImageTypes::IMAGEID_Recharge_Shields_Large);
 		if (u->order_queue.empty()) set_queued_order(u, false, u->unit_type->return_to_idle, {});
 		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
 		order_done(u);
 	}
-	
+
 	void order_RechargeShieldsBattery(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		set_secondary_order(u, get_order_type(Orders::ShieldBattery));
@@ -7544,7 +7544,7 @@ struct state_functions {
 		}
 		order_done(u);
 	}
-	
+
 	void order_Feedback(unit_t*  u) {
 		unit_t* target = u->order_target.unit;
 		if (!target || !ut_has_energy(target) || u_hallucination(target)) {
@@ -7572,7 +7572,7 @@ struct state_functions {
 			order_done(u);
 		}
 	}
-	
+
 	void order_CastHallucination(unit_t* u) {
 		auto* tech = get_tech_type(TechTypes::Hallucination);
 		if (spell_cast_target_movement(u, tech, unit_sight_range(u, true))) {
@@ -7599,7 +7599,7 @@ struct state_functions {
 			order_done(u);
 		}
 	}
-	
+
 	void order_Neutral(unit_t* u) {
 		unit_t* target = u->auto_target_unit;
 		if (target) {
@@ -8295,7 +8295,7 @@ struct state_functions {
 			else set_secondary_order(u, get_order_type(Orders::Nothing));
 		}
 	}
-	
+
 	void secondary_order_CloakNearbyUnits(unit_t* u) {
 		auto* w = unit_air_weapon(u);
 		if (!w) error("secondary_order_CloakNearbyUnits: no air weapon");
@@ -8318,7 +8318,7 @@ struct state_functions {
 			if (!u_passively_cloaked(target)) u_set_status_flag(target, unit_t::status_flag_passively_cloaked);
 		}
 	}
-	
+
 	void secondary_order_TrainFighter(unit_t* u) {
 		if (!unit_is_carrier(u) && !unit_is_reaver(u)) return;
 		if (u->secondary_order_state == 0 || u->secondary_order_state == 1) {
@@ -8373,7 +8373,7 @@ struct state_functions {
 			} else u->secondary_order_state = 4;
 		}
 	}
-	
+
 	void secondary_order_ShieldBattery(unit_t* u) {
 		unit_t* target = u->order_target.unit;
 		if (u->secondary_order_state == 0) {
@@ -8467,7 +8467,7 @@ struct state_functions {
 		if (!u->order_type) return true;
 		return u->order_type->id == Orders::Die && u->order_state == 1;
 	}
-	
+
 	bool unit_dying(const unit_t* u) const {
 		if (!u->order_type) return true;
 		return u->order_type->id == Orders::Die;
@@ -12282,7 +12282,7 @@ struct state_functions {
 	uint8_t tile_visibility(xy pos) const {
 		return ~st.tiles[tile_index(pos)].visible;
 	}
-	
+
 	uint8_t tile_explored(xy pos) const {
 		return ~st.tiles[tile_index(pos)].explored;
 	}
@@ -12763,7 +12763,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void update_psionic_matrix() {
 		st.update_psionic_matrix = false;
 		for (unit_t* u : ptr(st.visible_units)) {
@@ -12814,7 +12814,7 @@ struct state_functions {
 			st.units_container.push(u);
 		}
 	}
-	
+
 	void update_disruption_web() {
 		if (st.disruption_webbed_units) {
 			for (unit_t* u : ptr(st.visible_units)) {
@@ -13037,13 +13037,13 @@ struct state_functions {
 			break;
 		}
 	}
-	
+
 	auto active_players() const {
 		return make_filter_range(all_player_slots, [this](int n) {
 			return player_slot_active(n);
 		});
 	}
-	
+
 	void player_left(int owner) {
 		auto& p = st.players.at(owner);
 		st.running_triggers[owner].clear();
@@ -13052,7 +13052,7 @@ struct state_functions {
 		on_victory_state(owner, 2);
 		remove_player(owner);
 	}
-	
+
 	void player_dropped(int owner) {
 		auto& p = st.players.at(owner);
 		st.running_triggers[owner].clear();
@@ -13061,7 +13061,7 @@ struct state_functions {
 		on_victory_state(owner, 1);
 		remove_player(owner);
 	}
-	
+
 	void remove_player(int owner) {
 		auto& p = st.players.at(owner);
 		if (p.controller == player_t::controller_occupied) {
@@ -13114,7 +13114,7 @@ struct state_functions {
 			return;
 		}
 		st.trigger_timer = 30;
-		
+
 		execute_trigger_struct ets;
 
 		bool any_triggers_executed = false;
@@ -13139,7 +13139,7 @@ struct state_functions {
 				}
 			}
 		}
-		
+
 		if (any_triggers_executed) {
 			int winners = 0;
 			for (int p : active_players()) {
@@ -13316,7 +13316,7 @@ struct state_functions {
 			set_image_heading_by_index(i, index);
 		}
 	}
-	
+
 	xy get_image_center_map_position(const image_t* image) const {
 		return image->sprite->position + image->offset;
 	}
@@ -13637,7 +13637,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void create_shield_damage_effect(unit_t* target, direction_t heading) {
 		size_t index = (direction_index(heading) - 124) / 8 % 32;
 		xy offset = get_image_lo_offset(target->sprite->main_image, 5, index, true);
@@ -13706,7 +13706,7 @@ struct state_functions {
 		target->air_strength = get_unit_strength(target, false);
 		target->ground_strength = get_unit_strength(target, true);
 	}
-	
+
 	void hallucinated_weapon_hit(const weapon_type_t* weapon, unit_t* target, direction_t heading, unit_t* source_unit) {
 		if (target->hp == 0_fp8 || u_invincible(target)) return;
 		if (source_unit) {
@@ -13889,7 +13889,7 @@ struct state_functions {
 			target->shield_points = 0_fp8;
 		}
 	}
-	
+
 	void spawn_broodlings(unit_t* target, const unit_t* source_unit) {
 		if (!u_hallucination(target)) {
 			const unit_type_t* broodling_type = get_unit_type(UnitTypes::Zerg_Broodling);
@@ -13911,7 +13911,7 @@ struct state_functions {
 		// todo: increment scores and kill count
 		kill_unit(target);
 	}
-	
+
 	void ensnare_unit(unit_t* u) {
 		if (!u->ensnare_timer && !u_burrowed(u)) {
 			create_sized_image(u, ImageTypes::IMAGEID_Ensnare_Overlay_Small);
@@ -13919,7 +13919,7 @@ struct state_functions {
 		u->ensnare_timer = 75;
 		update_unit_speed(u);
 	}
-	
+
 	void ensnare(xy pos, const unit_t* source_unit) {
 		thingy_t* t = create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Ensnare), pos, 0);
 		t->sprite->elevation_level = 19;
@@ -13932,7 +13932,7 @@ struct state_functions {
 			ensnare_unit(target);
 		}
 	}
-	
+
 	void consume_unit(unit_t* target, unit_t* source_unit) {
 		if (!target || u_invincible(target)) return;
 		if (!unit_tech_target_valid(source_unit, get_tech_type(TechTypes::Consume), target)) return;
@@ -13942,7 +13942,7 @@ struct state_functions {
 			source_unit->energy = std::min(source_unit->energy + fp8::integer(50), unit_max_energy(source_unit));
 		}
 	}
-	
+
 	void dark_swarm(xy pos, int owner) {
 		const unit_type_t* unit_type = get_unit_type(UnitTypes::Spell_Dark_Swarm);
 		pos = restrict_move_target_to_valid_bounds(unit_type, pos);
@@ -13955,14 +13955,14 @@ struct state_functions {
 			set_remove_timer(u, 900);
 		} else display_last_error_for_player(owner);
 	}
-	
+
 	void plague_unit(unit_t* u) {
 		if (!u->plague_timer && !u_burrowed(u)) {
 			create_sized_image(u, ImageTypes::IMAGEID_Plague_Overlay_Small);
 		}
 		u->plague_timer = 75;
 	}
-	
+
 	void plague(xy pos, unit_t* source_unit) {
 		for (unit_t* target : find_units_noexpand(square_at(pos, 64))) {
 			if (target == source_unit) continue;
@@ -13972,11 +13972,11 @@ struct state_functions {
 			if (source_unit) on_unit_damage(target, source_unit, true);
 		}
 	}
-	
+
 	void parasite_unit(unit_t* u, int owner) {
 		u->parasite_flags |= 1 << owner;
 	}
-	
+
 	void stasis_unit(unit_t* u) {
 		if (u->stasis_timer == 0) {
 			create_sized_image(u, ImageTypes::IMAGEID_Stasis_Field_Small);
@@ -13985,7 +13985,7 @@ struct state_functions {
 		if (u->stasis_timer < 131) u->stasis_timer = 131;
 		set_unit_disabled(u);
 	}
-	
+
 	void stasis_field(xy pos, unit_t* source_unit) {
 		thingy_t* t = create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Stasis_Field_Hit), pos, 0);
 		if (t) {
@@ -14000,7 +14000,7 @@ struct state_functions {
 			stasis_unit(target);
 		}
 	}
-	
+
 	void maelstrom_unit(unit_t* u) {
 		if (u->maelstrom_timer == 0) {
 			create_sized_image(u, ImageTypes::IMAGEID_Maelstorm_Overlay_Small);
@@ -14008,7 +14008,7 @@ struct state_functions {
 		if (u->maelstrom_timer < 22) u->maelstrom_timer = 22;
 		set_unit_disabled(u);
 	}
-	
+
 	void maelstrom(xy pos, unit_t* source_unit) {
 		thingy_t* t = create_thingy(get_sprite_type(SpriteTypes::SPRITEID_Maelstrom_Hit), pos, 0);
 		if (t) {
@@ -14029,7 +14029,7 @@ struct state_functions {
 			maelstrom_unit(target);
 		}
 	}
-	
+
 	void disruption_web(xy pos, int owner) {
 		const unit_type_t* unit_type = get_unit_type(UnitTypes::Spell_Disruption_Web);
 		pos = restrict_move_target_to_valid_bounds(unit_type, pos);
@@ -14042,12 +14042,12 @@ struct state_functions {
 			set_remove_timer(u, 360);
 		} else display_last_error_for_player(owner);
 	}
-	
+
 	ImageTypes acid_spore_image(const unit_t* u) const {
 		size_t n = std::min((size_t)(u->acid_spore_count / 2), (size_t)3);
 		return (ImageTypes)((int)ImageTypes::IMAGEID_Acid_Spores_1_Overlay_Small + 4 * unit_sprite_size(u) + n);
 	}
-	
+
 	void update_acid_spore_image(unit_t* u) {
 		ImageTypes image_id = acid_spore_image(u);
 		if (!find_image(u, image_id, image_id)) {
@@ -14055,13 +14055,13 @@ struct state_functions {
 			create_image(get_image_type(image_id), (u->subunit ? u->subunit : u)->sprite, {}, image_order_top);
 		}
 	}
-	
+
 	void add_acid_spore(unit_t* u) {
 		if (u->acid_spore_count < 9) ++u->acid_spore_count;
 		update_acid_spore_image(u);
 		*get_best_score(u->acid_spore_time, identity()) = 150;
 	}
-	
+
 	void add_acid_spore(xy pos, int owner) {
 		for (unit_t* target : find_units_noexpand(square_at(pos, 64))) {
 			if (target->owner == owner) continue;
@@ -14286,7 +14286,7 @@ struct state_functions {
 		}
 		return bullet_state_move(b, ems);
 	}
-	
+
 	bool bullet_state_bounce(bullet_t* b, execute_movement_struct& ems) {
 		unit_t* target = b->bullet_target;
 		if (target && ~b->hit_flags & 1) {
@@ -14317,7 +14317,7 @@ struct state_functions {
 		}
 		return false;
 	}
-	
+
 	bool bullet_state_damage_over_time(bullet_t* b, execute_movement_struct& ems) {
 		if (b->remaining_time-- == 0) {
 			bullet_kill(b);
@@ -15175,7 +15175,7 @@ struct state_functions {
 			}
 		}
 	}
-	
+
 	void image_update_warpin(image_t* image) {
 		if (image->modifier_data2) --image->modifier_data2;
 		else {
@@ -15992,7 +15992,7 @@ struct state_functions {
 
 		return true;
 	}
-	
+
 	void kill_interceptors(unit_t* u) {
 		if (!unit_is_carrier(u)) return;
 		for (auto i = u->carrier.inside_units.begin(); i != u->carrier.inside_units.end();) {
@@ -17707,7 +17707,7 @@ struct state_functions {
 		case UnitTypes::Protoss_Forge:
 			if (!unit_is(u, UnitTypes::Protoss_Probe)) return false;
 			if (!player_has_completed_unit(owner, UnitTypes::Protoss_Nexus)) return false;
-			return true;	
+			return true;
 		case UnitTypes::Protoss_Stargate:
 			if (!unit_is(u, UnitTypes::Protoss_Probe)) return false;
 			if (!player_has_completed_unit(owner, UnitTypes::Protoss_Cybernetics_Core)) return false;
@@ -18768,7 +18768,7 @@ struct state_functions {
 			return false;
 		}
 	}
-	
+
 	auto trigger_players(int owner, int player) const {
 		return make_filter_range(all_player_slots, [this, owner, player](int n) {
 			return trigger_players_pred(owner, player, n);
@@ -18862,7 +18862,7 @@ struct state_functions {
 		}
 		return r;
 	}
-	
+
 	int trigger_opponent_count(int owner, int player) const {
 		int r = 0;
 		for (int p : trigger_players(owner, player)) {
@@ -18933,11 +18933,11 @@ struct state_functions {
 		}
 		return u;
 	}
-	
+
 	bool player_won(int owner) const {
 		return st.players.at(owner).victory_state >= 3;
 	}
-	
+
 	bool player_defeated(int owner) const {
 		int s = st.players.at(owner).victory_state;
 		return s && !player_won(owner);
@@ -18953,7 +18953,7 @@ struct state_functions {
 		if (c == player_t::controller_unused_rescue_active) return true;
 		return false;
 	}
-	
+
 	bool trigger_players_pred(int owner, int player, int n) const {
 		if (!player_slot_active(n)) return false;
 		if (player < 12) return n == player; // player index
@@ -19020,7 +19020,7 @@ struct state_functions {
 		}
 		return nullptr;
 	}
-	
+
 	struct execute_trigger_struct {
 		std::array<int, 12> victory_state{};
 	};
@@ -19989,7 +19989,7 @@ struct game_load_functions : state_functions {
 		game_st.repulse_field_width = (game_st.map_width + 47) / 48;
 		game_st.repulse_field_height = (game_st.map_height + 47) / 48;
 		st.repulse_field.resize(game_st.repulse_field_width * game_st.repulse_field_height);
-		
+
 		game_st.triggers.clear();
 
 		st.prev_bullet_source_unit = nullptr;
@@ -20005,7 +20005,7 @@ struct game_load_functions : state_functions {
 		st.disruption_webbed_units = 0;
 		st.cheats_enabled = false;
 		st.cheat_operation_cwal = false;
-		
+
 		st.locations.clear();
 	}
 
@@ -21003,7 +21003,7 @@ struct game_load_functions : state_functions {
 							if (at(this_y*v.max_width + this_x).masked) {
 								if (this_x || this_y) {
 									auto* this_entry = &v.maskdat.at(next_entry_index++);
-									
+
 									auto index = [&](auto* n) {
 										if (!n) return (size_t)-1;
 										return (size_t)(n - v.maskdat.data());
@@ -21126,7 +21126,7 @@ struct game_load_functions : state_functions {
 
 		set_mega_tile_flags();
 	}
-	
+
 	unit_t* create_starting_unit(const unit_type_t* unit_type, xy pos, int owner) {
 		unit_t* u = create_unit(unit_type, pos, owner);
 		if (!u) return nullptr;
@@ -21606,7 +21606,7 @@ struct game_load_functions : state_functions {
 				if (use_map_settings) {
 					if (owner < 8 && setup_info.create_melee_units_for_player[owner] && ~unit_type->group_flags & GroupFlags::Neutral) continue;
 				}
-				
+
 				if (is_invalid) {
 					lcg_rand(14);
 					if (is_in_map_bounds(xy(x, y))) error("attempt to create invalid initial unit in valid map bounds");
@@ -21614,7 +21614,7 @@ struct game_load_functions : state_functions {
 				}
 
 				unit_t* u = create_initial_unit(unit_type, {x, y}, owner);
-				
+
 				if (!u) continue;
 
 				if (valid_properties & 0x2) {
@@ -21743,7 +21743,7 @@ struct game_load_functions : state_functions {
 				st.players[i].color = r.get<uint8_t>();
 			}
 		};
-		
+
 		st.players = {};
 
 		read_chunks({
@@ -21847,14 +21847,14 @@ struct game_load_functions : state_functions {
 				});
 			}
 		} else error("unsupported map version %d", version);
-		
+
 		if (!use_map_settings) {
 			if (setup_info.victory_condition == 1) {
 				data_reader_le r(global_st.melee_trg.data(), global_st.melee_trg.data() + global_st.melee_trg.size());
 				tag_funcs["TRIG"](r);
 			}
 		}
-		
+
 		for (auto& v : st.players) v.initially_active = false;
 		for (int p : active_players()) {
 			st.players[p].initially_active = true;
@@ -21886,7 +21886,7 @@ struct game_load_functions : state_functions {
 				}
 			}
 		}
-		
+
 		if (initial_processing) {
 			process_frame();
 			process_frame();
@@ -22272,7 +22272,7 @@ void global_init(global_state& st, load_data_file_F&& load_data_file) {
 	load_data_file(st.weapons_dat, "arr/weapons.dat");
 	load_data_file(st.upgrades_dat, "arr/upgrades.dat");
 	load_data_file(st.techdata_dat, "arr/techdata.dat");
-	
+
 	load_data_file(st.melee_trg, "triggers/Melee.trg");
 
 	a_vector<uint8_t> buf;
