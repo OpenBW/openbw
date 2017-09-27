@@ -6171,7 +6171,7 @@ struct state_functions {
 			u->main_order_timer = 90;
 			u->order_state = 1;
 		} else if (u->order_state == 1) {
-			if (u->main_order_timer == 45 || unit_is_at_move_target(u)) {
+			if (u->main_order_timer <= 45 || unit_is_at_move_target(u)) {
 				play_sound(127, true);
 				// todo: callback for message
 				u->order_state = 2;
