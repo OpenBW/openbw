@@ -579,6 +579,7 @@ struct action_functions: state_functions {
 	}
 
 	bool action_control_group(int owner, size_t group_n, int subaction) {
+		if (group_n >= 10) return false;
 		bool retval = false;
 		if (subaction == 1) {
 			auto& group = action_st.control_groups.at(owner).at(group_n);
