@@ -103,6 +103,11 @@ struct sync_state {
 	replay_saver_state* save_replay = nullptr;
 
 	std::array<a_string, 12> player_names;
+
+	int successful_action_count = 0;
+	int failed_action_count = 0;
+	std::array<uint32_t, 4> insync_hash{};
+	uint8_t insync_hash_index = 0;
 	
 };
 
@@ -163,7 +168,14 @@ namespace sync_messages {
 		id_game_info,
 		id_set_race,
 		id_game_started,
-		id_leave_game
+		id_leave_game,
+		id_insync_check,
+		id_create_unit,
+		id_kill_unit,
+		id_remove_unit
+	};
+	enum {
+		id_game_started_escape = 0xdc
 	};
 }
 
@@ -450,7 +462,8 @@ struct sync_functions: action_functions {
 					auto w = get_player_left_action(player_left);
 					data_loading::data_reader_le r(w.data(), w.data() + w.size());
 					if (sync_st.save_replay) replay_saver_functions(*sync_st.save_replay).add_action(st.current_frame, client->player_slot, w.data(), w.size());
-					funcs.read_action(client->player_slot, r);
+					if (funcs.read_action(client->player_slot, r)) ++sync_st.successful_action_count;
+					else ++sync_st.failed_action_count;
 				} else {
 					st.players[client->player_slot].controller = player_t::controller_open;
 				}
@@ -497,7 +510,8 @@ struct sync_functions: action_functions {
 			send(w);
 		}
 		void send_switch_to_slot(int n) {
-			writer<2> w;
+			writer<3> w;
+			if (sync_st.game_started) w.put<uint8_t>(sync_messages::id_game_started_escape);
 			w.put<uint8_t>(sync_messages::id_occupy_slot);
 			w.put<uint8_t>(n);
 			send(w);
@@ -506,6 +520,30 @@ struct sync_functions: action_functions {
 			writer<2> w;
 			w.put<uint8_t>(sync_messages::id_set_race);
 			w.put<uint8_t>((int)race);
+			send(w);
+		}
+		void send_create_unit(const unit_type_t* unit_type, xy pos, int owner) {
+			writer<15> w;
+			if (sync_st.game_started) w.put<uint8_t>(sync_messages::id_game_started_escape);
+			w.put<uint8_t>(sync_messages::id_create_unit);
+			w.put<uint32_t>((int)unit_type->id);
+			w.put<int32_t>(pos.x);
+			w.put<int32_t>(pos.y);
+			w.put<uint8_t>(owner);
+			send(w);
+		}
+		void send_kill_unit(unit_t* u) {
+			writer<6> w;
+			if (sync_st.game_started) w.put<uint8_t>(sync_messages::id_game_started_escape);
+			w.put<uint8_t>(sync_messages::id_kill_unit);
+			w.put<uint32_t>(funcs.get_unit_id_32(u).raw_value);
+			send(w);
+		}
+		void send_remove_unit(unit_t* u) {
+			writer<6> w;
+			if (sync_st.game_started) w.put<uint8_t>(sync_messages::id_game_started_escape);
+			w.put<uint8_t>(sync_messages::id_remove_unit);
+			w.put<uint32_t>(funcs.get_unit_id_32(u).raw_value);
 			send(w);
 		}
 		
@@ -578,6 +616,42 @@ struct sync_functions: action_functions {
 				}
 			}
 			server.set_timeout(std::chrono::seconds(1), std::bind(&syncer_t::timeout_func, this));
+		}
+
+		void update_insync_hash() {
+			uint32_t hash = 2166136261u;
+			auto add = [&](auto v) {
+				hash ^= (uint32_t)v;
+				hash *= 16777619u;
+			};
+			add(sync_st.successful_action_count);
+			add(sync_st.failed_action_count);
+			add(st.lcg_rand_state);
+			for (auto v : st.current_minerals) add(v);
+			for (auto v : st.current_gas) add(v);
+			for (auto v : st.total_minerals_gathered) add(v);
+			for (auto v : st.total_gas_gathered) add(v);
+			add(st.active_orders_size);
+			add(st.active_bullets_size);
+			add(st.active_thingies_size);
+			for (unit_t* u : ptr(st.visible_units)) {
+				add((u->shield_points + u->hp).raw_value);
+				add(u->exact_position.x.raw_value);
+				add(u->exact_position.y.raw_value);
+			}
+
+			if (sync_st.insync_hash_index == sync_st.insync_hash.size() - 1) sync_st.insync_hash_index = 0;
+			else ++sync_st.insync_hash_index;
+			sync_st.insync_hash[sync_st.insync_hash_index] = hash;
+		}
+
+		void send_insync_check() {
+			writer<7> w;
+			if (sync_st.game_started) w.put<uint8_t>(sync_messages::id_game_started_escape);
+			w.put<uint8_t>(sync_messages::id_insync_check);
+			w.put<uint8_t>(sync_st.insync_hash_index);
+			w.put<uint32_t>(sync_st.insync_hash[sync_st.insync_hash_index]);
+			send(w);
 		}
 		
 		void send_game_started() {
@@ -699,6 +773,43 @@ struct sync_functions: action_functions {
 				funcs.execute_scheduled_actions([this](sync_state::client_t* client, auto& r) {
 					if (client->game_started) {
 						if (client->player_slot != -1) {
+							if (r.template get<uint8_t>() == sync_messages::id_game_started_escape) {
+								int id = r.template get<uint8_t>();
+								switch (id) {
+								case sync_messages::id_insync_check: {
+									uint8_t index = r.template get<uint8_t>();
+									uint32_t hash = r.template get<uint32_t>();
+									if (hash != sync_st.insync_hash.at(index)) {
+										this->kill_client(client);
+									}
+									break;
+								}
+								case sync_messages::id_create_unit: {
+									const unit_type_t* unit_type = funcs.get_unit_type((UnitTypes)r.template get<uint32_t>());
+									int x = r.template get<int32_t>();
+									int y = r.template get<int32_t>();
+									int owner = r.template get<uint8_t>();
+									funcs.trigger_create_unit(unit_type, {x, y}, owner);
+									break;
+								}
+								case sync_messages::id_kill_unit: {
+									unit_t* u = funcs.get_unit(unit_id_32(r.template get<uint32_t>()));
+									if (u) funcs.state_functions::kill_unit(u);
+									break;
+								}
+								case sync_messages::id_remove_unit: {
+									unit_t* u = funcs.get_unit(unit_id_32(r.template get<uint32_t>()));
+									if (u) {
+										funcs.hide_unit(u);
+										funcs.state_functions::kill_unit(u);
+									}
+									break;
+								}
+								}
+								return true;
+							} else {
+								r.seek(r.tell() - 1);
+							}
 							if (sync_st.save_replay) {
 								size_t t = r.tell();
 								size_t n = r.left();
@@ -807,6 +918,11 @@ struct sync_functions: action_functions {
 			}
 			++sync_st.sync_frame;
 			send_client_frame();
+
+			if (sync_st.game_started && sync_st.sync_frame % 32 == 0) {
+				update_insync_hash();
+				send_insync_check();
+			}
 		}
 		
 		bool all_clients_in_sync() {
@@ -980,6 +1096,21 @@ struct sync_functions: action_functions {
 			if (c->has_uid) ++clients_with_uid;
 		}
 		return clients_with_uid;
+	}
+
+	template<typename server_T>
+	void create_unit(server_T& server, const unit_type_t* unit_type, xy pos, int owner) {
+		get_syncer(server).send_create_unit(unit_type, pos, owner);
+	}
+
+	template<typename server_T>
+	void kill_unit(server_T& server, unit_t* u) {
+		get_syncer(server).send_kill_unit(u);
+	}
+
+	template<typename server_T>
+	void remove_unit(server_T& server, unit_t* u) {
+		get_syncer(server).send_remove_unit(u);
 	}
 
 };
