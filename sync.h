@@ -220,7 +220,7 @@ struct sync_functions: action_functions {
 				required_size += v.data_end - v.data_begin;
 			}
 			if (new_size < required_size) new_size = required_size;
-			if (new_size >= max_size) error("action buffer is full for client (%d-%s)", client->local_id, client->uid.str());
+			//if (new_size >= max_size) error("action buffer is full for client (%d-%s)", client->local_id, client->uid.str());
 			if (new_size >= max_size) return false;
 			a_vector<uint8_t> new_buffer(new_size);
 			buffer_begin = 0;
@@ -255,11 +255,6 @@ struct sync_functions: action_functions {
 					new_end = pos + n;
 				}
 			}
-		}
-		if (new_end > buffer.size()) error("new_end > buffer.size()");
-		if (new_end != pos + n) error("new_end != pos + n");
-		for (auto& v : client->scheduled_actions) {
-			if (v.data_begin < new_end && v.data_end > pos) error("overlapping waa");
 		}
 		buffer_end = new_end;
 		r.get_bytes(buffer.data() + pos, n);
