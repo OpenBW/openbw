@@ -586,7 +586,6 @@ struct unit_t: flingy_t {
 		status_flag_lifetime_expired = 0x80000000,
 	};
 
-	size_t index;
 	int owner;
 	const order_type_t* order_type;
 	int order_state;
