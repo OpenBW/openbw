@@ -96,6 +96,7 @@ struct sync_state {
 	bool has_initialized = false;
 	std::array<race_t, 12> initial_slot_races;
 	std::array<int, 12> initial_slot_controllers;
+	std::array<race_t, 12> picked_races;
 	
 	bool game_type_melee = false;
 	
@@ -681,6 +682,7 @@ struct sync_functions: action_functions {
 				if (v.controller == player_t::controller_computer) {
 					v.controller = player_t::controller_occupied;
 				}
+				sync_st.picked_races[i] = v.race;
 				if (!funcs.player_slot_active(i)) {
 					v.controller = player_t::controller_inactive;
 				} else {
@@ -713,6 +715,7 @@ struct sync_functions: action_functions {
 					size_t new_index = available_slots[funcs.lcg_rand(33, 0, i)];
 					if (old_index == new_index) continue;
 					std::swap(st.players[old_index], st.players[new_index]);
+					std::swap(sync_st.picked_races[old_index], sync_st.picked_races[new_index]);
 					for (auto* c : ptr(sync_st.clients)) {
 						if ((int)old_index == c->player_slot) c->player_slot = new_index;
 						else if ((int)new_index == c->player_slot) c->player_slot = old_index;
@@ -914,6 +917,7 @@ struct sync_functions: action_functions {
 				for (int i = 0; i != 12; ++i) {
 					sync_st.initial_slot_races[i] = st.players[i].race;
 					sync_st.initial_slot_controllers[i] = st.players[i].controller;
+					sync_st.picked_races[i] = st.players[i].race;
 				}
 			}
 			++sync_st.sync_frame;
