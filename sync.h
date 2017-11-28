@@ -776,8 +776,8 @@ struct sync_functions: action_functions {
 				funcs.execute_scheduled_actions([this](sync_state::client_t* client, auto& r) {
 					if (client->game_started) {
 						if (client->player_slot != -1) {
-							int id = r.template get<uint8_t>();
-							if (id == sync_messages::id_game_started_escape) {
+							if (r.template get<uint8_t>() == sync_messages::id_game_started_escape) {
+								int id = r.template get<uint8_t>();
 								switch (id) {
 								case sync_messages::id_insync_check: {
 									uint8_t index = r.template get<uint8_t>();
