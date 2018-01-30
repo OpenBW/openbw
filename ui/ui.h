@@ -554,6 +554,8 @@ struct ui_functions: ui_util_functions {
 	image_data img;
 	tileset_image_data tileset_img;
 	native_window::window wnd;
+	bool create_window = true;
+	bool draw_ui_elements = true;
 
 	bool exit_on_close = true;
 	bool window_closed = false;
@@ -1643,7 +1645,7 @@ struct ui_functions: ui_util_functions {
 	size_t scroll_speed_n = 0;
 
 	void resize(int width, int height) {
-		if (!wnd) wnd.create("OpenBW", 0, 0, width, height);
+		if (!wnd && create_window) wnd.create("OpenBW", 0, 0, width, height);
 		screen_width = width;
 		screen_height = height;
 		//view_scale = fp16::integer(1) - (fp16::integer(1) / 4);
@@ -1797,87 +1799,93 @@ struct ui_functions: ui_util_functions {
 			is_drag_selecting = false;
 		};
 
-		native_window::event_t e;
-		while (wnd.peek_message(e)) {
-			switch (e.type) {
-			case native_window::event_t::type_quit:
-				if (exit_on_close) std::exit(0);
-				else window_closed = true;
-				break;
-			case native_window::event_t::type_resize:
-				resize(e.width, e.height);
-				break;
-			case native_window::event_t::type_mouse_button_down:
-				if (e.button == 1) {
-					check_move_minimap(e);
-					check_move_replay_slider(e);
-					if (!is_moving_minimap && !is_moving_replay_slider) {
-						is_drag_selecting = true;
-						drag_select_from_x = e.mouse_x;
-						drag_select_from_y = e.mouse_y;
-						drag_select_to_x = e.mouse_x;
-						drag_select_to_y = e.mouse_y;
+		if (wnd) {
+			native_window::event_t e;
+			while (wnd.peek_message(e)) {
+				switch (e.type) {
+				case native_window::event_t::type_quit:
+					if (exit_on_close) std::exit(0);
+					else window_closed = true;
+					break;
+				case native_window::event_t::type_resize:
+					resize(e.width, e.height);
+					break;
+				case native_window::event_t::type_mouse_button_down:
+					if (e.button == 1) {
+						check_move_minimap(e);
+						check_move_replay_slider(e);
+						if (!is_moving_minimap && !is_moving_replay_slider) {
+							is_drag_selecting = true;
+							drag_select_from_x = e.mouse_x;
+							drag_select_from_y = e.mouse_y;
+							drag_select_to_x = e.mouse_x;
+							drag_select_to_y = e.mouse_y;
+						}
+					} else if (e.button == 3) {
+						is_dragging_screen = true;
+						drag_screen_pos = screen_pos + xy((fp16::integer(e.mouse_x) / view_scale).integer_part(), (fp16::integer(e.mouse_y) / view_scale).integer_part());
 					}
-				} else if (e.button == 3) {
-					is_dragging_screen = true;
-					drag_screen_pos = screen_pos + xy((fp16::integer(e.mouse_x) / view_scale).integer_part(), (fp16::integer(e.mouse_y) / view_scale).integer_part());
-				}
-				break;
-			case native_window::event_t::type_mouse_motion:
-				if (e.button_state & 1) {
-					if (is_moving_minimap) check_move_minimap(e);
-					if (is_moving_replay_slider) check_move_replay_slider(e);
-					if (is_drag_selecting) {
-						drag_select_to_x = e.mouse_x;
-						drag_select_to_y = e.mouse_y;
+					break;
+				case native_window::event_t::type_mouse_motion:
+					if (e.button_state & 1) {
+						if (is_moving_minimap) check_move_minimap(e);
+						if (is_moving_replay_slider) check_move_replay_slider(e);
+						if (is_drag_selecting) {
+							drag_select_to_x = e.mouse_x;
+							drag_select_to_y = e.mouse_y;
+						}
+					} else if (e.button_state & 4) {
+						if (is_dragging_screen) {
+							screen_pos = drag_screen_pos - xy((fp16::integer(e.mouse_x) / view_scale).integer_part(), (fp16::integer(e.mouse_y) / view_scale).integer_part());
+							//screen_pos -= xy((fp16::integer(e.mouse_x - drag_screen_x) / view_scale).integer_part(), (fp16::integer(e.mouse_y - drag_screen_y) / view_scale).integer_part());
+						}
 					}
-				} else if (e.button_state & 4) {
-					if (is_dragging_screen) {
-						screen_pos = drag_screen_pos - xy((fp16::integer(e.mouse_x) / view_scale).integer_part(), (fp16::integer(e.mouse_y) / view_scale).integer_part());
-						//screen_pos -= xy((fp16::integer(e.mouse_x - drag_screen_x) / view_scale).integer_part(), (fp16::integer(e.mouse_y - drag_screen_y) / view_scale).integer_part());
-					}
-				}
 
-				if (is_drag_selecting && ~e.button_state & 1) end_drag_select(false);
-				break;
-			case native_window::event_t::type_mouse_button_up:
-				if (e.button == 1) {
-					if (is_moving_minimap) is_moving_minimap = false;
-					if (is_moving_replay_slider) is_moving_replay_slider = false;
-					if (is_drag_selecting) {
-						end_drag_select(e.clicks >= 2 && e.clicks % 2 == 0);
+					if (is_drag_selecting && ~e.button_state & 1) end_drag_select(false);
+					break;
+				case native_window::event_t::type_mouse_button_up:
+					if (e.button == 1) {
+						if (is_moving_minimap) is_moving_minimap = false;
+						if (is_moving_replay_slider) is_moving_replay_slider = false;
+						if (is_drag_selecting) {
+							end_drag_select(e.clicks >= 2 && e.clicks % 2 == 0);
+						}
+					} else if (e.button == 3) {
+						is_dragging_screen = false;
 					}
-				} else if (e.button == 3) {
-					is_dragging_screen = false;
-				}
-				break;
-			case native_window::event_t::type_key_down:
-				//if (e.sym == 'q') {
-				//	use_new_images = !use_new_images;
-				//}
+					break;
+				case native_window::event_t::type_key_down:
+					//if (e.sym == 'q') {
+					//	use_new_images = !use_new_images;
+					//}
 #ifndef EMSCRIPTEN
-				if (e.sym == ' ' || e.sym == 'p') {
-					is_paused = !is_paused;
-				}
-				if (e.sym == 'a' || e.sym == 'u') {
-					if (game_speed < fp8::integer(128)) game_speed *= 2;
-				}
-				if (e.sym == 'z' || e.sym == 'd') {
-					if (game_speed > 2_fp8) game_speed /= 2;
-				}
-				if (e.sym == '\b') {
-					int t = 5 * 42 / 1000;
-					if (replay_frame < t) replay_frame = 0;
-					else replay_frame -= t;
-				}
+					if (e.sym == ' ' || e.sym == 'p') {
+						is_paused = !is_paused;
+					}
+					if (e.sym == 'a' || e.sym == 'u') {
+						if (game_speed < fp8::integer(128)) game_speed *= 2;
+					}
+					if (e.sym == 'z' || e.sym == 'd') {
+						if (game_speed > 2_fp8) game_speed /= 2;
+					}
+					if (e.sym == '\b') {
+						int t = 5 * 42 / 1000;
+						if (replay_frame < t) replay_frame = 0;
+						else replay_frame -= t;
+					}
 #endif
-				break;
+					break;
+				}
 			}
 		}
 
-		if (!window_surface) {
-			window_surface = native_window_drawing::get_window_surface(&wnd);
-			rgba_surface = native_window_drawing::create_rgba_surface(window_surface->w, window_surface->h);
+		if (!indexed_surface) {
+			if (wnd) {
+				window_surface = native_window_drawing::get_window_surface(&wnd);
+				rgba_surface = native_window_drawing::create_rgba_surface(window_surface->w, window_surface->h);
+			} else {
+				rgba_surface = native_window_drawing::create_rgba_surface(screen_width, screen_height);
+			}
 			indexed_surface = native_window_drawing::convert_to_8_bit_indexed(&*rgba_surface);
 			if (!palette) set_image_data();
 			indexed_surface->set_palette(palette);
@@ -1886,50 +1894,54 @@ struct ui_functions: ui_util_functions {
 			rgba_surface->set_blend_mode(native_window_drawing::blend_mode::none);
 			rgba_surface->set_alpha(0);
 
-			window_surface->set_blend_mode(native_window_drawing::blend_mode::none);
-			window_surface->set_alpha(0);
+			if (window_surface) {
+				window_surface->set_blend_mode(native_window_drawing::blend_mode::none);
+				window_surface->set_alpha(0);
+			}
 		}
 
-		auto input_poll_speed = std::chrono::milliseconds(12);
+		if (wnd) {
+			auto input_poll_speed = std::chrono::milliseconds(12);
 
-		auto input_poll_t = now - last_input_poll;
-		while (input_poll_t >= input_poll_speed) {
-			if (input_poll_t >= input_poll_speed * 20) last_input_poll = now - input_poll_speed;
-			else last_input_poll += input_poll_speed;
-			std::array<int, 6> scroll_speeds = {2, 2, 4, 6, 6, 8};
+			auto input_poll_t = now - last_input_poll;
+			while (input_poll_t >= input_poll_speed) {
+				if (input_poll_t >= input_poll_speed * 20) last_input_poll = now - input_poll_speed;
+				else last_input_poll += input_poll_speed;
+				std::array<int, 6> scroll_speeds = {2, 2, 4, 6, 6, 8};
 
-			if (!is_drag_selecting) {
-				int scroll_speed = scroll_speeds[scroll_speed_n];
-				auto prev_screen_pos = screen_pos;
-				if (wnd.get_key_state(81)) screen_pos.y += scroll_speed;
-				else if (wnd.get_key_state(82)) screen_pos.y -= scroll_speed;
-				if (wnd.get_key_state(79)) screen_pos.x += scroll_speed;
-				else if (wnd.get_key_state(80)) screen_pos.x -= scroll_speed;
-				if (screen_pos != prev_screen_pos) {
-					if (scroll_speed_n != scroll_speeds.size() - 1) ++scroll_speed_n;
-				} else scroll_speed_n = 0;
+				if (!is_drag_selecting) {
+					int scroll_speed = scroll_speeds[scroll_speed_n];
+					auto prev_screen_pos = screen_pos;
+					if (wnd.get_key_state(81)) screen_pos.y += scroll_speed;
+					else if (wnd.get_key_state(82)) screen_pos.y -= scroll_speed;
+					if (wnd.get_key_state(79)) screen_pos.x += scroll_speed;
+					else if (wnd.get_key_state(80)) screen_pos.x -= scroll_speed;
+					if (screen_pos != prev_screen_pos) {
+						if (scroll_speed_n != scroll_speeds.size() - 1) ++scroll_speed_n;
+					} else scroll_speed_n = 0;
+				}
+
+				input_poll_t = now - last_input_poll;
 			}
 
-			input_poll_t = now - last_input_poll;
-		}
-
-		if (is_moving_minimap) {
-			int x = -1;
-			int y = -1;
-			wnd.get_cursor_pos(&x, &y);
-			if (x != -1) move_minimap(x, y);
-		}
-		if (is_moving_replay_slider) {
-			int x = -1;
-			int y = -1;
-			wnd.get_cursor_pos(&x, &y);
-			if (x != -1) move_replay_slider(x, y);
+			if (is_moving_minimap) {
+				int x = -1;
+				int y = -1;
+				wnd.get_cursor_pos(&x, &y);
+				if (x != -1) move_minimap(x, y);
+			}
+			if (is_moving_replay_slider) {
+				int x = -1;
+				int y = -1;
+				wnd.get_cursor_pos(&x, &y);
+				if (x != -1) move_replay_slider(x, y);
+			}
 		}
 
 		if (screen_pos.y + view_height > game_st.map_height) screen_pos.y = game_st.map_height - view_height;
-		else if (screen_pos.y < 0) screen_pos.y = 0;
+		if (screen_pos.y < 0) screen_pos.y = 0;
 		if (screen_pos.x + view_width > game_st.map_width) screen_pos.x = game_st.map_width - view_width;
-		else if (screen_pos.x < 0) screen_pos.x = 0;
+		if (screen_pos.x < 0) screen_pos.x = 0;
 
 		uint8_t* data = (uint8_t*)indexed_surface->lock();
 		draw_tiles(data, indexed_surface->pitch);
@@ -1937,8 +1949,10 @@ struct ui_functions: ui_util_functions {
 
 		draw_callback(data, indexed_surface->pitch);
 
-		draw_minimap(data, indexed_surface->pitch);
-		draw_ui(data, indexed_surface->pitch);
+		if (draw_ui_elements) {
+			draw_minimap(data, indexed_surface->pitch);
+			draw_ui(data, indexed_surface->pitch);
+		}
 		indexed_surface->unlock();
 
 		rgba_surface->fill(0, 0, 0, 255);
@@ -1958,9 +1972,16 @@ struct ui_functions: ui_util_functions {
 			rgba_surface->unlock();
 		}
 
-		rgba_surface->blit(&*window_surface, 0, 0);
+		if (wnd) {
+			rgba_surface->blit(&*window_surface, 0, 0);
+			wnd.update_surface();
+		}
+	}
 
-		wnd.update_surface();
+	std::tuple<int, int, uint32_t*> get_rgba_buffer() {
+		void* r = rgba_surface->lock();
+		rgba_surface->unlock();
+		return std::make_tuple(rgba_surface->pitch / 4, rgba_surface->h, (uint32_t*)r);
 	}
 
 	template<typename cb_F>
