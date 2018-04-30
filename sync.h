@@ -37,10 +37,10 @@ struct sync_state {
 			arr[0] = 42;
 			arr[1] = (uint32_t)std::chrono::high_resolution_clock::now().time_since_epoch().count();
 			arr[2] = (uint32_t)std::hash<std::thread::id>()(std::this_thread::get_id());
-			arr[3] = (uint32_t)std::chrono::high_resolution_clock::now().time_since_epoch().count();;
-			arr[4] = (uint32_t)std::chrono::steady_clock::now().time_since_epoch().count();;
-			arr[5] = (uint32_t)std::chrono::high_resolution_clock::now().time_since_epoch().count();;
-			arr[6] = (uint32_t)std::chrono::system_clock::now().time_since_epoch().count();;
+			arr[3] = (uint32_t)std::chrono::high_resolution_clock::now().time_since_epoch().count();
+			arr[4] = (uint32_t)std::chrono::steady_clock::now().time_since_epoch().count();
+			arr[5] = (uint32_t)std::chrono::high_resolution_clock::now().time_since_epoch().count();
+			arr[6] = (uint32_t)std::chrono::system_clock::now().time_since_epoch().count();
 			arr[7] = 1;
 			std::seed_seq seq(arr.begin(), arr.end());
 			seq.generate(r.vals.begin(), r.vals.end());
@@ -173,7 +173,8 @@ namespace sync_messages {
 		id_insync_check,
 		id_create_unit,
 		id_kill_unit,
-		id_remove_unit
+		id_remove_unit,
+		id_custom_action
 	};
 	enum {
 		id_game_started_escape = 0xdc
@@ -183,6 +184,8 @@ namespace sync_messages {
 struct sync_functions: action_functions {
 	sync_state& sync_st;
 	explicit sync_functions(state& st, action_state& action_st, sync_state& sync_st) : action_functions(st, action_st), sync_st(sync_st) {}
+
+	std::function<void(int player_slot, data_loading::data_reader_le&)> on_custom_action;
 	
 	template<typename action_F>
 	void execute_scheduled_actions(action_F&& action_f) {
@@ -669,6 +672,15 @@ struct sync_functions: action_functions {
 				send(get_player_left_action(true));
 			}
 		}
+
+		void send_custom_action(const uint8_t* data, size_t size) {
+			if (size == 0) error("attempt to send no data");
+			dynamic_writer<> w;
+			if (sync_st.game_started) w.template put<uint8_t>(sync_messages::id_game_started_escape);
+			w.template put<uint8_t>(sync_messages::id_custom_action);
+			w.put_bytes(data, size);
+			send(w);
+		}
 		
 		void start_game(uint32_t seed) {
 			
@@ -807,6 +819,10 @@ struct sync_functions: action_functions {
 										funcs.hide_unit(u);
 										funcs.state_functions::kill_unit(u);
 									}
+									break;
+								}
+								case sync_messages::id_custom_action: {
+									if (funcs.on_custom_action) funcs.on_custom_action(client->player_slot, r);
 									break;
 								}
 								}
@@ -1057,7 +1073,7 @@ struct sync_functions: action_functions {
 	syncer_t<server_T>& get_syncer(server_T& server) {
 		return syncer_container.get<syncer_t<server_T>>(*this, server);
 	}
-	
+
 	template<typename server_T>
 	void sync(server_T& server) {
 		get_syncer(server).sync();
@@ -1116,6 +1132,11 @@ struct sync_functions: action_functions {
 	template<typename server_T>
 	void remove_unit(server_T& server, unit_t* u) {
 		get_syncer(server).send_remove_unit(u);
+	}
+
+	template<typename server_T>
+	void send_custom_action(server_T& server, const void* data, size_t size) {
+		get_syncer(server).send_custom_action((const uint8_t*)data, size);
 	}
 
 };
