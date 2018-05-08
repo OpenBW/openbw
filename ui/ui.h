@@ -6,6 +6,9 @@
 #include "native_window_drawing.h"
 #include "native_sound.h"
 
+#include <SDL2/SDL_keycode.h>
+#include <SDL2/SDL_scancode.h>
+
 namespace bwgame {
 
 struct vr4_entry {
@@ -1855,20 +1858,23 @@ struct ui_functions: ui_util_functions {
 					}
 					break;
 				case native_window::event_t::type_key_down:
-					//if (e.sym == 'q') {
-					//	use_new_images = !use_new_images;
-					//}
+					if (e.sym == SDLK_q || e.sym == SDLK_ESCAPE) {
+						// use_new_images = !use_new_images;
+						if (exit_on_close) std::exit(0);
+						else               window_closed = true;
+						break;
+					}
 #ifndef EMSCRIPTEN
-					if (e.sym == ' ' || e.sym == 'p') {
+					if (e.sym == SDLK_SPACE || e.sym == SDLK_p) {
 						is_paused = !is_paused;
 					}
-					if (e.sym == 'a' || e.sym == 'u') {
+					if (e.sym == SDLK_a || e.sym == SDLK_u) {
 						if (game_speed < fp8::integer(128)) game_speed *= 2;
 					}
-					if (e.sym == 'z' || e.sym == 'd') {
+					if (e.sym == SDLK_z || e.sym == SDLK_d) {
 						if (game_speed > 2_fp8) game_speed /= 2;
 					}
-					if (e.sym == '\b') {
+					if (e.sym == SDLK_BACKSPACE) {
 						int t = 5 * 42 / 1000;
 						if (replay_frame < t) replay_frame = 0;
 						else replay_frame -= t;
