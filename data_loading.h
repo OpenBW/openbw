@@ -7,6 +7,7 @@
 
 #include <type_traits>
 #include <array>
+#include <cassert>
 #include <cstring>
 #include <cstdio>
 
@@ -229,6 +230,8 @@ struct file_reader {
 	}
 
 	void open(a_string filename) {
+		assert( !filename.empty() );
+
 		if (f) fclose(f);
 		f = fopen(filename.c_str(), "rb");
 		if (!f) error("file_reader: failed to open %s for reading", filename.c_str());
