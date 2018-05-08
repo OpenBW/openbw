@@ -1855,9 +1855,12 @@ struct ui_functions: ui_util_functions {
 					}
 					break;
 				case native_window::event_t::type_key_down:
-					//if (e.sym == 'q') {
-					//	use_new_images = !use_new_images;
-					//}
+					if (e.sym == 'q' || e.sym == '\e') {
+						// use_new_images = !use_new_images;
+						if (exit_on_close) std::exit(0);
+						else               window_closed = true;
+						break;
+					}
 #ifndef EMSCRIPTEN
 					if (e.sym == ' ' || e.sym == 'p') {
 						is_paused = !is_paused;
