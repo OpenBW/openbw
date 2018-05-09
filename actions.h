@@ -1294,6 +1294,45 @@ struct action_functions: state_functions {
 		return action_cheat(owner, flags);
 	}
 
+	template<typename reader_T>
+	bool read_action_ext_cheat(int owner, reader_T&& r) {
+		int type = r.template get<uint8_t>();
+		if (type == 0) {
+			int subtype = r.template get<uint8_t>();
+			unit_t* target = get_unit(unit_id(r.template get<uint16_t>()));
+			if (subtype == 0) {
+				int value = r.template get<int32_t>();
+				set_unit_hp(target, fp8::integer(value));
+			} else if (subtype == 1) {
+				int value = r.template get<int32_t>();
+				set_unit_shield_points(target, fp8::integer(value));
+			} else if (subtype == 2) {
+				int value = r.template get<int32_t>();
+				set_unit_energy(target, fp8::integer(value));
+			} else error("unknown ext cheat unit subtype %d", subtype);
+		} else if (type == 1) {
+			int subtype = r.template get<uint8_t>();
+			int player = r.template get<uint8_t>();
+			if (subtype == 0) {
+				const upgrade_type_t* upgrade = get_upgrade_type((UpgradeTypes)r.template get<uint8_t>());
+				int level = r.template get<int8_t>();
+				st.upgrade_levels.at(player)[upgrade->id] = level;
+				apply_upgrades_to_player_units(player);
+			} else if (subtype == 1) {
+				const tech_type_t* tech = get_tech_type((TechTypes)r.template get<uint8_t>());
+				int researched = r.template get<int8_t>();
+				st.tech_researched.at(player)[tech->id] = true;
+			} else if (subtype == 2) {
+				int value = r.template get<int32_t>();
+				st.current_minerals.at(player) = value;
+			} else if (subtype == 3) {
+				int value = r.template get<int32_t>();
+				st.current_gas.at(player) = value;
+			} else error("unknown ext cheat player subtype %d", subtype);
+		} else error("unknown ext cheat type %d", type);
+		return true;
+	}
+
 	virtual void on_action(int owner, int action) {
 	}
 
@@ -1396,6 +1435,8 @@ struct action_functions: state_functions {
 			return read_action_morph_dark_archon(owner, r);
 		case 92:
 			return read_action_chat(owner, r);
+		case 210:
+			return read_action_ext_cheat(owner, r);
 		default:
 			error("execute_action: unknown action %d", action_id);
 		}
