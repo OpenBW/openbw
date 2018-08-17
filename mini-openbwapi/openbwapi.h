@@ -1051,9 +1051,7 @@ public:
 	Player neutral();
 	Player getPlayer(int n) const;
 	const std::vector<Player>& getPlayers();
-	Position getScreenPosition() {
-		return {};
-	}
+	Position getScreenPosition();
 	bool isExplored(int x, int y);
 	bool isVisible(int x, int y);
 	const std::vector<Bullet>& getBullets();
@@ -1080,7 +1078,7 @@ public:
 	double getAverageFPS() {
 		return 1.0;
 	}
-	void setScreenPosition(Position) {}
+	void setScreenPosition(Position);
 	void vPrintf(const char* fmt, va_list args);
 	void update();
 	

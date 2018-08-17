@@ -1358,6 +1358,15 @@ const std::vector<Player>& Game::getPlayers() {
 	return impl->funcs.get_players();
 }
 
+Position Game::getScreenPosition(Position position) {
+  #ifdef OPENBW_ENABLE_UI
+  auto ui = impl->openbwapi_functions->ui;
+  return ui ? ui.screen_pos : {};
+  #else
+  return {};
+  #endif
+}
+
 bool Game::isExplored(int x, int y) {
 	return impl->funcs.player_position_is_explored(impl->vars.local_player_id, {x, y});
 }
@@ -1388,6 +1397,15 @@ bool Game::isBuildable(int x, int y) {
 
 int Game::getGroundHeight(int x, int y) {
 	return impl->funcs.get_ground_height_at({int(x * 32u), int(y * 32u)});
+}
+
+void Game:: setScreenPosition(Position position) {
+  #ifdef OPENBW_ENABLE_UI
+  auto ui = impl->openbwapi_functions->ui;
+  if (ui) {
+    ui.screen_pos = position;
+  }
+  #endif
 }
 
 void Game::vPrintf(const char *fmt, va_list args) {
