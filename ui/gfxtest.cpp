@@ -499,6 +499,20 @@ struct util_functions: state_functions {
 		return r;
 	}
 
+	auto get_all_selected_units() {
+		val r = val::array();
+		size_t i = 0;
+		for (unit_t* u : ptr(st.visible_units)) {
+			if (u_completed(u)) continue;
+			r.set(i++, u);
+		}
+		for (unit_t* u : ptr(st.hidden_units)) {
+			if (u_completed(u)) continue;
+			r.set(i++, u);
+		}
+		return r;
+	}
+
 };
 
 optional<util_functions> m_util_funcs;
@@ -526,6 +540,24 @@ void set_volume(double percent) {
 
 double get_volume() {
 	return m->ui.global_volume / 100.0;
+}
+
+auto get_selected_units() {
+	auto& st = m->ui.st;
+	val r = val::array();
+	size_t i = 0;
+	for (unit_t* u : ptr(st.visible_units)) {
+		if (m->ui.current_selection_is_selected(u)) {
+			val o = val::object();
+			o.set("internalId", u->unit_id_generation);
+			o.set("playerId", u->owner);
+			o.set("x", u->position.x);
+			o.set("y", u->position.y);
+			o.set("type", (int)u->unit_type->id);
+			r.set(i++, o);
+		}
+	}
+	return r;
 }
 
 EMSCRIPTEN_BINDINGS(openbw) {
@@ -557,6 +589,8 @@ EMSCRIPTEN_BINDINGS(openbw) {
 		.function("unit_type", &unit_t_unit_type, allow_raw_pointers())
 		.function("build_type", &unit_t_build_type, allow_raw_pointers())
 		;
+
+	function("get_selected_units", &get_selected_units);
 }
 
 extern "C" double player_get_value(int player, int index) {
@@ -680,4 +714,3 @@ int main() {
 
 	return 0;
 }
-
