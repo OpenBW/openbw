@@ -561,15 +561,7 @@ auto get_selected_units() {
 }
 
 void select_unit_heuristics(int32_t x, int32_t y, int unit_type_id) {
-	ui_functions& ui = m->ui;
 	auto& st = m->ui.st;
-	// 1. Change screen pos
-	ui.screen_pos.x = x - ui.view_width / 2;
-	ui.screen_pos.y = y - ui.view_height / 2;
-	// 2. Find selected unit and mark it as selected
-	if (!ui.current_selection.empty()) {
-		return;
-	}
 	int32_t best_dist = 0;
 	unit_t* best_unit = nullptr;
 	for (unit_t* u : ptr(st.visible_units)) {
@@ -584,8 +576,18 @@ void select_unit_heuristics(int32_t x, int32_t y, int unit_type_id) {
 		}
 	}
 	if (best_unit != nullptr) {
-		ui.current_selection_add(best_unit);
+		m->ui.current_selection_add(best_unit);
 	}
+}
+
+void set_screen_center_position(int32_t x, int32_t y) {
+	ui_functions& ui = m->ui;
+	ui.screen_pos.x = x - ui.view_width / 2;
+	ui.screen_pos.y = y - ui.view_height / 2;
+}
+
+void clear_selection() {
+	m->ui.current_selection.clear();
 }
 
 EMSCRIPTEN_BINDINGS(openbw) {
@@ -620,6 +622,8 @@ EMSCRIPTEN_BINDINGS(openbw) {
 
 	function("get_selected_units", &get_selected_units);
 	function("select_unit_heuristics", &select_unit_heuristics);
+	function("set_screen_center_position", &set_screen_center_position);
+	function("clear_selection", &clear_selection);
 }
 
 extern "C" double player_get_value(int player, int index) {
