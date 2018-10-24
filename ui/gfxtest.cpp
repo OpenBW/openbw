@@ -10,6 +10,7 @@
 
 #include <chrono>
 #include <thread>
+#include "SDL.h"
 
 using namespace bwgame;
 
@@ -590,6 +591,20 @@ void clear_selection() {
 	m->ui.current_selection.clear();
 }
 
+void set_has_focus(bool has_focus) {
+	// Hackfix for handling focus properly
+	if (has_focus) {
+		// Process MouseDown events
+		SDL_EventState(SDL_MOUSEBUTTONDOWN, SDL_ENABLE);
+	}
+	else {
+		// Do not process the first MouseDown event
+		// otherwise it will prevent us from gaining focus and receiving
+		// further events.
+		SDL_EventState(SDL_MOUSEBUTTONDOWN, SDL_DISABLE);
+	}
+}
+
 EMSCRIPTEN_BINDINGS(openbw) {
 	register_vector<js_unit>("vector_js_unit");
 	class_<util_functions>("util_functions")
@@ -624,6 +639,7 @@ EMSCRIPTEN_BINDINGS(openbw) {
 	function("select_unit_heuristics", &select_unit_heuristics);
 	function("set_screen_center_position", &set_screen_center_position);
 	function("clear_selection", &clear_selection);
+	function("set_has_focus", &set_has_focus);
 }
 
 extern "C" double player_get_value(int player, int index) {
@@ -713,7 +729,6 @@ int main() {
 #ifndef EMSCRIPTEN
 	ui.load_replay_file("maps/p49.rep");
 #endif
-
 	auto& wnd = ui.wnd;
 	wnd.create("test", 0, 0, screen_width, screen_height);
 
@@ -725,8 +740,9 @@ int main() {
 	log("loaded in %dms\n", std::chrono::duration_cast<std::chrono::milliseconds>(clock.now() - start).count());
 
 	//set_malloc_fail_handler(malloc_fail_handler);
-
 #ifdef EMSCRIPTEN
+	SDL_EventState(SDL_MOUSEBUTTONDOWN, SDL_DISABLE);
+
 	::m = &m;
 	::g_m = &m;
 	//EM_ASM({js_load_done();});

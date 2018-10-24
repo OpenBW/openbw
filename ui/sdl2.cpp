@@ -48,7 +48,7 @@ struct window_impl {
 	~window_impl() {
 		if (window) SDL_DestroyWindow(window);
 	}
-	
+
 	void destroy() {
 		if (window) {
 			SDL_DestroyWindow(window);
@@ -71,7 +71,7 @@ struct window_impl {
 	void get_cursor_pos(int* x, int* y) {
 		SDL_GetMouseState(x, y);
 	}
-	
+
 	std::array<bool, 512> key_state {};
 	std::array<bool, 6> mouse_button_state {};
 
@@ -138,19 +138,19 @@ struct window_impl {
 	bool show_cursor(bool show) {
 		return SDL_ShowCursor(show ? SDL_ENABLE : SDL_DISABLE) ? true : false;
 	}
-	
+
 	bool get_key_state(int scancode) {
 		return key_state.at(scancode) ? true : false;
 	}
-	
+
 	bool get_mouse_button_state(int button) {
 		return mouse_button_state.at(button) ? true : false;
 	}
-	
+
 	void update_surface() {
 		SDL_UpdateWindowSurface(window);
 	}
-	
+
 	explicit operator bool() const {
 		return window != nullptr;
 	}
