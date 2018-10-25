@@ -63,13 +63,43 @@ struct main_t {
 	int fps_counter = 0;
 
 	a_map<int, std::unique_ptr<saved_state>> saved_states;
+	bool run_main_update_loop = true;
 
 	void reset() {
 		saved_states.clear();
 		ui.reset();
 	}
 
+	void next_frame() {
+		int save_interval = 10 * 1000 / 42;
+		if (ui.st.current_frame == 0 || ui.st.current_frame % save_interval == 0) {
+			auto i = saved_states.find(ui.st.current_frame);
+			if (i == saved_states.end()) {
+				auto v = std::make_unique<saved_state>();
+				v->st = copy_state(ui.st);
+				v->action_st = copy_state(ui.action_st, ui.st, v->st);
+				v->apm = ui.apm;
+
+				a_map<int, std::unique_ptr<saved_state>> new_saved_states;
+				new_saved_states[ui.st.current_frame] = std::move(v);
+				while (!saved_states.empty()) {
+					auto i = saved_states.begin();
+					auto v = std::move(*i);
+					saved_states.erase(i);
+					new_saved_states[v.first] = std::move(v.second);
+				}
+				std::swap(saved_states, new_saved_states);
+			}
+		}
+		ui.replay_functions::next_frame();
+		for (auto& v : ui.apm) v.update(ui.st.current_frame);
+	}
+
 	void update() {
+		if (!run_main_update_loop) {
+			return;
+		}
+
 		auto now = clock.now();
 
 		auto tick_speed = std::chrono::milliseconds((fp8::integer(42) / ui.game_speed).integer_part());
@@ -79,31 +109,6 @@ struct main_t {
 			last_fps = now;
 			fps_counter = 0;
 		}
-
-		auto next = [&]() {
-			int save_interval = 10 * 1000 / 42;
-			if (ui.st.current_frame == 0 || ui.st.current_frame % save_interval == 0) {
-				auto i = saved_states.find(ui.st.current_frame);
-				if (i == saved_states.end()) {
-					auto v = std::make_unique<saved_state>();
-					v->st = copy_state(ui.st);
-					v->action_st = copy_state(ui.action_st, ui.st, v->st);
-					v->apm = ui.apm;
-
-					a_map<int, std::unique_ptr<saved_state>> new_saved_states;
-					new_saved_states[ui.st.current_frame] = std::move(v);
-					while (!saved_states.empty()) {
-						auto i = saved_states.begin();
-						auto v = std::move(*i);
-						saved_states.erase(i);
-						new_saved_states[v.first] = std::move(v.second);
-					}
-					std::swap(saved_states, new_saved_states);
-				}
-			}
-			ui.replay_functions::next_frame();
-			for (auto& v : ui.apm) v.update(ui.st.current_frame);
-		};
 
 		if (!ui.is_done() || ui.st.current_frame != ui.replay_frame) {
 			if (ui.st.current_frame != ui.replay_frame) {
@@ -120,7 +125,7 @@ struct main_t {
 				if (ui.st.current_frame < ui.replay_frame) {
 					for (size_t i = 0; i != 32 && ui.st.current_frame != ui.replay_frame; ++i) {
 						for (size_t i2 = 0; i2 != 4 && ui.st.current_frame != ui.replay_frame; ++i2) {
-							next();
+							next_frame();
 						}
 						if (clock.now() - now >= std::chrono::milliseconds(50)) break;
 					}
@@ -141,7 +146,7 @@ struct main_t {
 						++fps_counter;
 						last_tick += tick_speed;
 
-						if (!ui.is_done()) next();
+						if (!ui.is_done()) next_frame();
 						else break;
 						if (i % 4 == 3 && clock.now() - now >= std::chrono::milliseconds(50)) break;
 					}
@@ -543,17 +548,32 @@ double get_volume() {
 	return m->ui.global_volume / 100.0;
 }
 
+val lookup_unit(int32_t index) {
+	util_functions f(m->ui.st);
+	unit_t* u = f.get_unit(unit_id(index));
+	if (!u) {
+		return val::null();
+	}
+	val o = val::object();
+	o.set("bw_id", f.get_unit_id(u).raw_value);
+	o.set("player_id", u->owner);
+	o.set("x", u->position.x);
+	o.set("y", u->position.y);
+	o.set("type", (int)u->unit_type->id);
+	return o;
+}
+
 auto get_selected_units() {
+	util_functions f(m->ui.st);
 	auto& st = m->ui.st;
 	val r = val::array();
 	size_t i = 0;
 	for (unit_t* u : ptr(st.visible_units)) {
 		if (m->ui.current_selection_is_selected(u)) {
 			val o = val::object();
-			o.set("internalId", u->index);
-			o.set("playerId", u->owner);
-			o.set("id", - (int)u->index);  // CherryPi ID
-			o.set("task", -1);  // CherryPi task
+			o.set("bw_id", f.get_unit_id(u).raw_value);
+			o.set("player_id", u->owner);
+			o.set("id", - (int)f.get_unit_id(u).raw_value);
 			o.set("x", u->position.x);
 			o.set("y", u->position.y);
 			o.set("type", (int)u->unit_type->id);
@@ -563,24 +583,9 @@ auto get_selected_units() {
 	return r;
 }
 
-void select_unit_heuristics(int32_t x, int32_t y, int unit_type_id) {
-	auto& st = m->ui.st;
-	int32_t best_dist = 0;
-	unit_t* best_unit = nullptr;
-	for (unit_t* u : ptr(st.visible_units)) {
-		if ((int)u->unit_type->id != unit_type_id) {
-			continue;
-		}
-		int32_t d = (u->position.x - x) * (u->position.x - x);
-		d += (u->position.y - y) * (u->position.y - y);
-		if (best_unit == nullptr || d < best_dist) {
-			best_unit = u;
-			best_dist = d;
-		}
-	}
-	if (best_unit != nullptr) {
-		m->ui.current_selection_add(best_unit);
-	}
+void select_unit_by_bw_id(size_t index) {
+	util_functions f(m->ui.st);
+	m->ui.current_selection_add(f.get_unit(unit_id(index)));
 }
 
 void set_screen_center_position(int32_t x, int32_t y) {
@@ -605,6 +610,101 @@ void set_has_focus(bool has_focus) {
 		// further events.
 		SDL_EventState(SDL_MOUSEBUTTONDOWN, SDL_DISABLE);
 	}
+}
+
+class unit_matcher {
+public:
+	struct unit_match_infos {
+		int32_t cherrypi_id;
+		int32_t unit_type;
+		int32_t posx;
+		int32_t posy;
+	};
+
+	void add_unit(
+			int32_t frame,
+			int32_t cherrypi_id,
+			int32_t unit_type,
+			int32_t posx,
+			int32_t posy) {
+		unit_match_infos i;
+		i.cherrypi_id = cherrypi_id;
+		i.unit_type = unit_type;
+		i.posx = posx;
+		i.posy = posy;
+		frames_new_units[frame].push_back(i);
+	}
+
+	size_t do_match_unit(
+			unit_match_infos const& info,
+			std::unordered_set<size_t> const& ignore_units
+	) {
+		util_functions f(m->ui.st);
+		int32_t best_dist = 0;
+		unit_t* best_unit = nullptr;
+		for (unit_t* u : ptr(m->ui.st.visible_units)) {
+			if ((int)u->unit_type->id != info.unit_type) {
+				continue;
+			}
+			if (ignore_units.find(f.get_unit_id(u).raw_value) != ignore_units.end()){
+				continue;
+			}
+			int32_t d = (u->position.x - info.posx) * (u->position.x - info.posx);
+			d += (u->position.y - info.posy) * (u->position.y - info.posy);
+			if (d > 10*10) // Way too far
+			 continue;
+			if (best_unit == nullptr || d < best_dist) {
+				best_unit = u;
+				best_dist = d;
+			}
+		}
+		return best_unit ? f.get_unit_id(best_unit).raw_value : 0;
+	}
+
+	val do_matching() {
+		util_functions f(m->ui.st);
+		val cp2internal = val::object();
+		val internal2cp = val::object();
+		std::unordered_set<size_t> matched_bw_ids;
+		std::unordered_set<size_t> matched_cp_ids;
+		auto& st = m->ui.st;
+		do {
+			auto it = frames_new_units.find(m->ui.st.current_frame);
+			if (it != frames_new_units.end()) {
+				for (auto& unit: it->second) {
+					size_t internal_index = do_match_unit(unit, matched_bw_ids);
+					if (internal_index > 0) {
+						cp2internal.set(
+							std::to_string(unit.cherrypi_id),
+							internal_index
+						);
+						internal2cp.set(
+							std::to_string(internal_index),
+							unit.cherrypi_id
+						);
+						matched_bw_ids.insert(internal_index);
+						matched_cp_ids.insert(unit.cherrypi_id);
+					}
+				}
+			}
+			m->next_frame();
+		} while (st.current_frame < m->ui.replay_st.end_frame);
+
+		val matching = val::object();
+		matching.set("cp2internal", cp2internal);
+		matching.set("internal2cp", internal2cp);
+		return matching;
+	}
+
+	std::unordered_map<int32_t, std::vector<unit_match_infos> > frames_new_units;
+};
+
+unit_matcher new_units_matcher() {
+	return unit_matcher();
+}
+
+void enable_main_update_loop() {
+	m->run_main_update_loop = true;
 }
 
 EMSCRIPTEN_BINDINGS(openbw) {
@@ -638,10 +738,17 @@ EMSCRIPTEN_BINDINGS(openbw) {
 		;
 
 	function("get_selected_units", &get_selected_units);
-	function("select_unit_heuristics", &select_unit_heuristics);
+	function("select_unit_by_bw_id", &select_unit_by_bw_id);
 	function("set_screen_center_position", &set_screen_center_position);
 	function("clear_selection", &clear_selection);
 	function("set_has_focus", &set_has_focus);
+	function("enable_main_update_loop", &enable_main_update_loop);
+	function("lookup_unit", &lookup_unit);
+
+	function("new_units_matcher", &new_units_matcher);
+	class_<unit_matcher>("unit_matcher")
+		.function("add_unit", &unit_matcher::add_unit)
+		.function("do_matching", &unit_matcher::do_matching);
 }
 
 extern "C" double player_get_value(int player, int index) {
@@ -688,6 +795,7 @@ extern "C" void load_replay(const uint8_t* data, size_t len) {
 	m->reset();
 	m->ui.load_replay_data(data, len);
 	m->ui.set_image_data();
+	m->run_main_update_loop = false;
 	any_replay_loaded = true;
 }
 
