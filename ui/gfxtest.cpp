@@ -550,8 +550,10 @@ auto get_selected_units() {
 	for (unit_t* u : ptr(st.visible_units)) {
 		if (m->ui.current_selection_is_selected(u)) {
 			val o = val::object();
-			o.set("internalId", u->unit_id_generation);
+			o.set("internalId", u->index);
 			o.set("playerId", u->owner);
+			o.set("id", - (int)u->index);  // CherryPi ID
+			o.set("task", -1);  // CherryPi task
 			o.set("x", u->position.x);
 			o.set("y", u->position.y);
 			o.set("type", (int)u->unit_type->id);
