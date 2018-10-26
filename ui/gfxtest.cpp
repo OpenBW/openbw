@@ -707,6 +707,11 @@ void enable_main_update_loop() {
 	m->run_main_update_loop = true;
 }
 
+bool any_replay_loaded = false;
+bool has_replay_loaded() {
+	return any_replay_loaded;
+}
+
 EMSCRIPTEN_BINDINGS(openbw) {
 	register_vector<js_unit>("vector_js_unit");
 	class_<util_functions>("util_functions")
@@ -746,6 +751,7 @@ EMSCRIPTEN_BINDINGS(openbw) {
 	function("lookup_unit", &lookup_unit);
 
 	function("new_units_matcher", &new_units_matcher);
+	function("has_replay_loaded", &has_replay_loaded);
 	class_<unit_matcher>("unit_matcher")
 		.function("add_unit", &unit_matcher::add_unit)
 		.function("do_matching", &unit_matcher::do_matching);
@@ -788,8 +794,6 @@ extern "C" double player_get_value(int player, int index) {
 		return 0;
 	}
 }
-
-bool any_replay_loaded = false;
 
 extern "C" void load_replay(const uint8_t* data, size_t len) {
 	m->reset();
