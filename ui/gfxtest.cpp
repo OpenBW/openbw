@@ -642,6 +642,8 @@ public:
 		util_functions f(m->ui.st);
 		int32_t best_dist = 0;
 		unit_t* best_unit = nullptr;
+		int32_t howmany_within_20 = 0;
+		int32_t howmany_within_30 = 0;
 		for (unit_t* u : ptr(m->ui.st.visible_units)) {
 			if ((int)u->unit_type->id != info.unit_type) {
 				continue;
@@ -651,41 +653,70 @@ public:
 			}
 			int32_t d = (u->position.x - info.posx) * (u->position.x - info.posx);
 			d += (u->position.y - info.posy) * (u->position.y - info.posy);
-			if (d > 10*10) // Way too far
-			 continue;
+			if (d < 20*20) {
+				++howmany_within_20;
+			}
+			if (d < 30*30) {
+				++howmany_within_30;
+			}
 			if (best_unit == nullptr || d < best_dist) {
 				best_unit = u;
 				best_dist = d;
 			}
 		}
+		// HACK: This accounts for some of the non-reproducibility of OpenBW
+		// This is too far
+		if (best_dist > 25*25) {
+			return 0;
+		}
+		else if (best_dist > 18*18) {
+			if (howmany_within_30 > 1)
+				return 0;
+		}
+		else if (best_dist > 10*10) {
+			if (howmany_within_20 > 1)
+				return 0;
+		}
 		return best_unit ? f.get_unit_id(best_unit).raw_value : 0;
 	}
 
+	void do_set_matching(std::vector<unit_match_infos> const& new_units,
+			val& internal2cp, val& cp2internal) {
+		for (auto& unit: new_units) {
+			if (matched_cp_ids.find(unit.cherrypi_id) != matched_cp_ids.end()) {
+				continue;
+			}
+			size_t internal_index = do_match_unit(unit, matched_bw_ids);
+			if (internal_index > 0) {
+				cp2internal.set(
+					std::to_string(unit.cherrypi_id),
+					internal_index
+				);
+				internal2cp.set(
+					std::to_string(internal_index),
+					unit.cherrypi_id
+				);
+				matched_bw_ids.insert(internal_index);
+				matched_cp_ids.insert(unit.cherrypi_id);
+			}
+		}
+	}
+
 	val do_matching() {
-		util_functions f(m->ui.st);
-		val cp2internal = val::object();
 		val internal2cp = val::object();
-		std::unordered_set<size_t> matched_bw_ids;
-		std::unordered_set<size_t> matched_cp_ids;
+		val cp2internal = val::object();
+		matched_bw_ids.clear();
+		matched_cp_ids.clear();
 		auto& st = m->ui.st;
 		do {
+			// If some units are still not matched from the previous frame
+			// Can happen because of how the unit positions is updated right after
+			// are created.
+			// A unit is first created at the position of the building, but
+			// is then updated to a correct position after 1 frame.
 			auto it = frames_new_units.find(m->ui.st.current_frame);
 			if (it != frames_new_units.end()) {
-				for (auto& unit: it->second) {
-					size_t internal_index = do_match_unit(unit, matched_bw_ids);
-					if (internal_index > 0) {
-						cp2internal.set(
-							std::to_string(unit.cherrypi_id),
-							internal_index
-						);
-						internal2cp.set(
-							std::to_string(internal_index),
-							unit.cherrypi_id
-						);
-						matched_bw_ids.insert(internal_index);
-						matched_cp_ids.insert(unit.cherrypi_id);
-					}
-				}
+				do_set_matching(it->second, internal2cp, cp2internal);
 			}
 			m->next_frame();
 		} while (st.current_frame < m->ui.replay_st.end_frame);
@@ -697,6 +728,8 @@ public:
 	}
 
 	std::unordered_map<int32_t, std::vector<unit_match_infos> > frames_new_units;
+	std::unordered_set<size_t> matched_bw_ids;
+	std::unordered_set<size_t> matched_cp_ids;
 };
 
 unit_matcher new_units_matcher() {
