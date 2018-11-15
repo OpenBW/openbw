@@ -1,3 +1,5 @@
+#pragma once
+
 #include "common.h"
 #include "../bwgame.h"
 #include "../replay.h"
@@ -2055,4 +2057,3 @@ struct ui_functions: ui_util_functions {
 };
 
 }
-

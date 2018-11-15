@@ -1,15 +1,4 @@
-
-#ifdef EMSCRIPTEN
-#include <emscripten.h>
-#endif
-
-#include "ui.h"
-#include "common.h"
-#include "bwgame.h"
-#include "replay.h"
-
-#include <chrono>
-#include <thread>
+#include "gfxtest.h"
 #include "SDL.h"
 
 using namespace bwgame;
@@ -45,119 +34,100 @@ void fatal_error_str(a_string str) {
 
 }
 
-struct saved_state {
-	state st;
-	action_state action_st;
-	std::array<apm_t, 12> apm;
-};
+void main_t::reset() {
+	saved_states.clear();
+	ui.reset();
+  //units_matcher = unit_matcher(this);
+}
 
-struct main_t {
-	ui_functions ui;
+void main_t::next_frame() {
+	int save_interval = 10 * 1000 / 42;
+	if (ui.st.current_frame == 0 || ui.st.current_frame % save_interval == 0) {
+		auto i = saved_states.find(ui.st.current_frame);
+		if (i == saved_states.end()) {
+			auto v = std::make_unique<saved_state>();
+			v->st = copy_state(ui.st);
+			v->action_st = copy_state(ui.action_st, ui.st, v->st);
+			v->apm = ui.apm;
 
-	main_t(game_player player) : ui(std::move(player)) {}
-
-	std::chrono::high_resolution_clock clock;
-	std::chrono::high_resolution_clock::time_point last_tick;
-
-	std::chrono::high_resolution_clock::time_point last_fps;
-	int fps_counter = 0;
-
-	a_map<int, std::unique_ptr<saved_state>> saved_states;
-	bool run_main_update_loop = true;
-
-	void reset() {
-		saved_states.clear();
-		ui.reset();
-	}
-
-	void next_frame() {
-		int save_interval = 10 * 1000 / 42;
-		if (ui.st.current_frame == 0 || ui.st.current_frame % save_interval == 0) {
-			auto i = saved_states.find(ui.st.current_frame);
-			if (i == saved_states.end()) {
-				auto v = std::make_unique<saved_state>();
-				v->st = copy_state(ui.st);
-				v->action_st = copy_state(ui.action_st, ui.st, v->st);
-				v->apm = ui.apm;
-
-				a_map<int, std::unique_ptr<saved_state>> new_saved_states;
-				new_saved_states[ui.st.current_frame] = std::move(v);
-				while (!saved_states.empty()) {
-					auto i = saved_states.begin();
-					auto v = std::move(*i);
-					saved_states.erase(i);
-					new_saved_states[v.first] = std::move(v.second);
-				}
-				std::swap(saved_states, new_saved_states);
+			a_map<int, std::unique_ptr<saved_state>> new_saved_states;
+			new_saved_states[ui.st.current_frame] = std::move(v);
+			while (!saved_states.empty()) {
+				auto i = saved_states.begin();
+				auto v = std::move(*i);
+				saved_states.erase(i);
+				new_saved_states[v.first] = std::move(v.second);
 			}
+			std::swap(saved_states, new_saved_states);
 		}
-		ui.replay_functions::next_frame();
-		for (auto& v : ui.apm) v.update(ui.st.current_frame);
+	}
+	ui.replay_functions::next_frame();
+	for (auto& v : ui.apm) v.update(ui.st.current_frame);
+  units_matcher.on_frame();
+}
+
+void main_t::update() {
+	if (!run_main_update_loop) {
+		return;
 	}
 
-	void update() {
-		if (!run_main_update_loop) {
-			return;
-		}
+	auto now = clock.now();
 
-		auto now = clock.now();
+	auto tick_speed = std::chrono::milliseconds((fp8::integer(42) / ui.game_speed).integer_part());
 
-		auto tick_speed = std::chrono::milliseconds((fp8::integer(42) / ui.game_speed).integer_part());
+	if (now - last_fps >= std::chrono::seconds(1)) {
+		//log("game fps: %g\n", fps_counter / std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1>>>(now - last_fps).count());
+		last_fps = now;
+		fps_counter = 0;
+	}
 
-		if (now - last_fps >= std::chrono::seconds(1)) {
-			//log("game fps: %g\n", fps_counter / std::chrono::duration_cast<std::chrono::duration<double, std::ratio<1, 1>>>(now - last_fps).count());
-			last_fps = now;
-			fps_counter = 0;
-		}
-
-		if (!ui.is_done() || ui.st.current_frame != ui.replay_frame) {
+	if (!ui.is_done() || ui.st.current_frame != ui.replay_frame) {
+		if (ui.st.current_frame != ui.replay_frame) {
 			if (ui.st.current_frame != ui.replay_frame) {
-				if (ui.st.current_frame != ui.replay_frame) {
-					auto i = saved_states.lower_bound(ui.replay_frame);
-					if (i != saved_states.begin()) --i;
-					auto& v = i->second;
-					if (ui.st.current_frame > ui.replay_frame || v->st.current_frame > ui.st.current_frame) {
-						ui.st = copy_state(v->st);
-						ui.action_st = copy_state(v->action_st, v->st, ui.st);
-						ui.apm = v->apm;
-					}
+				auto i = saved_states.lower_bound(ui.replay_frame);
+				if (i != saved_states.begin()) --i;
+				auto& v = i->second;
+				if (ui.st.current_frame > ui.replay_frame || v->st.current_frame > ui.st.current_frame) {
+					ui.st = copy_state(v->st);
+					ui.action_st = copy_state(v->action_st, v->st, ui.st);
+					ui.apm = v->apm;
 				}
-				if (ui.st.current_frame < ui.replay_frame) {
-					for (size_t i = 0; i != 32 && ui.st.current_frame != ui.replay_frame; ++i) {
-						for (size_t i2 = 0; i2 != 4 && ui.st.current_frame != ui.replay_frame; ++i2) {
-							next_frame();
-						}
-						if (clock.now() - now >= std::chrono::milliseconds(50)) break;
+			}
+			if (ui.st.current_frame < ui.replay_frame) {
+				for (size_t i = 0; i != 32 && ui.st.current_frame != ui.replay_frame; ++i) {
+					for (size_t i2 = 0; i2 != 4 && ui.st.current_frame != ui.replay_frame; ++i2) {
+						next_frame();
 					}
+					if (clock.now() - now >= std::chrono::milliseconds(50)) break;
 				}
+			}
+			last_tick = now;
+		} else {
+			if (ui.is_paused) {
 				last_tick = now;
 			} else {
-				if (ui.is_paused) {
-					last_tick = now;
-				} else {
-					auto tick_t = now - last_tick;
-					if (tick_t >= tick_speed * 16) {
-						last_tick = now - tick_speed * 16;
-						tick_t = tick_speed * 16;
-					}
-					auto tick_n = tick_speed.count() == 0 ? 128 : tick_t / tick_speed;
-					for (auto i = tick_n; i;) {
-						--i;
-						++fps_counter;
-						last_tick += tick_speed;
-
-						if (!ui.is_done()) next_frame();
-						else break;
-						if (i % 4 == 3 && clock.now() - now >= std::chrono::milliseconds(50)) break;
-					}
-					ui.replay_frame = ui.st.current_frame;
+				auto tick_t = now - last_tick;
+				if (tick_t >= tick_speed * 16) {
+					last_tick = now - tick_speed * 16;
+					tick_t = tick_speed * 16;
 				}
+				auto tick_n = tick_speed.count() == 0 ? 128 : tick_t / tick_speed;
+				for (auto i = tick_n; i;) {
+					--i;
+					++fps_counter;
+					last_tick += tick_speed;
+
+					if (!ui.is_done()) next_frame();
+					else break;
+					if (i % 4 == 3 && clock.now() - now >= std::chrono::milliseconds(50)) break;
+				}
+				ui.replay_frame = ui.st.current_frame;
 			}
 		}
-
-		ui.update();
 	}
-};
+
+	ui.update();
+}
 
 main_t* g_m = nullptr;
 
@@ -181,7 +151,7 @@ size_t bytes_allocated = 0;
 void free_memory() {
 	if (!g_m) out_of_memory();
 	size_t n_states = g_m->saved_states.size();
-	printf("n_states is %d\n", n_states);
+	printf("n_states is %zu\n", n_states);
 	if (n_states <= 2) out_of_memory();
 	size_t n;
 	if (n_states >= 300) n = 1 + freemem_rand() % (n_states - 2);
@@ -235,7 +205,7 @@ size_t max_bytes_allocated = 160 * 1024 * 1024;
 extern "C" void* malloc(size_t n) {
 	void* r = dlmalloc(n);
 	while (!r) {
-		printf("failed to allocate %d bytes\n", n);
+		printf("failed to allocate %zu bytes\n", n);
 		free_memory();
 		r = dlmalloc(n);
 	}
@@ -518,7 +488,6 @@ struct util_functions: state_functions {
 		}
 		return r;
 	}
-
 };
 
 optional<util_functions> m_util_funcs;
@@ -612,128 +581,8 @@ void set_has_focus(bool has_focus) {
 	}
 }
 
-class unit_matcher {
-public:
-	struct unit_match_infos {
-		int32_t cherrypi_id;
-		int32_t unit_type;
-		int32_t posx;
-		int32_t posy;
-	};
-
-	void add_unit(
-			int32_t frame,
-			int32_t cherrypi_id,
-			int32_t unit_type,
-			int32_t posx,
-			int32_t posy) {
-		unit_match_infos i;
-		i.cherrypi_id = cherrypi_id;
-		i.unit_type = unit_type;
-		i.posx = posx;
-		i.posy = posy;
-		frames_new_units[frame].push_back(i);
-	}
-
-	size_t do_match_unit(
-			unit_match_infos const& info,
-			std::unordered_set<size_t> const& ignore_units
-	) {
-		util_functions f(m->ui.st);
-		int32_t best_dist = 0;
-		unit_t* best_unit = nullptr;
-		int32_t howmany_within_20 = 0;
-		int32_t howmany_within_30 = 0;
-		for (unit_t* u : ptr(m->ui.st.visible_units)) {
-			if ((int)u->unit_type->id != info.unit_type) {
-				continue;
-			}
-			if (ignore_units.find(f.get_unit_id(u).raw_value) != ignore_units.end()){
-				continue;
-			}
-			int32_t d = (u->position.x - info.posx) * (u->position.x - info.posx);
-			d += (u->position.y - info.posy) * (u->position.y - info.posy);
-			if (d < 20*20) {
-				++howmany_within_20;
-			}
-			if (d < 30*30) {
-				++howmany_within_30;
-			}
-			if (best_unit == nullptr || d < best_dist) {
-				best_unit = u;
-				best_dist = d;
-			}
-		}
-		// HACK: This accounts for some of the non-reproducibility of OpenBW
-		// This is too far
-		if (best_dist > 25*25) {
-			return 0;
-		}
-		else if (best_dist > 18*18) {
-			if (howmany_within_30 > 1)
-				return 0;
-		}
-		else if (best_dist > 10*10) {
-			if (howmany_within_20 > 1)
-				return 0;
-		}
-		return best_unit ? f.get_unit_id(best_unit).raw_value : 0;
-	}
-
-	void do_set_matching(std::vector<unit_match_infos> const& new_units,
-			val& internal2cp, val& cp2internal) {
-		for (auto& unit: new_units) {
-			if (matched_cp_ids.find(unit.cherrypi_id) != matched_cp_ids.end()) {
-				continue;
-			}
-			size_t internal_index = do_match_unit(unit, matched_bw_ids);
-			if (internal_index > 0) {
-				cp2internal.set(
-					std::to_string(unit.cherrypi_id),
-					internal_index
-				);
-				internal2cp.set(
-					std::to_string(internal_index),
-					unit.cherrypi_id
-				);
-				matched_bw_ids.insert(internal_index);
-				matched_cp_ids.insert(unit.cherrypi_id);
-			}
-		}
-	}
-
-	val do_matching() {
-		val internal2cp = val::object();
-		val cp2internal = val::object();
-		matched_bw_ids.clear();
-		matched_cp_ids.clear();
-		auto& st = m->ui.st;
-		do {
-			// If some units are still not matched from the previous frame
-			// Can happen because of how the unit positions is updated right after
-			// are created.
-			// A unit is first created at the position of the building, but
-			// is then updated to a correct position after 1 frame.
-			auto it = frames_new_units.find(m->ui.st.current_frame);
-			if (it != frames_new_units.end()) {
-				do_set_matching(it->second, internal2cp, cp2internal);
-			}
-			m->next_frame();
-		} while (st.current_frame < m->ui.replay_st.end_frame);
-
-		val matching = val::object();
-		matching.set("cp2internal", cp2internal);
-		matching.set("internal2cp", internal2cp);
-		return matching;
-	}
-
-	std::unordered_map<int32_t, std::vector<unit_match_infos> > frames_new_units;
-	std::unordered_set<size_t> matched_bw_ids;
-	std::unordered_set<size_t> matched_cp_ids;
-};
-
-unit_matcher new_units_matcher() {
-	return unit_matcher();
+unit_matcher* get_units_matcher() {
+	return &g_m->units_matcher;
 }
 
 void enable_main_update_loop() {
@@ -783,11 +632,12 @@ EMSCRIPTEN_BINDINGS(openbw) {
 	function("enable_main_update_loop", &enable_main_update_loop);
 	function("lookup_unit", &lookup_unit);
 
-	function("new_units_matcher", &new_units_matcher);
+	function("get_units_matcher", &get_units_matcher, allow_raw_pointers());
 	function("has_replay_loaded", &has_replay_loaded);
 	class_<unit_matcher>("unit_matcher")
 		.function("add_unit", &unit_matcher::add_unit)
-		.function("do_matching", &unit_matcher::do_matching);
+		.function("do_matching", &unit_matcher::do_matching)
+		.function("get_matching", &unit_matcher::get_matching);
 }
 
 extern "C" double player_get_value(int player, int index) {
