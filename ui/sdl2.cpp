@@ -345,7 +345,6 @@ std::unique_ptr<surface> load_image(const void* data, size_t size) {
 	return nullptr;
 #endif
 }
-
 }
 
 namespace native_sound {

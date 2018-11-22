@@ -21,10 +21,10 @@ namespace native_window_drawing {
 		virtual ~palette() {}
 		virtual void set_colors(color colors[256]) = 0;
 	};
-	
+
 	palette* new_palette();
 	void delete_palette(palette*);
-	
+
 	enum struct blend_mode {
 		none,
 		alpha,
@@ -46,15 +46,16 @@ namespace native_window_drawing {
 		virtual void set_alpha(int a) = 0;
 		virtual void set_blend_mode(blend_mode blend) = 0;
 	};
-	
+
 	std::unique_ptr<surface> create_rgba_surface(int width, int height);
 	std::unique_ptr<surface> get_window_surface(native_window::window* wnd);
 	std::unique_ptr<surface> convert_to_8_bit_indexed(surface* s);
-	
+
 	std::unique_ptr<surface> load_image(const char* filename);
 	std::unique_ptr<surface> load_image(const void* data, size_t size);
-	
-	
+  std::unique_ptr<surface> create_text(const char* text, uint8_t color[4]);
+
+
 
 }
 

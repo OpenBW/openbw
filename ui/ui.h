@@ -1,4 +1,9 @@
 #pragma once
+#ifdef EMSCRIPTEN
+#include <emscripten.h>
+#include <emscripten/val.h>
+#endif
+
 
 #include "common.h"
 #include "../bwgame.h"
@@ -7,6 +12,7 @@
 #include "native_window.h"
 #include "native_window_drawing.h"
 #include "native_sound.h"
+#include "Bitmap.h"
 
 namespace bwgame {
 
@@ -552,6 +558,31 @@ struct ui_util_functions: replay_functions {
 
 };
 
+struct ui_functions;
+struct draw_command_t {
+	enum DrawCommands {
+		DrawLine = 20, //	x1, y1, x2, y2, color index
+		DrawUnitLine = 21, // uid1, uid2, color index
+		DrawUnitPosLine = 22, // uid, x2, y2, color index
+		DrawCircle = 23, //	x, y, radius, color index
+		DrawUnitCircle = 24, // uid, radius, color index
+		DrawText = 25, // x, y plus text arg
+		DrawTextScreen = 26, // x, y plus text arg
+	};
+
+	int code = -1;
+	std::vector<int> args;
+	std::string str;
+	draw_command_t(emscripten::val const& cmd) {
+		code = cmd["code"].as<int>();
+		args = emscripten::vecFromJSArray<int>(cmd["args"]);
+		str = cmd["str"].as<std::string>();
+	}
+	inline bool get_unit_pos(ui_functions& ui, int32_t uid, int32_t& x, int32_t& y);
+	inline void draw(uint8_t* data, size_t data_pitch, ui_functions& ui);
+	inline bool is_valid();
+};
+
 struct ui_functions: ui_util_functions {
 	image_data img;
 	tileset_image_data tileset_img;
@@ -576,6 +607,24 @@ struct ui_functions: ui_util_functions {
 
 	std::function<void(a_vector<uint8_t>&, a_string)> load_data_file;
 
+	// Screen drawing commands
+	std::vector<std::unique_ptr<draw_command_t> > draw_commands_list;
+
+	void add_draw_command(std::unique_ptr<draw_command_t> cmd) {
+		draw_commands_list.push_back(std::move(cmd));
+	}
+
+	void clear_draw_commands() {
+		draw_commands_list.clear();
+	}
+
+	void draw_commands(uint8_t* data, size_t data_pitch) {
+		for (auto& cmd: draw_commands_list) {
+			cmd->draw(data, data_pitch, *this);
+		}
+	}
+
+	// Sound related stuff
 	sound_types_t sound_types;
 	a_vector<a_string> sound_filenames;
 
@@ -769,6 +818,11 @@ struct ui_functions: ui_util_functions {
 		if (to_tile_x > game_st.map_tile_width) to_tile_x = game_st.map_tile_width;
 
 		return {{from_tile_x, from_tile_y}, {to_tile_x, to_tile_y}};
+	}
+
+	void map_pixel_to_screen_pixel(int32_t& x, int32_t& y) {
+		x -= screen_pos.x;
+		y -= screen_pos.y;
 	}
 
 
@@ -1310,6 +1364,44 @@ struct ui_functions: ui_util_functions {
 		for (size_t y = 0; y != height; ++y) {
 			p[data_pitch * y] = color;
 			p[data_pitch * y + width - 1] = color;
+		}
+	}
+
+	void draw_line(uint8_t* data, size_t data_pitch,
+			int32_t x1, int32_t y1, int32_t x2, int32_t y2,
+			uint8_t color_index) {
+		map_pixel_to_screen_pixel(x1, y1);
+		map_pixel_to_screen_pixel(x2, y2);
+		float dist = (x2 - x1) * (x2 - x1) + (y2 - y1) * (y2 - y1);
+		dist = sqrt(dist);
+		int32_t x, y;
+		for (float d = 0; d < dist; ++d) {
+			x = x1 + d * float(x2 - x1) / dist;
+			y = y1 + d * float(y2 - y1) / dist;
+			if (y < 0 || y >= view_height ||
+					x < 0 || x >= view_width) {
+				continue;
+			}
+			data[y * data_pitch + x] = color_index;
+		}
+	}
+
+	void draw_circle(uint8_t* data, size_t data_pitch,
+			int32_t centerX, int32_t centerY, int32_t radius,
+			uint8_t color_index) {
+		map_pixel_to_screen_pixel(centerX, centerY);
+		float dist = 2.0f * M_PI * float(radius);
+		int32_t x, y;
+		float angle;
+		for (float d = 0; d < dist; ++d) {
+			angle = 2.0f * M_PI * d / dist;
+			x = centerX + float(radius) * cos(angle);
+			y = centerY + float(radius) * sin(angle);
+			if (y < 0 || y >= view_height ||
+					x < 0 || x >= view_width) {
+				continue;
+			}
+			data[y * data_pitch + x] = color_index;
 		}
 	}
 
@@ -1948,7 +2040,7 @@ struct ui_functions: ui_util_functions {
 		uint8_t* data = (uint8_t*)indexed_surface->lock();
 		draw_tiles(data, indexed_surface->pitch);
 		draw_sprites(data, indexed_surface->pitch);
-
+		draw_commands(data, indexed_surface->pitch);
 		draw_callback(data, indexed_surface->pitch);
 
 		if (draw_ui_elements) {
@@ -2056,4 +2148,73 @@ struct ui_functions: ui_util_functions {
 	}
 };
 
+bool draw_command_t::get_unit_pos(
+		ui_functions& ui, int32_t uid, int32_t& x, int32_t& y) {
+	if (unit_t* u = ui.get_unit(unit_id(uid))) {
+		x = u->position.x;
+		y = u->position.y;
+		return true;
+	}
+	return false;
+}
+
+void draw_command_t::draw(uint8_t* data, size_t data_pitch, ui_functions& ui) {
+	int32_t tmp[4];
+	switch (code) {
+		case DrawCommands::DrawLine:
+			ui.draw_line(data, data_pitch, args[0], args[1], args[2], args[3],
+					args[4]);
+			break;
+		case DrawCommands::DrawUnitLine:
+			if (get_unit_pos(ui, args[0], tmp[0], tmp[1]) &&
+					get_unit_pos(ui, args[1], tmp[2], tmp[3])) {
+				ui.draw_line(data, data_pitch,
+					tmp[0], tmp[1], tmp[2], tmp[3], args[2]);
+			}
+			break;
+		case DrawCommands::DrawUnitPosLine:
+			if (get_unit_pos(ui, args[0], tmp[0], tmp[1])) {
+				ui.draw_line(data, data_pitch,
+					tmp[0], tmp[1], args[1], args[2], args[3]);
+			}
+			break;
+		case DrawCommands::DrawCircle:
+			ui.draw_circle(data, data_pitch, args[0], args[1], args[2], args[3]);
+			break;
+		case DrawCommands::DrawUnitCircle:
+			if (get_unit_pos(ui, args[0], tmp[0], tmp[1])) {
+				ui.draw_circle(data, data_pitch,
+					tmp[0], tmp[1], args[1], args[2]);
+			}
+			break;
+		case DrawCommands::DrawText:
+		{
+			tmp[0] = args[0];
+			tmp[1] = args[1];
+			ui.map_pixel_to_screen_pixel(tmp[0], tmp[1]);
+			auto bm = BW::Bitmap(data_pitch, ui.screen_height, data);
+			bm.blitString(str.c_str(), tmp[0], tmp[1]);
+			break;
+		}
+		case DrawCommands::DrawTextScreen:
+		{
+			auto bm = BW::Bitmap(data_pitch, ui.screen_height, data);
+			bm.blitString(str.c_str(), args[0], args[1]);
+			break;
+		}
+	}
+}
+
+bool draw_command_t::is_valid() {
+	switch (code) {
+		case DrawCommands::DrawLine: return args.size() == 5;
+		case DrawCommands::DrawUnitLine: return args.size() == 3;
+		case DrawCommands::DrawUnitPosLine: return args.size() == 4;
+		case DrawCommands::DrawCircle: return args.size() == 4;
+		case DrawCommands::DrawUnitCircle: return args.size() == 3;
+		case DrawCommands::DrawText: return args.size() == 2;
+		case DrawCommands::DrawTextScreen: return args.size() == 2;
+	}
+	return false;
+}
 }

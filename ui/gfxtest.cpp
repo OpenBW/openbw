@@ -37,7 +37,7 @@ void fatal_error_str(a_string str) {
 void main_t::reset() {
 	saved_states.clear();
 	ui.reset();
-  //units_matcher = unit_matcher(this);
+	//units_matcher = unit_matcher(this);
 }
 
 void main_t::next_frame() {
@@ -63,7 +63,7 @@ void main_t::next_frame() {
 	}
 	ui.replay_functions::next_frame();
 	for (auto& v : ui.apm) v.update(ui.st.current_frame);
-  units_matcher.on_frame();
+	units_matcher.on_frame();
 }
 
 void main_t::update() {
@@ -534,136 +534,136 @@ val lookup_unit(int32_t index) {
 
 class Dump {
 public:
-  #define STR(a) #a
-  #define DUMP_VAL(name) o.set(STR(name), to_emscripten(dumping->name))
-  #define DUMP_POS(field) o.set(STR(field), dump_pos(dumping->field))
+	#define STR(a) #a
+	#define DUMP_VAL(name) o.set(STR(name), to_emscripten(dumping->name))
+	#define DUMP_POS(field) o.set(STR(field), dump_pos(dumping->field))
 
-  template <typename T>
-  static val to_emscripten(T& v) {
-    return val(v);
-  }
-  static val to_emscripten(fp8& v) {
-    double as_double = v.raw_value;
-    as_double /= (1 << v.fractional_bits);
-    return val(as_double);
-  }
-  template<typename T>
-  static val to_emscripten(id_type_for<T>* v) {
-    if (!v) {
-      return val::null();
-    }
-    return val((int)v->id);
-  }
-  static val to_emscripten(unit_t* unit) {
-    util_functions f(m->ui.st);
-    if (!unit) {
-      return val::null();
-    }
-    return val(f.get_unit_id(unit).raw_value);
-  }
+	template <typename T>
+	static val to_emscripten(T& v) {
+		return val(v);
+	}
+	static val to_emscripten(fp8& v) {
+		double as_double = v.raw_value;
+		as_double /= (1 << v.fractional_bits);
+		return val(as_double);
+	}
+	template<typename T>
+	static val to_emscripten(id_type_for<T>* v) {
+		if (!v) {
+			return val::null();
+		}
+		return val((int)v->id);
+	}
+	static val to_emscripten(unit_t* unit) {
+		util_functions f(m->ui.st);
+		if (!unit) {
+			return val::null();
+		}
+		return val(f.get_unit_id(unit).raw_value);
+	}
 
-  template <typename T>
-  static val dump_pos(T& pos) {
-    val o = val::object();
-    o.set("x", to_emscripten(pos.x));
-    o.set("y", to_emscripten(pos.y));
-    return o;
-  }
+	template <typename T>
+	static val dump_pos(T& pos) {
+		val o = val::object();
+		o.set("x", to_emscripten(pos.x));
+		o.set("y", to_emscripten(pos.y));
+		return o;
+	}
 
-  static val dump_sprite(sprite_t* dumping) {
-    val o = val::object();
-    DUMP_VAL(index);
-    DUMP_VAL(owner);
-    DUMP_VAL(selection_index);
-    DUMP_VAL(visibility_flags);
-    DUMP_VAL(elevation_level);
-    DUMP_VAL(flags);
-    DUMP_VAL(selection_timer);
-    DUMP_VAL(width);
-    DUMP_VAL(height);
-    DUMP_POS(position);
-    return o;
-  }
+	static val dump_sprite(sprite_t* dumping) {
+		val o = val::object();
+		DUMP_VAL(index);
+		DUMP_VAL(owner);
+		DUMP_VAL(selection_index);
+		DUMP_VAL(visibility_flags);
+		DUMP_VAL(elevation_level);
+		DUMP_VAL(flags);
+		DUMP_VAL(selection_timer);
+		DUMP_VAL(width);
+		DUMP_VAL(height);
+		DUMP_POS(position);
+		return o;
+	}
 
-  static val dump_thingy(thingy_t* dumping) {
-    val o = val::object();
-    DUMP_VAL(hp);
-    o.set("sprite", dump_sprite(dumping->sprite));
-    return o;
-  }
+	static val dump_thingy(thingy_t* dumping) {
+		val o = val::object();
+		DUMP_VAL(hp);
+		o.set("sprite", dump_sprite(dumping->sprite));
+		return o;
+	}
 
-  static val dump_target(target_t* dumping) {
-    val o = val::object();
-    DUMP_POS(pos);
-    DUMP_VAL(unit);
-    return o;
-  }
+	static val dump_target(target_t* dumping) {
+		val o = val::object();
+		DUMP_POS(pos);
+		DUMP_VAL(unit);
+		return o;
+	}
 
-  static val dump_flingy(flingy_t* dumping) {
-    val o = val::object();
-    DUMP_VAL(index);
-    o.set("move_target", dump_target(&dumping->move_target));
-    DUMP_POS(next_movement_waypoint);
-    DUMP_POS(next_target_waypoint);
-    DUMP_VAL(movement_flags);
-    DUMP_POS(position);
-    DUMP_POS(exact_position);
-    DUMP_VAL(flingy_top_speed);
-    DUMP_VAL(current_speed);
-    DUMP_VAL(next_speed);
-    DUMP_POS(velocity);
-    DUMP_VAL(flingy_acceleration);
-    o.set("sprite", dump_sprite(dumping->sprite));
-    o.set("_thingy_t", dump_thingy(dumping));
-    return o;
-  }
+	static val dump_flingy(flingy_t* dumping) {
+		val o = val::object();
+		DUMP_VAL(index);
+		o.set("move_target", dump_target(&dumping->move_target));
+		DUMP_POS(next_movement_waypoint);
+		DUMP_POS(next_target_waypoint);
+		DUMP_VAL(movement_flags);
+		DUMP_POS(position);
+		DUMP_POS(exact_position);
+		DUMP_VAL(flingy_top_speed);
+		DUMP_VAL(current_speed);
+		DUMP_VAL(next_speed);
+		DUMP_POS(velocity);
+		DUMP_VAL(flingy_acceleration);
+		o.set("sprite", dump_sprite(dumping->sprite));
+		o.set("_thingy_t", dump_thingy(dumping));
+		return o;
+	}
 
-  static val dump_unit(unit_t* dumping) {
-    val o = val::object();
-    DUMP_VAL(owner);
-    DUMP_VAL(order_state);
-    DUMP_VAL(main_order_timer);
-    DUMP_VAL(ground_weapon_cooldown);
-    DUMP_VAL(air_weapon_cooldown);
-    DUMP_VAL(spell_cooldown);
-    o.set("order_target", dump_target(&dumping->order_target));
+	static val dump_unit(unit_t* dumping) {
+		val o = val::object();
+		DUMP_VAL(owner);
+		DUMP_VAL(order_state);
+		DUMP_VAL(main_order_timer);
+		DUMP_VAL(ground_weapon_cooldown);
+		DUMP_VAL(air_weapon_cooldown);
+		DUMP_VAL(spell_cooldown);
+		o.set("order_target", dump_target(&dumping->order_target));
 
-    DUMP_VAL(shield_points);
-    DUMP_VAL(unit_type);
+		DUMP_VAL(shield_points);
+		DUMP_VAL(unit_type);
 
-    DUMP_VAL(subunit);
-    DUMP_VAL(auto_target_unit);
-    DUMP_VAL(connected_unit);
-    DUMP_VAL(order_queue_count);
-    DUMP_VAL(order_process_timer);
-    DUMP_VAL(unknown_0x086);
-    DUMP_VAL(attack_notify_timer);
-    DUMP_VAL(previous_unit_type);
-    DUMP_VAL(last_event_timer);
-    DUMP_VAL(last_event_color);
-    DUMP_VAL(rank_increase);
-    DUMP_VAL(kill_count);
-    DUMP_VAL(last_attacking_player);
-    DUMP_VAL(secondary_order_timer);
-    DUMP_VAL(user_action_flags);
-    DUMP_VAL(cloak_counter);
-    DUMP_VAL(movement_state);
-    DUMP_VAL(energy);
-    DUMP_VAL(unit_id_generation);
-    DUMP_VAL(damage_overlay_state);
-    DUMP_VAL(hp_construction_rate);
-    DUMP_VAL(shield_construction_rate);
-    DUMP_VAL(remaining_build_time);
-    DUMP_VAL(previous_hp);
+		DUMP_VAL(subunit);
+		DUMP_VAL(auto_target_unit);
+		DUMP_VAL(connected_unit);
+		DUMP_VAL(order_queue_count);
+		DUMP_VAL(order_process_timer);
+		DUMP_VAL(unknown_0x086);
+		DUMP_VAL(attack_notify_timer);
+		DUMP_VAL(previous_unit_type);
+		DUMP_VAL(last_event_timer);
+		DUMP_VAL(last_event_color);
+		DUMP_VAL(rank_increase);
+		DUMP_VAL(kill_count);
+		DUMP_VAL(last_attacking_player);
+		DUMP_VAL(secondary_order_timer);
+		DUMP_VAL(user_action_flags);
+		DUMP_VAL(cloak_counter);
+		DUMP_VAL(movement_state);
+		DUMP_VAL(energy);
+		DUMP_VAL(unit_id_generation);
+		DUMP_VAL(damage_overlay_state);
+		DUMP_VAL(hp_construction_rate);
+		DUMP_VAL(shield_construction_rate);
+		DUMP_VAL(remaining_build_time);
+		DUMP_VAL(previous_hp);
 
-    val loaded = val::object();
-    for (int i = 0; i < dumping->loaded_units.size(); ++i) {
-      loaded.set(i, dumping->loaded_units[i].raw_value);
-    }
-    o.set("loaded_units", loaded);
-    o.set("_flingy_t", dump_flingy(dumping));
-    return o;
-  }
+		val loaded = val::object();
+		for (int i = 0; i < dumping->loaded_units.size(); ++i) {
+			loaded.set(i, dumping->loaded_units[i].raw_value);
+		}
+		o.set("loaded_units", loaded);
+		o.set("_flingy_t", dump_flingy(dumping));
+		return o;
+	}
 };
 
 val lookup_unit_extended(int32_t index) {
@@ -737,6 +737,28 @@ bool has_replay_loaded() {
 	return any_replay_loaded;
 }
 
+bool js_add_draw_command(val command) {
+	auto cmd = std::make_unique<draw_command_t>(command);
+	if (!cmd->is_valid()) {
+		return false;
+	}
+	m->ui.add_draw_command(std::move(cmd));
+	return true;
+}
+
+void js_clear_draw_commands() {
+	m->ui.clear_draw_commands();
+}
+
+val get_screen_info() {
+	val v = val::object();
+	v.set("x", m->ui.screen_pos.x);
+	v.set("y", m->ui.screen_pos.y);
+	v.set("screen_width", m->ui.screen_width);
+	v.set("screen_height", m->ui.screen_height);
+	return v;
+}
+
 EMSCRIPTEN_BINDINGS(openbw) {
 	register_vector<js_unit>("vector_js_unit");
 	class_<util_functions>("util_functions")
@@ -767,7 +789,7 @@ EMSCRIPTEN_BINDINGS(openbw) {
 		.function("build_type", &unit_t_build_type, allow_raw_pointers())
 		;
 
-  function("get_selected_units", &get_selected_units);
+	function("get_selected_units", &get_selected_units);
 	function("select_unit_by_bw_id", &select_unit_by_bw_id);
 	function("set_screen_center_position", &set_screen_center_position);
 	function("clear_selection", &clear_selection);
@@ -775,6 +797,11 @@ EMSCRIPTEN_BINDINGS(openbw) {
 	function("enable_main_update_loop", &enable_main_update_loop);
 	function("lookup_unit", &lookup_unit);
 	function("lookup_unit_extended", &lookup_unit_extended);
+
+	// Draw commands
+	function("add_draw_command", &js_add_draw_command);
+	function("clear_draw_commands", &js_clear_draw_commands);
+	function("get_screen_info", &get_screen_info);
 
 	function("get_units_matcher", &get_units_matcher, allow_raw_pointers());
 	function("has_replay_loaded", &has_replay_loaded);
