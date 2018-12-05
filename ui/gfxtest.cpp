@@ -710,20 +710,6 @@ void clear_selection() {
 	m->ui.current_selection.clear();
 }
 
-void set_has_focus(bool has_focus) {
-	// Hackfix for handling focus properly
-	if (has_focus) {
-		// Process MouseDown events
-		SDL_EventState(SDL_MOUSEBUTTONDOWN, SDL_ENABLE);
-	}
-	else {
-		// Do not process the first MouseDown event
-		// otherwise it will prevent us from gaining focus and receiving
-		// further events.
-		SDL_EventState(SDL_MOUSEBUTTONDOWN, SDL_DISABLE);
-	}
-}
-
 unit_matcher* get_units_matcher() {
 	return &g_m->units_matcher;
 }
@@ -793,7 +779,6 @@ EMSCRIPTEN_BINDINGS(openbw) {
 	function("select_unit_by_bw_id", &select_unit_by_bw_id);
 	function("set_screen_center_position", &set_screen_center_position);
 	function("clear_selection", &clear_selection);
-	function("set_has_focus", &set_has_focus);
 	function("enable_main_update_loop", &enable_main_update_loop);
 	function("lookup_unit", &lookup_unit);
 	function("lookup_unit_extended", &lookup_unit_extended);
@@ -909,8 +894,6 @@ int main() {
 
 	//set_malloc_fail_handler(malloc_fail_handler);
 #ifdef EMSCRIPTEN
-	SDL_EventState(SDL_MOUSEBUTTONDOWN, SDL_DISABLE);
-
 	::m = &m;
 	::g_m = &m;
 	//EM_ASM({js_load_done();});
