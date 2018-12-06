@@ -160,27 +160,6 @@ struct sync_server_noop {
 	}
 };
 
-namespace sync_messages {
-	enum {
-		id_client_uid,
-		id_client_frame,
-		id_occupy_slot,
-		id_start_game,
-		id_game_info,
-		id_set_race,
-		id_game_started,
-		id_leave_game,
-		id_insync_check,
-		id_create_unit,
-		id_kill_unit,
-		id_remove_unit,
-		id_custom_action
-	};
-	enum {
-		id_game_started_escape = 0xdc
-	};
-}
-
 struct sync_functions: action_functions {
 	sync_state& sync_st;
 	explicit sync_functions(state& st, action_state& action_st, sync_state& sync_st) : action_functions(st, action_st), sync_st(sync_st) {}
@@ -788,9 +767,11 @@ struct sync_functions: action_functions {
 				funcs.execute_scheduled_actions([this](sync_state::client_t* client, auto& r) {
 					if (client->game_started) {
 						if (client->player_slot != -1) {
+							size_t begin_pos = r.tell();
 							int sync_message_id = r.template get<uint8_t>();
 							if (sync_message_id == sync_messages::id_game_started_escape) {
 								int id = r.template get<uint8_t>();
+								bool handled = true;
 								switch (id) {
 								case sync_messages::id_insync_check: {
 									uint8_t index = r.template get<uint8_t>();
@@ -800,38 +781,23 @@ struct sync_functions: action_functions {
 									}
 									break;
 								}
-								case sync_messages::id_create_unit: {
-									const unit_type_t* unit_type = funcs.get_unit_type((UnitTypes)r.template get<uint32_t>());
-									int x = r.template get<int32_t>();
-									int y = r.template get<int32_t>();
-									int owner = r.template get<uint8_t>();
-									funcs.trigger_create_unit(unit_type, {x, y}, owner);
-									break;
-								}
-								case sync_messages::id_kill_unit: {
-									unit_t* u = funcs.get_unit(unit_id_32(r.template get<uint32_t>()));
-									if (u) funcs.state_functions::kill_unit(u);
-									break;
-								}
-								case sync_messages::id_remove_unit: {
-									unit_t* u = funcs.get_unit(unit_id_32(r.template get<uint32_t>()));
-									if (u) {
-										funcs.hide_unit(u);
-										funcs.state_functions::kill_unit(u);
-									}
-									break;
-								}
 								case sync_messages::id_custom_action: {
 									if (funcs.on_custom_action) funcs.on_custom_action(client->player_slot, r);
 									break;
 								}
+								case sync_messages::id_create_unit:
+								case sync_messages::id_kill_unit:
+								case sync_messages::id_remove_unit:
+									handled = false;
+									break;
 								}
-								return true;
-							} else {
-								r.seek(r.tell() - 1);
+								if (handled)
+									return true;
 							}
+							r.seek(begin_pos);
 							if (sync_st.save_replay) {
 								size_t t = r.tell();
+								r.seek(begin_pos);
 								size_t n = r.left();
 								replay_saver_functions(*sync_st.save_replay).add_action(st.current_frame, client->player_slot, r.get_n(n), n);
 								r.seek(t);
