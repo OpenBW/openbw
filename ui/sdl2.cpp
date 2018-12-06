@@ -62,9 +62,19 @@ struct window_impl {
 		flags |= SDL_WINDOW_RESIZABLE;
 		window = SDL_CreateWindow(title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, width, height, flags);
 		if (!window) log("SDL_CreateWindow failed: %s\n", SDL_GetError());
+		#ifdef EMSCRIPTEN
+		SDL_EventState(SDL_MOUSEBUTTONDOWN, SDL_ENABLE);
+		// Keyboard events are handled by the html side
+		// We need to disable these events, otherwise Emscripten captures
+		//  keyboard events on the whole page, and makes HTML <input> useless
+		SDL_EventState(SDL_KEYDOWN, SDL_DISABLE);
+		SDL_EventState(SDL_KEYUP, SDL_DISABLE);
+		SDL_EventState(SDL_TEXTINPUT, SDL_DISABLE);
+		#else
 		if (window) {
 			SDL_StartTextInput();
 		}
+		#endif
 		return window != nullptr;
 	}
 
