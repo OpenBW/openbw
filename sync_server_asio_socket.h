@@ -9,6 +9,7 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <iostream>
 
 namespace {
 static inline void silence_asio_warnings() {
@@ -23,11 +24,11 @@ namespace bwgame {
 
 template<typename socket_T>
 struct sync_server_asio_socket {
-	
+
 	asio::io_service io_service;
 	asio::io_service::work work{io_service};
 	asio::steady_timer timer{io_service};
-	
+
 	template<typename T, typename release_F>
 	struct async_handle_t {
 		T* obj;
@@ -52,18 +53,18 @@ struct sync_server_asio_socket {
 	async_handle_t<T, release_F> async_handle(T* obj, release_F&&f) {
 		return async_handle_t<T, release_F>(obj, std::forward<release_F>(f));
 	}
-	
+
 	const size_t recv_size = 0x1000;
-	
+
 	struct send_buffer_t {
 		std::array<uint8_t, 0x2000> buffer;
 		int refcount = 0;
 		size_t pos = 0;
 	};
-	
+
 	using send_buffers_t = a_list<send_buffer_t>;
 	send_buffers_t send_buffers;
-	
+
 	struct message_buffer_handle {
 		sync_server_asio_socket* server = nullptr;
 		typename send_buffers_t::iterator buffer;
@@ -94,7 +95,7 @@ struct sync_server_asio_socket {
 			}
 		}
 	};
-	
+
 	struct client_t {
 		client_t(socket_T socket) : socket(std::move(socket)) {}
 		typename a_list<client_t>::iterator my_it;
@@ -108,9 +109,9 @@ struct sync_server_asio_socket {
 		std::function<void(const void*, size_t)> on_message;
 		bool allow_send = false;
 	};
-	
+
 	a_list<client_t> clients;
-	
+
 	typename send_buffers_t::iterator get_send_buffer_with_space(size_t n) {
 		for (auto i = send_buffers.begin(); i != send_buffers.end(); ++i) {
 			if (i->buffer.size() - i->pos >= n) return i;
@@ -118,7 +119,7 @@ struct sync_server_asio_socket {
 		send_buffers.emplace_back();
 		return std::prev(send_buffers.end());
 	}
-	
+
 	struct message_t {
 		sync_server_asio_socket& server;
 		static_vector<message_buffer_handle, 2> buffers;
@@ -149,7 +150,7 @@ struct sync_server_asio_socket {
 			}
 		}
 	};
-	
+
 	message_t new_message() {
 		message_t r{*this};
 		auto buffer = get_send_buffer_with_space(0x10);
@@ -158,7 +159,7 @@ struct sync_server_asio_socket {
 		r.template put<uint16_t>(0);
 		return r;
 	}
-	
+
 	void write_handler(client_t* c, const asio::error_code& ec, size_t bytes_transferred) {
 		if (ec) {
 			if (c->on_kill) c->on_kill();
@@ -171,12 +172,12 @@ struct sync_server_asio_socket {
 			if (!c->send_queue.empty()) send_send_queue(c);
 		}
 	}
-	
+
 	void send_send_queue(client_t* client) {
 		auto& v = client->send_queue.front();
 		client->socket.async_write_some(asio::buffer(v.buffer->buffer.data() + v.offset, v.size), std::bind(&sync_server_asio_socket::write_handler, this, async_handle(client, std::bind(&sync_server_asio_socket::async_release, this, std::placeholders::_1)), std::placeholders::_1, std::placeholders::_2));
 	}
-	
+
 	void send_to(const message_t& d, client_t* client) {
 		if (!client->allow_send) return;
 		for (auto& v : d.buffers) {
@@ -186,11 +187,11 @@ struct sync_server_asio_socket {
 			}
 		}
 	}
-	
+
 	void allow_send(const void* h, bool allow) {
 		((client_t*)h)->allow_send = allow;
 	}
-	
+
 	void send_message(const message_t& d, const void* h) {
 		data_loading::set_value_at<true>(d.buffers[0].buffer->buffer.data() + d.buffers[0].offset, (uint16_t)(d.total_size - 2));
 		if (h) {
@@ -201,17 +202,17 @@ struct sync_server_asio_socket {
 			}
 		}
 	}
-	
+
 	a_vector<client_t*> new_clients;
-	
+
 	void new_connection_handler(socket_T socket) {
 		clients.emplace_back(std::move(socket));
 		client_t* c = &clients.back();
 		c->my_it = std::prev(clients.end());
-            ++c->async_count;
+		++c->async_count;
 		new_clients.push_back(c);
 	}
-	
+
 	void kill_client(const void* h) {
 		client_t* c = (client_t*)h;
 		c->is_dead = true;
@@ -220,7 +221,23 @@ struct sync_server_asio_socket {
 		if (c->socket.is_open()) c->socket.close();
 		if (--c->async_count == 0) async_release(c);
 	}
-	
+
+	struct timer_guard_t {
+		~timer_guard_t() {
+			timer.cancel();
+		}
+		asio::steady_timer& timer;
+	};
+
+	template<typename duration_T, typename callback_F>
+	timer_guard_t set_timeout_guarded(duration_T&& duration, callback_F&& callback) {
+		timer.expires_from_now(duration);
+		timer.async_wait([callback = std::forward<callback_F>(callback)](const asio::error_code& ec) {
+			if (!ec) callback();
+		});
+		return timer_guard_t{timer};
+	}
+
 	template<typename duration_T, typename callback_F>
 	void set_timeout(duration_T&& duration, callback_F&& callback) {
 		timer.expires_from_now(duration);
@@ -228,11 +245,11 @@ struct sync_server_asio_socket {
 			if (!ec) callback();
 		});
 	}
-	
+
 	void async_release(client_t* c) {
 		clients.erase(c->my_it);
 	}
-	
+
 	void read_handler(client_t* c, const asio::error_code& ec, size_t bytes_transferred) {
 		if (ec) {
 			if (c->on_kill) c->on_kill();
@@ -252,19 +269,19 @@ struct sync_server_asio_socket {
 					c->recv_message_size = 0;
 				} else break;
 			}
-			
+
 			size_t new_size = c->recv_buffer.size() + recv_size;
 			c->recv_buffer.resize(new_size);
 			c->socket.async_read_some(asio::buffer(c->recv_buffer.data() + c->recv_buffer.size() - recv_size, recv_size), std::bind(&sync_server_asio_socket::read_handler, this, async_handle(c, std::bind(&sync_server_asio_socket::async_release, this, std::placeholders::_1)), std::placeholders::_1, std::placeholders::_2));
 		}
 	}
-	
+
 	template<typename F>
 	void set_on_kill(const void* h, F&& f) {
 		client_t* c = (client_t*)h;
 		c->on_kill = std::forward<F>(f);
 	}
-	
+
 	template<typename F>
 	void set_on_message(const void* h, F&& f) {
 		client_t* c = (client_t*)h;
@@ -272,7 +289,7 @@ struct sync_server_asio_socket {
 		c->recv_buffer.resize(recv_size);
 		c->socket.async_read_some(asio::buffer(c->recv_buffer), std::bind(&sync_server_asio_socket::read_handler, this, async_handle(c, std::bind(&sync_server_asio_socket::async_release, this, std::placeholders::_1)), std::placeholders::_1, std::placeholders::_2));
 	}
-	
+
 	template<typename on_new_client_F>
 	void poll(on_new_client_F&& on_new_client) {
 		io_service.poll();
@@ -282,7 +299,7 @@ struct sync_server_asio_socket {
 		}
 		new_clients.clear();
 	}
-	
+
 	template<typename on_new_client_F>
 	void run_one(on_new_client_F&& on_new_client) {
 		if (!io_service.run_one()) error("asio io_service has no work");
@@ -292,7 +309,7 @@ struct sync_server_asio_socket {
 		}
 		new_clients.clear();
 	}
-	
+
 	template<typename on_new_client_F, typename pred_F>
 	void run_until(on_new_client_F&& on_new_client, pred_F&& pred) {
 		while (!pred()) {
