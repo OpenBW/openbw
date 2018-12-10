@@ -958,6 +958,7 @@ struct sync_functions: action_functions {
 		void sync() {
 			sync_next_frame();
 
+			server.set_timeout(std::chrono::seconds(1), std::bind(&syncer_t::timeout_func, this));
 			server.poll(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1));
 
 			auto pred = [this]() {
@@ -983,7 +984,6 @@ struct sync_functions: action_functions {
 					server.run_until(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1), pred);
 				}
 			} else {
-				server.set_timeout(std::chrono::seconds(1), std::bind(&syncer_t::timeout_func, this));
 				server.run_until(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1), pred);
 			}
 
