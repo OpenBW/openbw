@@ -21,14 +21,14 @@ struct sync_state {
 		size_t data_begin;
 		size_t data_end;
 	};
-	
+
 	int latency = 2;
 	bool is_first_bwapi_compatible_frame = true;
-	
+
 	int game_starting_countdown = 0;
 	uint32_t start_game_seed = 0;
 	bool game_started = false;
-	
+
 	struct uid_t {
 		std::array<uint32_t, 8> vals{};
 		static uid_t generate() {
@@ -69,7 +69,7 @@ struct sync_state {
 			return r;
 		}
 	};
-	
+
 	struct client_t {
 		uid_t uid;
 		bool has_uid = false;
@@ -86,20 +86,20 @@ struct sync_state {
 		bool has_greeted = false;
 		std::chrono::steady_clock::time_point last_synced;
 	};
-	
+
 	a_list<client_t> clients = {{uid_t::generate(), true}};
 	int next_client_id = 1;
 	client_t* local_client = &clients.front();
-	
+
 	int sync_frame = 0;
-	
+
 	bool has_initialized = false;
 	std::array<race_t, 12> initial_slot_races;
 	std::array<int, 12> initial_slot_controllers;
 	std::array<race_t, 12> picked_races;
-	
+
 	bool game_type_melee = false;
-	
+
 	game_load_functions::setup_info_t* setup_info = nullptr;
 	replay_saver_state* save_replay = nullptr;
 
@@ -109,7 +109,7 @@ struct sync_state {
 	int failed_action_count = 0;
 	std::array<uint32_t, 4> insync_hash{};
 	uint8_t insync_hash_index = 0;
-	
+
 };
 
 struct sync_server_noop {
@@ -186,7 +186,7 @@ struct sync_functions: action_functions {
 	explicit sync_functions(state& st, action_state& action_st, sync_state& sync_st) : action_functions(st, action_st), sync_st(sync_st) {}
 
 	std::function<void(int player_slot, data_loading::data_reader_le&)> on_custom_action;
-	
+
 	template<typename action_F>
 	void execute_scheduled_actions(action_F&& action_f) {
 		for (auto i = sync_st.clients.begin(); i != sync_st.clients.end();) {
@@ -203,7 +203,7 @@ struct sync_functions: action_functions {
 			}
 		}
 	}
-	
+
 	void next_frame() = delete;
 
 	template<typename server_T>
@@ -279,12 +279,12 @@ struct sync_functions: action_functions {
 		client->scheduled_actions.push_back({(uint8_t)(client->frame + sync_st.latency), pos, buffer_end});
 		return true;
 	}
-	
+
 	bool schedule_action(sync_state::client_t* client, const uint8_t* data, size_t data_size) {
 		data_loading::data_reader_le r(data, data + data_size);
 		return schedule_action(client, r);
 	}
-	
+
 	template<size_t max_size, bool default_little_endian = true>
 	struct writer {
 		std::array<uint8_t, max_size> arr;
@@ -314,7 +314,7 @@ struct sync_functions: action_functions {
 			return arr.data();
 		}
 	};
-	
+
 	template<bool default_little_endian = true>
 	struct dynamic_writer {
 		std::vector<uint8_t> vec;
@@ -349,7 +349,7 @@ struct sync_functions: action_functions {
 			return vec.data();
 		}
 	};
-	
+
 	template<typename server_T>
 	struct syncer_t {
 		sync_functions& funcs;
@@ -357,9 +357,9 @@ struct sync_functions: action_functions {
 		state& st;
 		sync_state& sync_st;
 		syncer_t(sync_functions& funcs, server_T& server) : funcs(funcs), server(server), st(funcs.st), sync_st(funcs.sync_st) {}
-		
+
 		const uint32_t greeting_value = 0x39e25069;
-		
+
 		void send(const uint8_t* data, size_t size, const void* h = nullptr) {
 			if (size == 0) error("attempt to send no data");
 			auto d = server.new_message();
@@ -394,7 +394,7 @@ struct sync_functions: action_functions {
 					} else {
 						client->uid = uid;
 						client->has_uid = true;
-						
+
 						client->name.clear();
 						client->name.reserve(31);
 						while (client->name.size() < 31) {
@@ -402,12 +402,12 @@ struct sync_functions: action_functions {
 							if (!c) break;
 							client->name += c;
 						}
-						
+
 						for (int i = 0; i != 12; ++i) {
 							st.players[i].controller = sync_st.initial_slot_controllers[i];
 							st.players[i].race = sync_st.initial_slot_races[i];
 						}
-						
+
 						for (auto* c : ptr(sync_st.clients)) {
 							c->player_slot = -1;
 							clear_scheduled_actions(c);
@@ -417,7 +417,7 @@ struct sync_functions: action_functions {
 						if (client->h) {
 							server.allow_send(client->h, true);
 						}
-						
+
 						sync_st.clients.sort([&](auto& a, auto& b) {
 							return a.uid < b.uid;
 						});
@@ -433,33 +433,33 @@ struct sync_functions: action_functions {
 				}
 			}
 		}
-		
+
 		void recv(sync_state::client_t* client, const uint8_t* data, size_t data_size) {
 			data_loading::data_reader_le r(data, data + data_size);
 			return recv(client, r);
 		}
-		
+
 		void send_greeting(const void* h) {
 			auto d = server.new_message();
 			d.template put<uint32_t>(greeting_value);
 			d.template put<uint8_t>(sync_st.sync_frame);
 			server.send_message(d, h);
 		}
-		
+
 		sync_state::client_t* get_client(const sync_state::uid_t& uid) {
 			for (auto& c : sync_st.clients) {
 				if (c.uid == uid) return &c;
 			}
 			return nullptr;
 		}
-		
+
 		auto get_player_left_action(bool player_left) {
 			writer<2> w;
 			w.put<uint8_t>(87);
 			w.put<uint8_t>(player_left ? 0 : 6);
 			return w;
 		}
-		
+
 		void kill_client(sync_state::client_t* client, bool player_left = false) {
 			if (client->player_slot != -1) {
 				if (sync_st.game_started) {
@@ -502,7 +502,7 @@ struct sync_functions: action_functions {
 			w.put<uint8_t>(0);
 			send(w, h);
 		}
-		
+
 		void send_start_game() {
 			writer<5> w;
 			w.put<uint8_t>(sync_messages::id_start_game);
@@ -550,14 +550,14 @@ struct sync_functions: action_functions {
 			w.put<uint32_t>(funcs.get_unit_id_32(u).raw_value);
 			send(w);
 		}
-		
+
 		void clear_scheduled_actions(sync_state::client_t* client) {
 			client->buffer.clear();
 			client->buffer_begin = 0;
 			client->buffer_end = 0;
 			client->scheduled_actions.clear();
 		}
-		
+
 		void send_game_info(const void* h) {
 			dynamic_writer<> w(0x100);
 			w.put<uint8_t>(sync_messages::id_game_info);
@@ -657,7 +657,7 @@ struct sync_functions: action_functions {
 			w.put<uint32_t>(sync_st.insync_hash[sync_st.insync_hash_index]);
 			send(w);
 		}
-		
+
 		void send_game_started() {
 			writer<1> w;
 			w.put<uint8_t>(sync_messages::id_game_started);
@@ -681,14 +681,14 @@ struct sync_functions: action_functions {
 			w.put_bytes(data, size);
 			send(w);
 		}
-		
+
 		void start_game(uint32_t seed) {
-			
+
 			a_string seed_str;
 			for (auto& v : sync_st.clients) seed_str += v.uid.str();
 			uint32_t rand_state = seed ^ data_loading::crc32_t()((const uint8_t*)seed_str.data(), seed_str.size());
 			st.lcg_rand_state = rand_state;
-			
+
 			for (int i = 0; i != 12; ++i) {
 				auto& v = st.players[i];
 				if (v.controller == player_t::controller_computer) {
@@ -701,7 +701,7 @@ struct sync_functions: action_functions {
 					if ((int)v.race > 2) v.race = (bwgame::race_t)funcs.lcg_rand(144, 0, 2);
 				}
 			}
-			
+
 			auto slot_available = [&](size_t index) {
 				auto c = sync_st.initial_slot_controllers[index];
 				if (c == player_t::controller_open) return true;
@@ -711,7 +711,7 @@ struct sync_functions: action_functions {
 				if (c == player_t::controller_neutral) return true;
 				return false;
 			};
-			
+
 			auto randomize_slots = [&](auto pred) {
 				bwgame::static_vector<size_t, 12> available_slots;
 				for (auto& v : st.players) {
@@ -734,7 +734,7 @@ struct sync_functions: action_functions {
 					}
 				}
 			};
-			
+
 			if (sync_st.game_type_melee) {
 				randomize_slots([](size_t){return true;});
 			} else {
@@ -743,17 +743,17 @@ struct sync_functions: action_functions {
 				}
 			}
 			sync_st.game_started = true;
-			
+
 			sync_st.clients.sort([&](auto& a, auto& b) {
 				if ((unsigned)a.player_slot != (unsigned)b.player_slot) return (unsigned)a.player_slot < (unsigned)b.player_slot;
 				return a.uid < b.uid;
 			});
 			send_game_started();
-			
+
 			for (auto* c : ptr(sync_st.clients)) {
 				if (c->player_slot != -1) sync_st.player_names.at(c->player_slot) = c->name;
 			}
-			
+
 			if (sync_st.save_replay) {
 				auto& r = *sync_st.save_replay;
 				r.random_seed = st.lcg_rand_state;
@@ -764,26 +764,26 @@ struct sync_functions: action_functions {
 				r.slot_count = range_size(funcs.active_players());
 				r.game_type = sync_st.game_type_melee ? 2 : 10;
 				r.tileset = st.game->tileset_index;
-				
+
 				r.game_name = "openbw game";
 				r.map_name = st.game->scenario_name;
 				r.setup_info = *sync_st.setup_info;
 				r.players = st.players;
 				r.player_names = sync_st.player_names;
-				
+
 			}
-			
+
 		}
-		
+
 		void process_messages() {
-			
+
 			if (sync_st.game_starting_countdown) {
 				--sync_st.game_starting_countdown;
 				if (sync_st.game_starting_countdown == 0) {
 					start_game(sync_st.start_game_seed);
 				}
 			}
-			
+
 			if (sync_st.game_started) {
 				funcs.execute_scheduled_actions([this](sync_state::client_t* client, auto& r) {
 					if (client->game_started) {
@@ -926,7 +926,7 @@ struct sync_functions: action_functions {
 				});
 			}
 		}
-		
+
 		void sync_next_frame() {
 			if (!sync_st.has_initialized) {
 				if (!sync_st.setup_info) error("sync_state::setup_info is null");
@@ -945,7 +945,7 @@ struct sync_functions: action_functions {
 				send_insync_check();
 			}
 		}
-		
+
 		bool all_clients_in_sync() {
 			for (auto* c : ptr(sync_st.clients)) {
 				if ((int8_t)(sync_st.sync_frame - c->frame) >= (int8_t)sync_st.latency) {
@@ -957,13 +957,13 @@ struct sync_functions: action_functions {
 
 		void sync() {
 			sync_next_frame();
-			
+
 			server.poll(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1));
-			
+
 			auto pred = [this]() {
 				return all_clients_in_sync();
 			};
-			
+
 			if (!sync_st.game_started && !sync_st.game_starting_countdown && pred()) {
 				auto any_scheduled_actions = [&]() {
 					for (auto& c : sync_st.clients) {
@@ -986,15 +986,15 @@ struct sync_functions: action_functions {
 				server.set_timeout(std::chrono::seconds(1), std::bind(&syncer_t::timeout_func, this));
 				server.run_until(std::bind(&syncer_t::on_new_client, this, std::placeholders::_1), pred);
 			}
-			
+
 			auto now = std::chrono::steady_clock::now();
 			for (auto& c : sync_st.clients) {
 				c.last_synced = now;
 			}
-			
+
 			process_messages();
 		}
-		
+
 		void final_sync() {
 			bool timed_out = false;
 			server.set_timeout(std::chrono::milliseconds(250), [&]{
@@ -1009,13 +1009,13 @@ struct sync_functions: action_functions {
 				if (!timed_out) process_messages();
 			}
 		}
-		
+
 		void leave_game() {
 			send_leave_game();
 			final_sync();
 		}
 	};
-	
+
 	struct syncer_container_t {
 		static const size_t size = 0x40;
 		static const size_t alignment = alignof(std::max_align_t);
@@ -1023,18 +1023,18 @@ struct sync_functions: action_functions {
 		const void* server_ptr = nullptr;
 		std::aligned_storage<size, alignment>::type obj;
 		void (syncer_container_t::* destroy_f)();
-		
+
 		syncer_container_t() = default;
 		syncer_container_t(const syncer_container_t&) = delete;
 		syncer_container_t& operator=(const syncer_container_t&) = delete;
 		~syncer_container_t() {
 			destroy();
 		}
-		
+
 		void destroy() {
 			if (type) (this->*destroy_f)();
 		}
-		
+
 		template<typename T, typename server_T>
 		void construct(sync_functions& funcs, server_T& server) {
 			static_assert(sizeof(T) <= size || alignof(T) <= alignment, "syncer_container_t size or alignment too small");
@@ -1053,7 +1053,7 @@ struct sync_functions: action_functions {
 			static_assert(sizeof(T) <= size || alignof(T) <= alignment, "syncer_container_t size or alignment too small");
 			return (T&)obj;
 		}
-		
+
 		template<typename T, typename server_T>
 		T& get(sync_functions& funcs, server_T& server) {
 			if (type) {
@@ -1066,9 +1066,9 @@ struct sync_functions: action_functions {
 			return as<T>();
 		}
 	};
-	
+
 	syncer_container_t syncer_container;
-	
+
 	template<typename server_T>
 	syncer_t<server_T>& get_syncer(server_T& server) {
 		return syncer_container.get<syncer_t<server_T>>(*this, server);
@@ -1078,34 +1078,34 @@ struct sync_functions: action_functions {
 	void sync(server_T& server) {
 		get_syncer(server).sync();
 	}
-	
+
 	template<typename server_T>
 	void start_game(server_T& server) {
 		if (sync_st.game_started) return;
 		get_syncer(server).send_start_game();
 	}
-	
+
 	template<typename server_T>
 	void switch_to_slot(server_T& server, int n) {
 		get_syncer(server).send_switch_to_slot(n);
 	}
-	
+
 	void set_local_client_name(a_string name) {
 		if (sync_st.game_started) return;
 		sync_st.local_client->name = std::move(name);
 	}
-	
+
 	template<typename server_T>
 	void set_local_client_race(server_T& server, race_t race) {
 		if (sync_st.game_started) return;
 		get_syncer(server).send_set_race(race);
 	}
-	
+
 	template<typename server_T>
 	void input_action(server_T& server, const uint8_t* data, size_t size) {
 		get_syncer(server).send(data, size);
 	}
-	
+
 	template<typename server_T>
 	void leave_game(server_T& server) {
 		get_syncer(server).leave_game();
