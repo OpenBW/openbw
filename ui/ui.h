@@ -12,7 +12,9 @@
 #include "native_window.h"
 #include "native_window_drawing.h"
 #include "native_sound.h"
+#ifdef EMSCRIPTEN
 #include "Bitmap.h"
+#endif
 
 namespace bwgame {
 
@@ -558,6 +560,7 @@ struct ui_util_functions: replay_functions {
 
 };
 
+#ifdef EMSCRIPTEN
 struct ui_functions;
 struct draw_command_t {
 	enum DrawCommands {
@@ -582,6 +585,7 @@ struct draw_command_t {
 	inline void draw(uint8_t* data, size_t data_pitch, ui_functions& ui);
 	inline bool is_valid();
 };
+#endif
 
 struct ui_functions: ui_util_functions {
 	image_data img;
@@ -608,6 +612,7 @@ struct ui_functions: ui_util_functions {
 	std::function<void(a_vector<uint8_t>&, a_string)> load_data_file;
 
 	// Screen drawing commands
+  #ifdef EMSCRIPTEN
 	std::vector<std::unique_ptr<draw_command_t> > draw_commands_list;
 
 	void add_draw_command(std::unique_ptr<draw_command_t> cmd) {
@@ -623,6 +628,9 @@ struct ui_functions: ui_util_functions {
 			cmd->draw(data, data_pitch, *this);
 		}
 	}
+  #else
+  void draw_commands(uint8_t* data, size_t data_pitch) {}
+  #endif
 
 	// Sound related stuff
 	sound_types_t sound_types;
@@ -2148,6 +2156,7 @@ struct ui_functions: ui_util_functions {
 	}
 };
 
+#ifdef EMSCRIPTEN
 bool draw_command_t::get_unit_pos(
 		ui_functions& ui, int32_t uid, int32_t& x, int32_t& y) {
 	if (unit_t* u = ui.get_unit(unit_id(uid))) {
@@ -2217,4 +2226,5 @@ bool draw_command_t::is_valid() {
 	}
 	return false;
 }
+#endif
 }
