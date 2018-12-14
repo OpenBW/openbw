@@ -138,6 +138,7 @@ struct sync_server_noop {
 	guard_t set_timeout_guarded(duration_T&& duration, callback_F&& callback) {
 		timeout_time = std::chrono::steady_clock::now() + duration;
 		timeout_function = std::forward<callback_F>(callback);
+		return guard_t{*this};
 	}
 	template<typename duration_T, typename callback_F>
 	void set_timeout(duration_T&& duration, callback_F&& callback) {
