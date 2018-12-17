@@ -37,7 +37,7 @@ void fatal_error_str(a_string str) {
 void main_t::reset() {
 	saved_states.clear();
 	ui.reset();
-	//units_matcher = unit_matcher(this);
+	units_matcher = unit_matcher(this);
 }
 
 void main_t::next_frame() {
@@ -745,6 +745,14 @@ val get_screen_info() {
 	return v;
 }
 
+void reset_replay() {
+	m->reset();
+	m->ui.reset();
+	m->ui.set_image_data();
+	m->run_main_update_loop = true;
+	any_replay_loaded = false;
+}
+
 EMSCRIPTEN_BINDINGS(openbw) {
 	register_vector<js_unit>("vector_js_unit");
 	class_<util_functions>("util_functions")
@@ -782,6 +790,7 @@ EMSCRIPTEN_BINDINGS(openbw) {
 	function("enable_main_update_loop", &enable_main_update_loop);
 	function("lookup_unit", &lookup_unit);
 	function("lookup_unit_extended", &lookup_unit_extended);
+	function("reset_replay", &reset_replay);
 
 	// Draw commands
 	function("add_draw_command", &js_add_draw_command);
@@ -848,7 +857,7 @@ int main() {
 
 	using namespace bwgame;
 
-	log("v25\n");
+	log("v26\n");
 
 	size_t screen_width = 1280;
 	size_t screen_height = 800;
