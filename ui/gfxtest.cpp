@@ -736,12 +736,46 @@ void js_clear_draw_commands() {
 	m->ui.clear_draw_commands();
 }
 
+extern "C" void js_add_screen_overlay(
+		float* values,
+		size_t x_dim,
+		size_t y_dim,
+		int x_topleft,
+		int y_topleft,
+		float x_scaling,
+		float y_scaling,
+		float original_ratio,
+		float game_saturation,
+		float mean,
+		float stddev,
+		bool render_fast) {
+	m->ui.overlay = ui_functions::overlay_t{
+		std::vector<float>(values, values + (x_dim * y_dim)),
+		{x_dim, y_dim},
+		{x_topleft, y_topleft},
+		{x_scaling, y_scaling},
+		original_ratio,
+		game_saturation,
+		render_fast
+	};
+	for (auto& v: m->ui.overlay->values) {
+		v -= mean;
+		v /= stddev;
+	}
+}
+
+void js_remove_screen_overlay() {
+	m->ui.overlay.reset();
+}
+
 val get_screen_info() {
 	val v = val::object();
-	v.set("x", m->ui.screen_pos.x);
-	v.set("y", m->ui.screen_pos.y);
+	v.set("screen_x", m->ui.screen_pos.x);
+	v.set("screen_y", m->ui.screen_pos.y);
 	v.set("screen_width", m->ui.screen_width);
 	v.set("screen_height", m->ui.screen_height);
+	v.set("cursor_x", m->ui.cursor_pos.x);
+	v.set("cursor_y", m->ui.cursor_pos.y);
 	return v;
 }
 
@@ -795,6 +829,7 @@ EMSCRIPTEN_BINDINGS(openbw) {
 	// Draw commands
 	function("add_draw_command", &js_add_draw_command);
 	function("clear_draw_commands", &js_clear_draw_commands);
+	function("remove_screen_overlay", &js_remove_screen_overlay);
 	function("get_screen_info", &get_screen_info);
 
 	function("get_units_matcher", &get_units_matcher, allow_raw_pointers());
@@ -857,7 +892,7 @@ int main() {
 
 	using namespace bwgame;
 
-	log("v26\n");
+	log("v28_overlays\n");
 
 	size_t screen_width = 1280;
 	size_t screen_height = 800;

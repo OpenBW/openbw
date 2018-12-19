@@ -601,6 +601,7 @@ struct ui_functions: ui_util_functions {
 
 	size_t screen_width;
 	size_t screen_height;
+	xy cursor_pos;
 
 	game_player player;
 	replay_state current_replay_state;
@@ -611,9 +612,19 @@ struct ui_functions: ui_util_functions {
 
 	std::function<void(a_vector<uint8_t>&, a_string)> load_data_file;
 
+	#ifdef EMSCRIPTEN
 	// Screen drawing commands
-  #ifdef EMSCRIPTEN
 	std::vector<std::unique_ptr<draw_command_t> > draw_commands_list;
+	struct overlay_t {
+		std::vector<float> values;
+		std::array<size_t, 2> dimension; // {dimX, dimY}
+		std::array<int, 2> topleft_pos;
+		std::array<float, 2> scaling;
+		float original_ratio;
+		float game_saturation;
+		bool render_fast;
+	};
+	optional<overlay_t> overlay;
 
 	void add_draw_command(std::unique_ptr<draw_command_t> cmd) {
 		draw_commands_list.push_back(std::move(cmd));
@@ -628,9 +639,78 @@ struct ui_functions: ui_util_functions {
 			cmd->draw(data, data_pitch, *this);
 		}
 	}
-  #else
-  void draw_commands(uint8_t* data, size_t data_pitch) {}
-  #endif
+
+	void draw_overlay_rgba(uint32_t* data, size_t data_pitch) {
+		if (!overlay) {
+			return;
+		}
+
+		auto minimap_area = get_minimap_area();
+		size_t minimap_width = minimap_area.to.x - minimap_area.from.x;
+		size_t minimap_height = minimap_area.to.y - minimap_area.from.y;
+		bool has_minimap = minimap_width == game_st.map_tile_width
+				&& minimap_height == game_st.map_tile_height;
+
+
+		auto merge_colors = [&](int c1, int c2, float c1_ratio) -> uint8_t {
+			if (overlay->render_fast) {
+				return (c1 >> 1) + (c2 >> 1);
+			}
+			else {
+				return std::min(int(std::sqrt(c1 * c1 * c1_ratio + c2 * c2 * (1.0f - c1_ratio))), 0xFF);
+			}
+		};
+
+		auto draw_overlay_at = [&](float overlay_x, float overlay_y, uint32_t& v) {
+			if (overlay_x >= 0 && overlay_x < overlay->dimension[0] &&
+				overlay_y >= 0 && overlay_y < overlay->dimension[1]) {
+				float normalized_value = overlay->values[int(overlay_x) + overlay->dimension[0] * int(overlay_y)];
+				normalized_value = std::max(-1.0f, std::min(normalized_value, 1.0f));
+
+				uint8_t r = v & 0xFF;
+				uint8_t g = (v >> 8) & 0xFF;
+				uint8_t b = (v >> 16) & 0xFF;
+				uint8_t gray = (r >> 2) + (g >> 1) + (b >> 2);
+				r = merge_colors(r, gray, overlay->game_saturation);
+				g = merge_colors(g, gray, overlay->game_saturation);
+				b = merge_colors(b, gray, overlay->game_saturation);
+
+				r = merge_colors(r, std::max<int>(-normalized_value * 0xFF, 0), overlay->original_ratio);
+				g = merge_colors(g, std::max<int>(normalized_value * 0xFF, 0), overlay->original_ratio);
+				b = merge_colors(b, 0, overlay->original_ratio);
+				v = r + (g << 8) + (b << 16);
+			}
+		};
+
+		// Draw on map
+		for (auto y = 0; y < view_height; ++y) {
+			float overlay_y = (y + screen_pos.y - overlay->topleft_pos[1]) / overlay->scaling[1];
+			for (auto x = 0; x < view_width; ++x) {
+				if (has_minimap && (minimap_area.from.x - 1) <= x && x <= (minimap_area.to.x + 1)
+						&& (minimap_area.from.y - 1) <= y && y <= (minimap_area.to.y + 1)) {
+					continue;
+				}
+				float overlay_x = (x + screen_pos.x - overlay->topleft_pos[0]) / overlay->scaling[0];
+				draw_overlay_at(overlay_x, overlay_y, data[y * data_pitch + x]);
+			}
+		}
+
+		// Draw on minimap
+		if (has_minimap) {
+			for (auto y = 0; y < minimap_height; ++y) {
+				float overlay_y = (y * 32 - overlay->topleft_pos[1]) / overlay->scaling[1];
+				for (auto x = 0; x < minimap_width; ++x) {
+					float overlay_x = (x * 32 - overlay->topleft_pos[0]) / overlay->scaling[0];
+					auto idx = (minimap_area.from.y + y) * data_pitch + minimap_area.from.x + x;
+					draw_overlay_at(overlay_x, overlay_y, data[idx]);
+				}
+			}
+		}
+	}
+	#else
+	void draw_commands(uint8_t* data, size_t data_pitch) {}
+	void draw_overlay_rgba(uint32_t* data, size_t data_pitch) {}
+	#endif
 
 	// Sound related stuff
 	sound_types_t sound_types;
@@ -1944,6 +2024,8 @@ struct ui_functions: ui_util_functions {
 					}
 
 					if (is_drag_selecting && ~e.button_state & 1) end_drag_select(false);
+					cursor_pos.x = e.mouse_x;
+					cursor_pos.y = e.mouse_y;
 					break;
 				case native_window::event_t::type_mouse_button_up:
 					if (e.button == 1) {
@@ -2074,6 +2156,9 @@ struct ui_functions: ui_util_functions {
 			rgba_surface->unlock();
 		}
 
+		draw_overlay_rgba((uint32_t*)rgba_surface->lock(), rgba_surface->pitch / 4);
+		rgba_surface->unlock();
+
 		if (wnd) {
 			rgba_surface->blit(&*window_surface, 0, 0);
 			wnd.update_surface();
@@ -2153,6 +2238,9 @@ struct ui_functions: ui_util_functions {
 
 		st.global = &global_st;
 		st.game = &game;
+#ifdef EMSCRIPTEN
+		overlay.reset();
+#endif
 	}
 };
 
