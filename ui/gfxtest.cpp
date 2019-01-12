@@ -767,6 +767,27 @@ extern "C" void js_add_screen_overlay(
 	}
 }
 
+void js_set_highlighted_units(val unit_ids) {
+	auto ids = emscripten::vecFromJSArray<int32_t>(unit_ids);
+	m->ui.highlighted_units_ids.clear();
+	for (auto id: ids) {
+		m->ui.highlighted_units_ids.insert(id);
+	}
+}
+
+void js_set_highlighted_rects(val rectangles_) {
+	auto rectangles = emscripten::vecFromJSArray<val>(rectangles_);
+	m->ui.highlighted_rectangles.clear();
+	for (auto rect: rectangles) {
+		auto from = emscripten::vecFromJSArray<size_t>(rect["from"]);
+		auto to = emscripten::vecFromJSArray<size_t>(rect["to"]);
+		m->ui.highlighted_rectangles.push_back({
+			{from[0], from[1]},
+			{to[0], to[1]},
+		});
+	}
+}
+
 void js_remove_screen_overlay() {
 	m->ui.overlay.reset();
 }
@@ -833,6 +854,8 @@ EMSCRIPTEN_BINDINGS(openbw) {
 	function("add_draw_command", &js_add_draw_command);
 	function("clear_draw_commands", &js_clear_draw_commands);
 	function("remove_screen_overlay", &js_remove_screen_overlay);
+	function("set_highlighted_units", &js_set_highlighted_units);
+	function("set_highlighted_rects", &js_set_highlighted_rects);
 	function("get_screen_info", &get_screen_info);
 
 	function("get_units_matcher", &get_units_matcher, allow_raw_pointers());
@@ -895,7 +918,7 @@ int main() {
 
 	using namespace bwgame;
 
-	log("v28_overlays\n");
+	log("v29\n");
 
 	size_t screen_width = 1280;
 	size_t screen_height = 800;

@@ -449,6 +449,8 @@ struct ui_util_functions: replay_functions {
 
 	explicit ui_util_functions(state& st, action_state& action_st, replay_state& replay_st) : replay_functions(st, action_st, replay_st) {}
 
+	std::unordered_set<size_t> highlighted_sprites_ids;
+
 	rect sprite_clickable_bounds(const sprite_t* sprite) const {
 		rect r{{(int)game_st.map_width - 1, (int)game_st.map_height - 1}, {0, 0}};
 		for (const image_t* image : ptr(sprite->images)) {
@@ -549,6 +551,9 @@ struct ui_util_functions: replay_functions {
 	}
 
 	uint32_t sprite_depth_order(const sprite_t* sprite) const {
+		if (highlighted_sprites_ids.count(sprite->index)) {
+			return 0xFFFFFFFF;
+		}
 		uint32_t score = 0;
 		score |= sprite->elevation_level;
 		score <<= 13;
@@ -612,6 +617,8 @@ struct ui_functions: ui_util_functions {
 
 	std::function<void(a_vector<uint8_t>&, a_string)> load_data_file;
 
+	std::unordered_set<int32_t> highlighted_units_ids;
+	std::vector<rect_t<xy_t<size_t>>> highlighted_rectangles;
 	#ifdef EMSCRIPTEN
 	// Screen drawing commands
 	std::vector<std::unique_ptr<draw_command_t> > draw_commands_list;
@@ -711,6 +718,95 @@ struct ui_functions: ui_util_functions {
 	void draw_commands(uint8_t* data, size_t data_pitch) {}
 	void draw_overlay_rgba(uint32_t* data, size_t data_pitch) {}
 	#endif
+	void draw_highlights_on_units(uint32_t* data, size_t data_pitch) {
+		uint64_t total_surface = 0;
+		for (auto uid: highlighted_units_ids) {
+			if (auto* u = get_unit(unit_id(uid))) {
+				// Find unit bounding box
+				int minX = screen_width;
+				int maxX = 0;
+				int minY = screen_height;
+				int maxY = 0;
+				for (auto* image : ptr(reverse(u->sprite->images))) {
+					if (i_flag(image, image_t::flag_hidden)) continue;
+
+					xy map_pos = get_image_map_position(image);
+					int screen_x = map_pos.x - screen_pos.x;
+					int screen_y = map_pos.y - screen_pos.y;
+					if (screen_x >= (int)screen_width || screen_y >= (int)screen_height) continue;
+
+					auto& frame = image->grp->frames.at(image->frame_index);
+					size_t width = frame.size.x;
+					size_t height = frame.size.y;
+					if (screen_x + (int)width <= 0 || screen_y + (int)height <= 0) continue;
+					minX = std::min(minX, screen_x);
+					maxX = std::max<int>(maxX, screen_x + width);
+					minY = std::min(minY, screen_y);
+					maxY = std::max<int>(maxY, screen_y + height);
+				}
+
+				// Mark pixels inside this bounding box
+				minX = std::max(minX, 0);
+				maxX = std::min<int>(maxX, screen_width);
+				minY = std::max(minY, 0);
+				maxY = std::min<int>(maxY, screen_height);
+				total_surface += (maxX - minX) * (maxY - minY);
+				for (auto x = minX; x < maxX; ++x) {
+					for (auto y = minY; y < maxY; ++y) {
+						data[y * data_pitch + x] |= 0x01000000;
+					}
+				}
+			}
+		}
+		for (auto rect: highlighted_rectangles) {
+			int minX = std::max<int>(rect.from.x - screen_pos.x, 0);
+			int maxX = std::min<int>(rect.to.x - screen_pos.x, screen_width);
+			int minY = std::max<int>(rect.from.y - screen_pos.y, 0);
+			int maxY = std::min<int>(rect.to.y - screen_pos.y, screen_height);
+			total_surface += (maxX - minX) * (maxY - minY);
+			for (auto x = minX; x < maxX; ++x) {
+				for (auto y = minY; y < maxY; ++y) {
+					data[y * data_pitch + x] |= 0x01000000;
+				}
+			}
+		}
+		if (!total_surface) {
+			return;
+		}
+
+		uint8_t shift_count = 1;
+		// For very small area, need to darken the outside more
+		if (total_surface <= (16 * 16)) {
+			shift_count = 2;
+		}
+
+		auto minimap_area = get_minimap_area();
+		size_t minimap_width = minimap_area.to.x - minimap_area.from.x;
+		size_t minimap_height = minimap_area.to.y - minimap_area.from.y;
+		bool has_minimap = minimap_width == game_st.map_tile_width
+				&& minimap_height == game_st.map_tile_height;
+
+		// Darken everything outside
+		for (auto x = 0; x < screen_width; ++x) {
+			for (auto y = 0; y < screen_height; ++y) {
+				if (has_minimap && (minimap_area.from.x - 1) <= x && x <= (minimap_area.to.x + 1)
+						&& (minimap_area.from.y - 1) <= y && y <= (minimap_area.to.y + 1)) {
+					// Don't overlay on the minimap
+					continue;
+				}
+				uint32_t& v = data[y * data_pitch + x];
+				if ((v & 0xFF000000) == 0) {
+					uint8_t r = v & 0xFF;
+					uint8_t g = (v >> 8) & 0xFF;
+					uint8_t b = (v >> 16) & 0xFF;
+					r = (r >> shift_count);
+					g = (g >> shift_count);
+					b = (b >> shift_count);
+					v = r + (g << 8) + (b << 16);
+				}
+			}
+		}
+	}
 
 	// Sound related stuff
 	sound_types_t sound_types;
@@ -1365,8 +1461,13 @@ struct ui_functions: ui_util_functions {
 	void draw_sprites(uint8_t* data, size_t data_pitch) {
 
 		image_draw_queue.clear();
-
 		sorted_sprites.clear();
+		highlighted_sprites_ids.clear();
+		for (auto uid: highlighted_units_ids) {
+			if (auto* u = get_unit(unit_id(uid))) {
+				highlighted_sprites_ids.insert(u->sprite->index);
+			}
+		}
 
 		auto screen_tile = screen_tile_bounds();
 
@@ -2158,6 +2259,8 @@ struct ui_functions: ui_util_functions {
 
 		draw_overlay_rgba((uint32_t*)rgba_surface->lock(), rgba_surface->pitch / 4);
 		rgba_surface->unlock();
+		draw_highlights_on_units((uint32_t*)rgba_surface->lock(), rgba_surface->pitch / 4);
+		rgba_surface->unlock();
 
 		if (wnd) {
 			rgba_surface->blit(&*window_surface, 0, 0);
@@ -2238,6 +2341,8 @@ struct ui_functions: ui_util_functions {
 
 		st.global = &global_st;
 		st.game = &game;
+		highlighted_units_ids.clear();
+		highlighted_rectangles.clear();
 #ifdef EMSCRIPTEN
 		overlay.reset();
 #endif
