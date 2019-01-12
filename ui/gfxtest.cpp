@@ -517,21 +517,6 @@ double get_volume() {
 	return m->ui.global_volume / 100.0;
 }
 
-val lookup_unit(int32_t index) {
-	util_functions f(m->ui.st);
-	unit_t* u = f.get_unit(unit_id(index));
-	if (!u) {
-		return val::null();
-	}
-	val o = val::object();
-	o.set("bw_id", f.get_unit_id(u).raw_value);
-	o.set("player_id", u->owner);
-	o.set("x", u->position.x);
-	o.set("y", u->position.y);
-	o.set("type", (int)u->unit_type->id);
-	return o;
-}
-
 class Dump {
 public:
 	#define STR(a) #a
@@ -673,6 +658,24 @@ val lookup_unit_extended(int32_t index) {
 		return val::null();
 	}
 	return Dump::dump_unit(u);
+}
+
+val lookup_unit(int32_t index) {
+	util_functions f(m->ui.st);
+	unit_t* u = f.get_unit(unit_id(index));
+	if (!u) {
+		return val::null();
+	}
+	val o = val::object();
+	o.set("bw_id", f.get_unit_id(u).raw_value);
+	o.set("player_id", u->owner);
+	o.set("x", u->position.x);
+	o.set("y", u->position.y);
+	o.set("type", (int)u->unit_type->id);
+	o.set("hp", Dump::to_emscripten(u->hp));
+	o.set("ground_weapon_cooldown", u->ground_weapon_cooldown);
+	o.set("air_weapon_cooldown", u->air_weapon_cooldown);
+	return o;
 }
 
 auto get_selected_units() {
