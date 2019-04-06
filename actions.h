@@ -19,6 +19,9 @@ struct action_state {
 
 	std::array<static_vector<unit_t*, 12>, 8> selection{};
 	std::array<std::array<static_vector<unit_id, 12>, 10>, 8> control_groups{};
+
+	int total_actions = 0;
+	int valid_actions = 0;
 };
 
 static inline action_state copy_state(const action_state& action_st, const state& source_st, const state& dest_st) {
@@ -180,7 +183,7 @@ struct action_functions: state_functions {
 		g.target_pos = target_pos;
 	}
 
-	xy get_group_move_pos(const unit_t* u, xy pos, const group_move_t& g) const {
+	virtual xy get_group_move_pos(const unit_t* u, xy pos, const group_move_t& g) const {
 		xy target_pos = u->pathing_flags & 1 ? g.target_pos : g.original_target_pos;
 		if (g.target_is_in_unit_bounds) {
 			pos = u->sprite->position;
@@ -228,7 +231,7 @@ struct action_functions: state_functions {
 		return target_pos;
 	}
 	
-	bool morph_archon_impl(int owner, bool is_dark_archon) {
+	virtual bool morph_archon_impl(int owner, bool is_dark_archon) {
 		auto sel = selected_units(owner);
 		auto i = sel.begin();
 		if (i == sel.end()) return false;
@@ -264,8 +267,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	template<typename units_T>
-	bool action_select(int owner, units_T&& units) {
+	virtual bool action_select(int owner, const static_vector<unit_t*, 12>& units) {
 		auto& selection = action_st.selection.at(owner);
 		selection.clear();
 		bool retval = false;
@@ -284,11 +286,12 @@ struct action_functions: state_functions {
 	}
 
 	bool action_select(int owner, unit_t* u) {
-		return action_select(owner, std::array<unit_t*, 1>{u});
+		static_vector<unit_t*, 12> units;
+		units.push_back(u);
+		return action_select(owner, units);
 	}
 
-	template<typename units_T>
-	bool action_shift_select(int owner, units_T&& units) {
+	virtual bool action_shift_select(int owner, const static_vector<unit_t*, 12>& units) {
 		auto& selection = action_st.selection.at(owner);
 		if (selection.size() + units.size() > 12) return false;
 		bool retval = false;
@@ -307,11 +310,12 @@ struct action_functions: state_functions {
 	}
 
 	bool action_shift_select(int owner, unit_t* u) {
-		return action_shift_select(owner, std::array<unit_t*, 1>{u});
+		static_vector<unit_t*, 12> units;
+		units.push_back(u);
+		return action_shift_select(owner, u);
 	}
 
-	template<typename units_T>
-	bool action_deselect(int owner, units_T&& units) {
+	virtual bool action_deselect(int owner, const static_vector<unit_t*, 12>& units) {
 		auto& selection = action_st.selection.at(owner);
 		bool retval = false;
 		for (unit_t* u : units) {
@@ -327,10 +331,12 @@ struct action_functions: state_functions {
 	}
 
 	bool action_deselect(int owner, unit_t* u) {
-		return action_deselect(owner, std::array<unit_t*, 1>{u});
+		static_vector<unit_t*, 12> units;
+		units.push_back(u);
+		return action_deselect(owner, units);
 	}
 
-	bool action_train(int owner, const unit_type_t* unit_type) {
+	virtual bool action_train(int owner, const unit_type_t* unit_type) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
 		if (u->owner != owner) return false;
@@ -341,7 +347,7 @@ struct action_functions: state_functions {
 		return true;
 	}
 
-	bool action_build(int owner, const order_type_t* order_type, const unit_type_t* unit_type, xy_t<size_t> tile_pos) {
+	virtual bool action_build(int owner, const order_type_t* order_type, const unit_type_t* unit_type, xy_t<size_t> tile_pos) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
 		if (u->owner != owner) return false;
@@ -365,7 +371,7 @@ struct action_functions: state_functions {
 		return true;
 	}
 
-	bool action_default_order(int owner, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
+	virtual bool action_default_order(int owner, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
 		if (!is_in_map_bounds(pos)) return false;
 		if (target) target_unit_type = nullptr;
 		else if (target_unit_type) {
@@ -435,7 +441,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_order(int owner, const order_type_t* input_order, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
+	virtual bool action_order(int owner, const order_type_t* input_order, xy pos, unit_t* target, const unit_type_t* target_unit_type, bool queue) {
 		if (!is_in_map_bounds(pos)) return false;
 		switch (input_order->id) {
 		case Orders::Die:
@@ -542,7 +548,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_stop(int owner, bool queue) {
+	virtual bool action_stop(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (unit_can_receive_order(u, get_order_type(Orders::Stop), owner)) {
@@ -553,14 +559,14 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_cancel_building_unit(int owner) {
+	virtual bool action_cancel_building_unit(int owner) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u || u->owner != owner) return false;
 		cancel_building_unit(u);
 		return true;
 	}
 
-	bool action_cancel_build_queue(int owner, size_t slot) {
+	virtual bool action_cancel_build_queue(int owner, size_t slot) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u || u->owner != owner) return false;
 		if (!u_completed(u)) return false;
@@ -578,7 +584,7 @@ struct action_functions: state_functions {
 		return true;
 	}
 
-	bool action_control_group(int owner, size_t group_n, int subaction) {
+	virtual bool action_control_group(int owner, size_t group_n, int subaction) {
 		if (group_n >= 10) return false;
 		bool retval = false;
 		if (subaction == 1) {
@@ -640,7 +646,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_unload_all(int owner, bool queue) {
+	virtual bool action_unload_all(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (!unit_can_receive_order(u, get_order_type(Orders::Unload), owner)) continue;
@@ -650,14 +656,14 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_unload(int owner, unit_t* target) {
+	virtual bool action_unload(int owner, unit_t* target) {
 		if (!target) return false;
 		if (target->owner != owner) return false;
 		if (!target->connected_unit || !u_loaded(target)) return false;
 		return unit_unload(target);
 	}
 
-	bool action_liftoff(int owner, xy pos) {
+	virtual bool action_liftoff(int owner, xy pos) {
 		if (!is_in_map_bounds(pos)) return false;
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
@@ -669,7 +675,7 @@ struct action_functions: state_functions {
 		return true;
 	}
 
-	bool action_research(int owner, const tech_type_t* tech) {
+	virtual bool action_research(int owner, const tech_type_t* tech) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
 		if (!unit_can_research(u, tech, owner)) return false;
@@ -684,7 +690,7 @@ struct action_functions: state_functions {
 		return true;
 	}
 
-	bool action_cancel_research(int owner) {
+	virtual bool action_cancel_research(int owner) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u || u->owner != owner) return false;
 		if (!ut_building(u)) return false;
@@ -694,7 +700,7 @@ struct action_functions: state_functions {
 		return true;
 	}
 
-	bool action_upgrade(int owner, const upgrade_type_t* upgrade) {
+	virtual bool action_upgrade(int owner, const upgrade_type_t* upgrade) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u) return false;
 		if (!unit_can_upgrade(u, upgrade, owner)) return false;
@@ -710,7 +716,7 @@ struct action_functions: state_functions {
 		return true;
 	}
 
-	bool action_cancel_upgrade(int owner) {
+	virtual bool action_cancel_upgrade(int owner) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u || u->owner != owner) return false;
 		if (!ut_building(u)) return false;
@@ -720,7 +726,7 @@ struct action_functions: state_functions {
 		return true;
 	}
 
-	bool action_unsiege(int owner, bool queue) {
+	virtual bool action_unsiege(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (u->owner != owner) continue;
@@ -733,7 +739,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_siege(int owner, bool queue) {
+	virtual bool action_siege(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (u->owner != owner) continue;
@@ -746,7 +752,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_return_cargo(int owner, bool queue) {
+	virtual bool action_return_cargo(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			const order_type_t* order = nullptr;
@@ -760,7 +766,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_hold_position(int owner, bool queue) {
+	virtual bool action_hold_position(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			const order_type_t* order = get_order_type(Orders::HoldPosition);
@@ -776,7 +782,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_cloak(int owner) {
+	virtual bool action_cloak(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (u->owner != owner) continue;
@@ -793,7 +799,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_decloak(int owner) {
+	virtual bool action_decloak(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (u->owner != owner) continue;
@@ -807,7 +813,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_set_alliances(int owner, std::array<int, 12> alliances) {
+	virtual bool action_set_alliances(int owner, std::array<int, 12> alliances) {
 		st.alliances.at(owner) = alliances;
 		for (unit_t* u : ptr(st.player_units[owner])) {
 			if (u->order_target.unit && u->order_type->targets_enemies) {
@@ -819,14 +825,14 @@ struct action_functions: state_functions {
 		return true;
 	}
 
-	bool action_set_shared_vision(int owner, uint32_t flags) {
+	virtual bool action_set_shared_vision(int owner, uint32_t flags) {
 		flags &= 0xff;
 		flags |= st.shared_vision.at(owner) & 0xff00;
 		st.shared_vision.at(owner) = flags;
 		return true;
 	}
 
-	bool action_cancel_addon(int owner) {
+	virtual bool action_cancel_addon(int owner) {
 		unit_t* u = get_single_selected_unit(owner);
 		if (!u || u->owner != owner) return false;
 		if (!u_completed(u)) return false;
@@ -839,7 +845,7 @@ struct action_functions: state_functions {
 		return true;
 	}
 
-	bool action_stim_pack(int owner) {
+	virtual bool action_stim_pack(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (u->owner != owner) continue;
@@ -856,7 +862,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_cancel_nuke(int owner) {
+	virtual bool action_cancel_nuke(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (!unit_is_ghost(u)) continue;
@@ -868,7 +874,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_morph(int owner, const unit_type_t* unit_type) {
+	virtual bool action_morph(int owner, const unit_type_t* unit_type) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (u->owner != owner) continue;
@@ -885,7 +891,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 
-	bool action_morph_building(int owner, const unit_type_t* unit_type) {
+	virtual bool action_morph_building(int owner, const unit_type_t* unit_type) {
 		if (!unit_is_zerg_building(unit_type)) return false;
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
@@ -899,7 +905,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 	
-	bool action_burrow(int owner, bool queue) {
+	virtual bool action_burrow(int owner, bool queue) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (!unit_can_use_tech(u, get_tech_type(TechTypes::Burrowing), owner)) continue;
@@ -911,7 +917,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 	
-	bool action_unburrow(int owner) {
+	virtual bool action_unburrow(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (!unit_can_use_tech(u, get_tech_type(TechTypes::Burrowing), owner)) continue;
@@ -922,7 +928,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 	
-	bool action_cancel_morph(int owner) {
+	virtual bool action_cancel_morph(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (!u || u->owner != owner) return false;
@@ -931,11 +937,11 @@ struct action_functions: state_functions {
 		return retval;
 	}
 	
-	bool action_morph_archon(int owner) {
+	virtual bool action_morph_archon(int owner) {
 		return morph_archon_impl(owner, false);
 	}
 	
-	bool action_carrier_stop(int owner) {
+	virtual bool action_carrier_stop(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (!unit_can_receive_order(u, get_order_type(Orders::CarrierStop), owner)) continue;
@@ -945,7 +951,7 @@ struct action_functions: state_functions {
 		return retval;
 	}
 	
-	bool action_train_fighter(int owner) {
+	virtual bool action_train_fighter(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (u->owner != owner) continue;
@@ -964,11 +970,11 @@ struct action_functions: state_functions {
 		return retval;
 	}
 	
-	bool action_morph_dark_archon(int owner) {
+	virtual bool action_morph_dark_archon(int owner) {
 		return morph_archon_impl(owner, true);
 	}
 	
-	bool action_reaver_stop(int owner) {
+	virtual bool action_reaver_stop(int owner) {
 		bool retval = false;
 		for (unit_t* u : selected_units(owner)) {
 			if (!unit_can_receive_order(u, get_order_type(Orders::ReaverStop), owner)) continue;
@@ -978,13 +984,13 @@ struct action_functions: state_functions {
 		return retval;
 	}
 	
-	bool action_player_leave(int owner, int reason) {
+	virtual bool action_player_leave(int owner, int reason) {
 		if (reason == 6) player_dropped(owner);
 		else player_left(owner);
 		return true;
 	}
 	
-	bool action_cheat(int owner, int flags) {
+	virtual bool action_cheat(int owner, int flags) {
 		if (!st.cheats_enabled) return false;
 		st.cheat_operation_cwal = (flags & 2) != 0;
 		if (flags & 2) flags &= ~2;
@@ -1467,7 +1473,8 @@ struct action_functions: state_functions {
 			const uint8_t* end = ptr + actions_size;
 			data_loading::data_reader_le r2(ptr, end);
 			while (r2.ptr != end) {
-				read_action(r2);
+				++action_st.total_actions;
+				if (read_action(r2)) ++action_st.valid_actions;
 			}
 			action_st.actions_data_position = end - actions_data_begin;
 		}

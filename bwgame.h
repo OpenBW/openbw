@@ -1458,6 +1458,10 @@ struct state_functions {
 		return unit_is_undetected(target, u->owner);
 	}
 
+	bool unit_is_visible(const unit_t* u, int owner) const {
+		return (u->sprite->visibility_flags & (1 << owner)) != 0;
+	}
+
 	bool unit_target_is_visible(const unit_t* u, const unit_t* target) const {
 		return (target->sprite->visibility_flags & (1 << u->owner)) != 0;
 	}
@@ -4542,7 +4546,13 @@ struct state_functions {
 
 	void order_GatherWaitInterrupted(unit_t* u) {
 		if (u->worker.gather_target) {
-			u->worker.gather_target->building.resource.gather_queue.remove(*u);
+			auto& queue = u->worker.gather_target->building.resource.gather_queue;
+			for (unit_t* qu : ptr(queue)) {
+				if (qu == u) {
+					queue.remove(*u);
+					break;
+				}
+			}
 			u->worker.gather_target = nullptr;
 		}
 		u_unset_status_flag(u, unit_t::status_flag_order_not_interruptible);
@@ -18832,9 +18842,9 @@ struct state_functions {
 				for (const unit_t* n : loaded_units(u)) add_completed(n);
 			}
 			if (unit_is_carrier(u)) {
-				r.completed_unit_counts[u->owner][UnitTypes::Protoss_Interceptor] += u->carrier.inside_count;
+				r.completed_unit_counts[u->owner][UnitTypes::Protoss_Interceptor] += (int)u->carrier.inside_count;
 			} else if (unit_is_reaver(u)) {
-				r.completed_unit_counts[u->owner][UnitTypes::Protoss_Reaver] += u->carrier.inside_count;
+				r.completed_unit_counts[u->owner][UnitTypes::Protoss_Reaver] += (int)u->carrier.inside_count;
 			}
 			if (ut_worker(u) && u->worker.powerup) {
 				if (unit_is(u->worker.powerup, UnitTypes::Powerup_Flag)) add_completed(u->worker.powerup);
@@ -18866,7 +18876,7 @@ struct state_functions {
 	int trigger_opponent_count(int owner, int player) const {
 		int r = 0;
 		for (int p : trigger_players(owner, player)) {
-			r += range_size(trigger_players(p, 26));
+			r += (int)range_size(trigger_players(p, 26));
 		}
 		return r;
 	}

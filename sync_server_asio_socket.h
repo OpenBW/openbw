@@ -53,10 +53,10 @@ struct sync_server_asio_socket {
 		return async_handle_t<T, release_F>(obj, std::forward<release_F>(f));
 	}
 	
-	const size_t recv_size = 0x1000;
+	const size_t recv_size = 0x10000;
 	
 	struct send_buffer_t {
-		std::array<uint8_t, 0x2000> buffer;
+		std::array<uint8_t, 0x10000> buffer;
 		int refcount = 0;
 		size_t pos = 0;
 	};
@@ -211,7 +211,7 @@ struct sync_server_asio_socket {
             ++c->async_count;
 		new_clients.push_back(c);
 	}
-	
+
 	void kill_client(const void* h) {
 		client_t* c = (client_t*)h;
 		c->is_dead = true;
@@ -232,7 +232,7 @@ struct sync_server_asio_socket {
 	void async_release(client_t* c) {
 		clients.erase(c->my_it);
 	}
-	
+
 	void read_handler(client_t* c, const asio::error_code& ec, size_t bytes_transferred) {
 		if (ec) {
 			if (c->on_kill) c->on_kill();
