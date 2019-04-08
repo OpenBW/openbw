@@ -187,6 +187,15 @@ struct sync_server_asio_socket {
 			}
 		}
 	}
+
+	size_t send_queue_size(const void* h) {
+		client_t* c = (client_t*)h;
+		size_t r = 0;
+		for (auto& v : c->send_queue) {
+			r += v.size;
+		}
+		return r;
+	}
 	
 	void allow_send(const void* h, bool allow) {
 		((client_t*)h)->allow_send = allow;
