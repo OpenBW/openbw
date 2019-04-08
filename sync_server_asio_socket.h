@@ -90,6 +90,7 @@ struct sync_server_asio_socket {
 		}
 		~message_buffer_handle() {
 			if (server && --buffer->refcount == 0) {
+				buffer->pos = 0;
 				server->send_buffers.splice(server->send_buffers.begin(), server->send_buffers, buffer);
 			}
 		}
@@ -110,13 +111,13 @@ struct sync_server_asio_socket {
 	};
 	
 	a_list<client_t> clients;
-	
+
 	typename send_buffers_t::iterator get_send_buffer_with_space(size_t n) {
 		for (auto i = send_buffers.begin(); i != send_buffers.end(); ++i) {
 			if (i->buffer.size() - i->pos >= n) return i;
 		}
-		send_buffers.emplace_back();
-		return std::prev(send_buffers.end());
+		send_buffers.emplace_front();
+		return send_buffers.begin();
 	}
 	
 	struct message_t {
