@@ -312,7 +312,7 @@ struct action_functions: state_functions {
 	bool action_shift_select(int owner, unit_t* u) {
 		static_vector<unit_t*, 12> units;
 		units.push_back(u);
-		return action_shift_select(owner, u);
+		return action_shift_select(owner, units);
 	}
 
 	virtual bool action_deselect(int owner, const static_vector<unit_t*, 12>& units) {
