@@ -1321,7 +1321,7 @@ struct action_functions: state_functions {
 			} else if (subtype == 1) {
 				const tech_type_t* tech = get_tech_type((TechTypes)r.template get<uint8_t>());
 				int researched = r.template get<int8_t>();
-				st.tech_researched.at(player)[tech->id] = true;
+				st.tech_researched.at(player)[tech->id] = researched;
 			} else if (subtype == 2) {
 				int value = r.template get<int32_t>();
 				st.current_minerals.at(player) = value;
