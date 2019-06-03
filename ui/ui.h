@@ -718,93 +718,49 @@ struct ui_functions: ui_util_functions {
 	void draw_commands(uint8_t* data, size_t data_pitch) {}
 	void draw_overlay_rgba(uint32_t* data, size_t data_pitch) {}
 	#endif
-	void draw_highlights_on_units(uint32_t* data, size_t data_pitch) {
-		uint64_t total_surface = 0;
+	void draw_highlights(uint8_t* data, size_t data_pitch) {
+		std::vector<rect_t<xy_t<size_t>>> rectangles = highlighted_rectangles;
 		for (auto uid: highlighted_units_ids) {
 			if (auto* u = get_unit(unit_id(uid))) {
 				// Find unit bounding box
-				int minX = screen_width;
-				int maxX = 0;
-				int minY = screen_height;
-				int maxY = 0;
+				size_t minX = 0xFFFFFF;
+				size_t maxX = 0;
+				size_t minY = 0xFFFFFF;
+				size_t maxY = 0;
 				for (auto* image : ptr(reverse(u->sprite->images))) {
 					if (i_flag(image, image_t::flag_hidden)) continue;
 
 					xy map_pos = get_image_map_position(image);
-					int screen_x = map_pos.x - screen_pos.x;
-					int screen_y = map_pos.y - screen_pos.y;
-					if (screen_x >= (int)screen_width || screen_y >= (int)screen_height) continue;
-
 					auto& frame = image->grp->frames.at(image->frame_index);
-					size_t width = frame.size.x;
-					size_t height = frame.size.y;
-					if (screen_x + (int)width <= 0 || screen_y + (int)height <= 0) continue;
-					minX = std::min(minX, screen_x);
-					maxX = std::max<int>(maxX, screen_x + width);
-					minY = std::min(minY, screen_y);
-					maxY = std::max<int>(maxY, screen_y + height);
+					minX = std::min(minX, size_t(map_pos.x));
+					maxX = std::max(maxX, map_pos.x + frame.size.x);
+					minY = std::min(minY, size_t(map_pos.y));
+					maxY = std::max(maxY, map_pos.y + frame.size.y);
+				}
+
+				if (maxX < minX || maxY < minY) {
+					continue;
 				}
 
 				// Mark pixels inside this bounding box
-				minX = std::max(minX, 0);
-				maxX = std::min<int>(maxX, screen_width);
-				minY = std::max(minY, 0);
-				maxY = std::min<int>(maxY, screen_height);
-				total_surface += (maxX - minX) * (maxY - minY);
-				for (auto x = minX; x < maxX; ++x) {
-					for (auto y = minY; y < maxY; ++y) {
-						data[y * data_pitch + x] |= 0x01000000;
-					}
-				}
+				rectangles.push_back({
+					{minX, minY},
+					{maxX, maxY},
+				});
 			}
 		}
-		for (auto rect: highlighted_rectangles) {
+		if (rectangles.empty()) {
+			return;
+		}
+		for (auto rect: rectangles) {
 			int minX = std::max<int>(rect.from.x - screen_pos.x, 0);
 			int maxX = std::min<int>(rect.to.x - screen_pos.x, screen_width);
 			int minY = std::max<int>(rect.from.y - screen_pos.y, 0);
 			int maxY = std::min<int>(rect.to.y - screen_pos.y, screen_height);
-			total_surface += (maxX - minX) * (maxY - minY);
-			for (auto x = minX; x < maxX; ++x) {
-				for (auto y = minY; y < maxY; ++y) {
-					data[y * data_pitch + x] |= 0x01000000;
-				}
-			}
-		}
-		if (!total_surface) {
-			return;
-		}
-
-		uint8_t shift_count = 1;
-		// For very small area, need to darken the outside more
-		if (total_surface <= (16 * 16)) {
-			shift_count = 2;
-		}
-
-		auto minimap_area = get_minimap_area();
-		size_t minimap_width = minimap_area.to.x - minimap_area.from.x;
-		size_t minimap_height = minimap_area.to.y - minimap_area.from.y;
-		bool has_minimap = minimap_width == game_st.map_tile_width
-				&& minimap_height == game_st.map_tile_height;
-
-		// Darken everything outside
-		for (auto x = 0; x < screen_width; ++x) {
-			for (auto y = 0; y < screen_height; ++y) {
-				if (has_minimap && (minimap_area.from.x - 1) <= x && x <= (minimap_area.to.x + 1)
-						&& (minimap_area.from.y - 1) <= y && y <= (minimap_area.to.y + 1)) {
-					// Don't overlay on the minimap
-					continue;
-				}
-				uint32_t& v = data[y * data_pitch + x];
-				if ((v & 0xFF000000) == 0) {
-					uint8_t r = v & 0xFF;
-					uint8_t g = (v >> 8) & 0xFF;
-					uint8_t b = (v >> 16) & 0xFF;
-					r = (r >> shift_count);
-					g = (g >> shift_count);
-					b = (b >> shift_count);
-					v = r + (g << 8) + (b << 16);
-				}
-			}
+			line_rectangle(data, data_pitch, {
+				{minX, minY},
+				{maxX, maxY},
+			}, 255);
 		}
 	}
 
@@ -2233,6 +2189,7 @@ struct ui_functions: ui_util_functions {
 		draw_sprites(data, indexed_surface->pitch);
 		draw_commands(data, indexed_surface->pitch);
 		draw_callback(data, indexed_surface->pitch);
+		draw_highlights(data, indexed_surface->pitch);
 
 		if (draw_ui_elements) {
 			draw_minimap(data, indexed_surface->pitch);
@@ -2258,8 +2215,6 @@ struct ui_functions: ui_util_functions {
 		}
 
 		draw_overlay_rgba((uint32_t*)rgba_surface->lock(), rgba_surface->pitch / 4);
-		rgba_surface->unlock();
-		draw_highlights_on_units((uint32_t*)rgba_surface->lock(), rgba_surface->pitch / 4);
 		rgba_surface->unlock();
 
 		if (wnd) {
