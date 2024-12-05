@@ -482,7 +482,7 @@ private:
 		std::swap(m_end, other.m_end);
 	}
 	void m_destroy(pointer p) {
-		get_allocator().destroy(p);
+		p->~T();
 	}
 public:
 	circular_vector() {}

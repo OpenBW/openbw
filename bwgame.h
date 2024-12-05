@@ -4644,7 +4644,7 @@ struct state_functions {
 				}
 			} else order_done(u);
 		};
-		if (!target || !ut_building(target)) {
+		if (!target || u_completed(target)) {
 			done();
 			return;
 		}
@@ -4657,19 +4657,17 @@ struct state_functions {
 				u->order_state = 2;
 			}
 			if (unit_is_at_move_target(u)) {
-				if (unit_is_at_move_target(u)) {
-					if (u_immovable(u) || (target->connected_unit && target->connected_unit != u && target->connected_unit->order_target.unit == target)) {
-						order_done(u);
-					} else {
-						target->connected_unit = u;
-						u_unset_status_flag(u, unit_t::status_flag_ground_unit);
-						u->sprite->elevation_level = u->unit_type->elevation_level + 1;
-						set_queued_order(u, false, get_order_type(Orders::ResetCollision), {});
-						set_queued_order(u, false, u->unit_type->return_to_idle, {});
-						set_unit_move_target(u, target->sprite->position);
-						set_next_target_waypoint(u, target->sprite->position);
-						u->order_state = 3;
-					}
+				if (u_immovable(u) || (target->connected_unit && target->connected_unit != u && target->connected_unit->order_target.unit == target)) {
+					order_done(u);
+				} else {
+					target->connected_unit = u;
+					u_unset_status_flag(u, unit_t::status_flag_ground_unit);
+					u->sprite->elevation_level = u->unit_type->elevation_level + 1;
+					set_queued_order(u, false, get_order_type(Orders::ResetCollision), {});
+					set_queued_order(u, false, u->unit_type->return_to_idle, {});
+					set_unit_move_target(u, target->sprite->position);
+					set_next_target_waypoint(u, target->sprite->position);
+					u->order_state = 3;
 				}
 			}
 		} else if (u->order_state == 3) {
@@ -6980,10 +6978,10 @@ struct state_functions {
 		} else if (u->order_state == 3) {
 			if (u->order_target.unit && unit_is(u->order_target.unit, UnitTypes::Protoss_Assimilator) && u->order_queue.empty()) {
 				set_unit_order(u, get_order_type(Orders::WaitForGas), u->order_target.unit);
-				sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
 			} else {
 				order_done(u);
 			}
+			sprite_run_anim(u->sprite, iscript_anims::WalkingToIdle);
 		}
 	}
 
@@ -9214,6 +9212,9 @@ struct state_functions {
 
 			xy_fp8 to_pos = region_pos(to_region);
 
+			all_nodes.clear();
+			open.clear();
+
 			all_nodes.emplace_back();
 			node_t* start_node = &all_nodes.back();
 			start_node->pos = region_pos(from_region);
@@ -9323,12 +9324,8 @@ struct state_functions {
 				for (auto& v : all_nodes) {
 					v.region->pathfinder_node = nullptr;
 				}
-				if (pf.source_region->group_index == goal_node->region->group_index) {
-					find(pf.source_region, goal_node->region);
-					path_is_reversed = false;
-				} else {
-					find(goal_node->region, pf.source_region);
-				}
+				find(pf.source_region, goal_node->region);
+				path_is_reversed = false;
 			}
 		}
 
@@ -9339,8 +9336,9 @@ struct state_functions {
 		pf.current_long_path_index = (size_t)0 - 1;
 		size_t full_path_size = 0;
 		if (path_is_reversed) {
+			size_t goal_group_index = goal_node->region->group_index;
 			for (auto* n = goal_node; n; n = n->prev) {
-				if (n->region->group_index != pf.source_region->group_index) break;
+				if (n->region->group_index != goal_group_index) break;
 				if (pf.long_path.size() != 50) pf.long_path.push_back(n->region);
 				++full_path_size;
 			}
@@ -12536,6 +12534,7 @@ struct state_functions {
 			create_bunker_fire_animation(u);
 		}
 
+		st.prev_bullet_source_unit = nullptr;
 		u_set_movement_flag(u, 8);
 		cooldown = get_modified_weapon_cooldown(u, weapon) + (lcg_rand(12) & 3) - 1;
 		u->ground_weapon_cooldown = cooldown;
@@ -13478,7 +13477,7 @@ struct state_functions {
 	void create_defensive_matrix_image(unit_t* u) {
 		if (u->defensive_matrix_timer && !u_burrowed(u)) {
 			create_sized_image(u, ImageTypes::IMAGEID_Defensive_Matrix_Front_Small);
-			create_sized_image(u, ImageTypes::IMAGEID_Defensive_Matrix_Back_Small, true, image_order_below);
+			create_sized_image(u, ImageTypes::IMAGEID_Defensive_Matrix_Back_Small, false, image_order_below);
 		}
 	}
 
@@ -14402,7 +14401,7 @@ struct state_functions {
 		if (weapon_type->bullet_heading_offset != 0_dir) {
 			bool clockwise;
 			if (source_unit == st.prev_bullet_source_unit) clockwise = !st.prev_bullet_heading_offset_clockwise;
-			else clockwise = lcg_rand((int)weapon_type->id) & 1;
+			else clockwise = lcg_rand(0) & 1;
 			direction_t heading_offset = weapon_type->bullet_heading_offset;
 			if (!clockwise) heading_offset = -heading_offset;
 			b->next_velocity_direction += heading_offset;
@@ -15042,7 +15041,7 @@ struct state_functions {
 				if (iscript_unit && ut_resource(iscript_unit)) {
 					ImageTypes image_id = iscript_unit->building.resource.resource_count ? ImageTypes::IMAGEID_Vespene_Geyser_Smoke1 : ImageTypes::IMAGEID_Vespene_Geyser_Smoke1_Overlay;
 					image_id = (ImageTypes)((size_t)image_id + a);
-					create_image(get_image_type(image_id), image->sprite, image->offset + get_image_lo_offset(image, 2, a), image_order_above);
+					create_image(get_image_type(image_id), image->sprite, image->offset + get_image_lo_offset(image, 2, a), image_order_above, image);
 				}
 				break;
 			case opc_pwrupcondjmp:
@@ -18780,17 +18779,17 @@ struct state_functions {
 		int r = 0;
 		for (int p : trigger_players(owner, player)) {
 			if (completed_units) {
-				if (unit_id == 229) r += count_obj.non_building_counts[p] + count_obj.building_counts[p];
-				else if (unit_id == 230) r += count_obj.non_building_counts[p];
-				else if (unit_id == 231) r += count_obj.building_counts[p];
-				else if (unit_id == 232) r += count_obj.factory_counts[p];
-				else r += count_obj.unit_counts[owner].at((UnitTypes)unit_id);
-			} else {
 				if (unit_id == 229) r += count_obj.completed_non_building_counts[p] + count_obj.completed_building_counts[p];
 				else if (unit_id == 230) r += count_obj.completed_non_building_counts[p];
 				else if (unit_id == 231) r += count_obj.completed_building_counts[p];
 				else if (unit_id == 232) r += count_obj.completed_factory_counts[p];
 				else r += count_obj.completed_unit_counts[p].at((UnitTypes)unit_id);
+			} else {
+				if (unit_id == 229) r += count_obj.non_building_counts[p] + count_obj.building_counts[p];
+				else if (unit_id == 230) r += count_obj.non_building_counts[p];
+				else if (unit_id == 231) r += count_obj.building_counts[p];
+				else if (unit_id == 232) r += count_obj.factory_counts[p];
+				else r += count_obj.unit_counts[owner].at((UnitTypes)unit_id);
 			}
 		}
 		return r;
