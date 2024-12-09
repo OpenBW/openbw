@@ -5253,7 +5253,7 @@ struct state_functions {
 					for (unit_t* n : find_units_noexpand(unit_sprite_inner_bounding_box(u))) {
 						if (n == u) continue;
 						if (unit_target_is_enemy(n, u)) continue;
-						if ((!unit_can_move(u) && unit_can_attack(u)) || u_burrowed(u)) kill_unit(n);
+						if ((!unit_can_move(n) && unit_can_attack(n)) || u_burrowed(n)) kill_unit(n);
 					}
 					if (!u->order_queue.empty()) {
 						auto* o = &u->order_queue.front();
