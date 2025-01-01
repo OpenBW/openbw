@@ -878,6 +878,9 @@ struct action_functions: state_functions {
 				if (!unit_can_build(u, unit_type)) continue;
 			} else continue;
 			if (u->order_type->id == Orders::ZergUnitMorph) continue;
+			while (!u->build_queue.emtpy()) {
+				u->build_queue.erase(u->build_queue.begin());
+			}
 			if (!build_queue_push(u, unit_type)) continue;
 			set_unit_order(u, get_order_type(Orders::ZergUnitMorph));
 			retval = true;
