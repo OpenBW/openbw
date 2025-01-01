@@ -878,10 +878,12 @@ struct action_functions: state_functions {
 				if (!unit_can_build(u, unit_type)) continue;
 			} else continue;
 			if (u->order_type->id == Orders::ZergUnitMorph) continue;
-			while (!u->build_queue.emtpy()) {
-				u->build_queue.erase(u->build_queue.begin());
-			}
 			if (!build_queue_push(u, unit_type)) continue;
+			if ((unit_is(u, UnitTypes::Zerg_Hydralisk) && unit_is(unit_type, UnitTypes::Zerg_Lurker)) || (unit_is(u, UnitTypes::Zerg_Mutalisk) && (unit_is(unit_type, UnitTypes::Zerg_Guardian) || unit_is(unit_type, UnitTypes::Zerg_Devourer)))) {
+				for (int i = 3; i >= 0; i--)
+					u->build_queue[i + 1] = u->build_queue[i];
+				u->build_queue[0] = unit_type;
+			}
 			set_unit_order(u, get_order_type(Orders::ZergUnitMorph));
 			retval = true;
 		}
