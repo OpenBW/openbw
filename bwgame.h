@@ -16086,6 +16086,7 @@ struct state_functions {
 					destroy_sprite(u->building.pylon.psi_field_sprite);
 					u->building.pylon.psi_field_sprite = nullptr;
 				}
+				break;
 			case UnitTypes::Zerg_Nydus_Canal:
 				if (u->building.nydus.exit) {
 					unit_t* exit = u->building.nydus.exit;
@@ -16093,6 +16094,7 @@ struct state_functions {
 					exit->building.nydus.exit = nullptr;
 					kill_unit(exit);
 				}
+				break;
 			default:
 				break;
 			}
