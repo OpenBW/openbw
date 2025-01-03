@@ -2295,11 +2295,22 @@ struct state_functions {
 		if (u->build_queue.empty() && !has_available_supply_for(u->owner, unit_type, true)) return false;
 		if (!has_available_resources_for(u->owner, unit_type, true)) return false;
 		u->build_queue.push_back(unit_type);
+		for (const unit_type_t* t : u->build_queue_limbo) {
+			u->build_queue.push_back(t);
+		}
+		u->build_queue_limbo.clear();
 		if (!ut_building(unit_type)) {
 			st.current_minerals[u->owner] -= unit_type->mineral_cost;
 			st.current_gas[u->owner] -= unit_type->gas_cost;
 		}
 		return true;
+	}
+
+	void build_queue_clear_single(unit_t* u ) {
+		if (u->build_queue.empty()) return;
+		u->build_queue.erase(u->build_queue.begin());
+		u->build_queue_limbo = u->build_queue;
+		u->build_queue.clear();
 	}
 
 	bool train_unit(unit_t* u, const unit_type_t* unit_type) {
@@ -2323,7 +2334,7 @@ struct state_functions {
 		if (unit_is_morphing_building(u)) {
 			if (u->build_queue.empty()) error("cancel_morphing_building: build queue is empty");
 			const unit_type_t* build_type = u->build_queue.front();
-			u->build_queue.erase(u->build_queue.begin());
+			build_queue_clear_single(u);
 			partially_refund_unit_costs(u->owner, build_type);
 			u_set_status_flag(u, unit_t::status_flag_completed);
 			add_completed_unit(u, -1, false);
@@ -2397,7 +2408,7 @@ struct state_functions {
 		}
 		if (morph_to) {
 			morph_unit(u, morph_to);
-			if (!u->build_queue.empty()) u->build_queue.erase(u->build_queue.begin());
+			if (!u->build_queue.empty()) build_queue_clear_single(u);
 			u->remaining_build_time = 0;
 			if (!u->previous_unit_type) error("cancel_building_unit: previous_unit_type is null");
 			replace_sprite_images(u->sprite, u->previous_unit_type->flingy->sprite->image, 0_dir);
@@ -2453,12 +2464,7 @@ struct state_functions {
 		if (!has_available_supply_for(u->owner, unit_type, true)) return;
 		if (!has_available_resources_for(u->owner, unit_type, true)) return;
 		set_unit_order(u, order_type, position);
-		if (!u->build_queue.empty()) {
-			for (size_t i = 5; i;) {
-				--i;
-				cancel_build_queue(u, i);
-			}
-		}
+		cancel_build_queue(u);
 		if (ut_building(u) && ut_building(unit_type)) {
 			u->building.addon_build_type = unit_type;
 		} else {
@@ -2959,7 +2965,7 @@ struct state_functions {
 		u->order_type = prev_order_type;
 		u->order_target = prev_order_target;
 		u->order_state = prev_order_state;
-		if (u_grounded_building(u) && !u->build_queue.empty()) u->build_queue.erase(u->build_queue.begin());
+		if (u_grounded_building(u) && !u->build_queue.empty()) build_queue_clear_single(u);
 		if (ut_resource(u)) set_unit_resources(u, prev_resources);
 		if (was_hatchery && unit_is_hatchery(u)) u->building.hatchery.larva_spawn_side_values = prev_larva_spawn_side_values;
 	}
@@ -3978,7 +3984,7 @@ struct state_functions {
 		add_creep_provider(u);
 		set_construction_graphic(u, true);
 		u->hp = u->unit_type->hitpoints / 10;
-		if (!u->build_queue.empty()) u->build_queue.erase(u->build_queue.begin());
+		if (!u->build_queue.empty()) build_queue_clear_single(u);
 		set_unit_order(u, get_order_type(Orders::IncompleteMorphing));
 	}
 
@@ -4590,7 +4596,7 @@ struct state_functions {
 					unit_t* build_unit;
 					if (unit_type->id == UnitTypes::Terran_Refinery) build_unit = build_refinery(u, unit_type);
 					else build_unit = create_unit(unit_type, u->order_target.pos, u->owner);
-					u->build_queue.erase(u->build_queue.begin());
+					build_queue_clear_single(u);
 					if (build_unit) {
 						build_unit->connected_unit = u;
 						u->order_type = get_order_type(Orders::ConstructingBuilding);
@@ -6320,7 +6326,7 @@ struct state_functions {
 				u->order_signal &= ~4;
 				morph_unit(u, unit_type);
 				// todo: callback for sound
-				u->build_queue.erase(u->build_queue.begin());
+				build_queue_clear_single(u);
 				if ((int)(ImageTypes)u->unit_type->construction_animation) {
 					set_construction_graphic(u, true);
 					sprite_run_anim(u->sprite, iscript_anims::SpecialState1);
@@ -6953,7 +6959,7 @@ struct state_functions {
 						unit_t* build_unit;
 						if (build_type->id == UnitTypes::Protoss_Assimilator) build_unit = build_refinery(u, build_type);
 						else build_unit = create_unit(build_type, u->order_target.pos, u->owner);
-						u->build_queue.erase(u->build_queue.begin());
+						build_queue_clear_single(u);
 						if (build_unit) {
 							replace_sprite_images(build_unit->sprite, get_image_type(ImageTypes::IMAGEID_Warp_Anchor), 0_dir);
 							if (unit_is(build_type, UnitTypes::Protoss_Assimilator)) create_image(get_image_type(ImageTypes::IMAGEID_Vespene_Geyser), build_unit->sprite, xy(), image_order_below);

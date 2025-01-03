@@ -620,6 +620,7 @@ struct unit_t: flingy_t {
 	int cloak_counter;
 	int movement_state;
 	static_vector<const unit_type_t*, 5> build_queue;
+	static_vector<const unit_type_t*, 5> build_queue_limbo;
 	fp8 energy;
 	unsigned int unit_id_generation;
 	const order_type_t* secondary_order_type;
