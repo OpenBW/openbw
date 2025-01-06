@@ -16270,6 +16270,7 @@ struct state_functions {
 		if (!initialize_unit_type(u, unit_type, pos, owner)) return false;
 
 		new (&u->build_queue) static_vector<const unit_type_t*, 5>();
+		new (&u->build_queue_limbo) static_vector<const unit_type_t*, 5>();
 		++u->unit_id_generation;
 		u->wireframe_randomizer = lcg_rand(15) & 0xff;
 		if (ut_turret(u)) u->hp = 1_fp8;
@@ -19572,6 +19573,7 @@ struct state_copier {
 			remap_unit(u->auto_target_unit);
 			remap_unit(u->connected_unit);
 			new (&u->build_queue) static_vector<const unit_type_t*, 5>(v->build_queue);
+			new (&u->build_queue_limbo) static_vector<const unit_type_t*, 5>(v->build_queue_limbo);
 			if (u->unit_type) {
 				if (funcs.unit_is(u, UnitTypes::Protoss_Interceptor) || funcs.unit_is(u, UnitTypes::Protoss_Scarab)) {
 					remap_unit(u->fighter.parent);
