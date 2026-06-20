@@ -2544,12 +2544,11 @@ struct state_functions {
 		}
 		bool is_nydus_exit = u && unit_is_nydus(u);
 		if (ut_requires_creep(unit_type) || is_nydus_exit) {
-			bool require_visibility = !check_invisible_tiles || is_nydus_exit;
 			for (size_t y = tile_pos.y; y != tile_pos.y + tile_size.y; ++y) {
 				for (size_t x = tile_pos.x; x != tile_pos.x + tile_size.x; ++x) {
 					auto& tile = st.tiles[y * game_st.map_tile_width + x];
 					if (tile.explored & visibility_mask) return false;
-					if (require_visibility || ~tile.visible & visibility_mask) {
+					if (check_invisible_tiles || is_nydus_exit || ~tile.visible & visibility_mask) {
 						if (~tile.flags & tile_t::flag_has_creep) return false;
 					}
 				}
