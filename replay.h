@@ -221,12 +221,8 @@ struct replay_functions: action_functions {
 			st.lcg_rand_state = random_seed;
 		}, initial_processing);
 		
-		std::array<int, 8> source_colors;
 		for (size_t i = 0; i != 8; ++i) {
-			source_colors[i] = st.players[i].color;
-		}
-		for (size_t i = 0; i != 8; ++i) {
-			st.players[i].color = source_colors.at(player_color[i]);
+			st.players[i].color = (int)player_color[i];
 		}
 	}
 	
