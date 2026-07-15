@@ -19477,8 +19477,8 @@ struct state_functions {
 		unit_area.from.y = pos.y / 32u - unit_type->placement_size.y / 32u / 2;
 		unit_area.to.x = unit_area.from.x + unit_type->placement_size.x / 32u;
 		unit_area.to.y = unit_area.from.y + unit_type->placement_size.y / 32u;
-		st.tiles.at(unit_area.from.y * game_st.map_tile_width + unit_area.from.x);
-		if (unit_area.from != unit_area.to) st.tiles.at((unit_area.to.y - 1) * game_st.map_tile_width + unit_area.to.x - 1);
+		(void)st.tiles.at(unit_area.from.y * game_st.map_tile_width + unit_area.from.x);
+		if (unit_area.from != unit_area.to) (void)st.tiles.at((unit_area.to.y - 1) * game_st.map_tile_width + unit_area.to.x - 1);
 		for (size_t y = unit_area.from.y; y != unit_area.to.y; ++y) {
 			for (size_t x = unit_area.from.x; x != unit_area.to.x; ++x) {
 				if (!tile_can_have_creep({x, y})) continue;

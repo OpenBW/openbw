@@ -508,7 +508,7 @@ template<typename T, std::enable_if<std::is_integral<T>::value && std::numeric_l
 using int_bits = std::integral_constant<size_t, std::numeric_limits<T>::digits + std::is_signed<T>::value>;
 
 template<typename T>
-using is_native_fast_int = std::integral_constant<bool, std::is_integral<T>::value && std::is_literal_type<T>::value && sizeof(T) <= sizeof(void*)>;
+using is_native_fast_int = std::integral_constant<bool, std::is_integral<T>::value && sizeof(T) <= sizeof(void*)>;
 
 template<size_t t_integer_bits, size_t t_fractional_bits, bool t_is_signed, bool t_exact_integer_bits = false>
 struct fixed_point {

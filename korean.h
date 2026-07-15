@@ -8,6 +8,7 @@
 namespace bwgame {
 
 namespace korean {
+namespace {
 
 uint16_t table_81[] = {
 	0xac02, 0xac03, 0xac05, 0xac06, 0xac0b, 0xac0c, 0xac0d, 0xac0e, 0xac0f, 0xac18, 0xac1e, 0xac1f, 0xac21, 0xac22, 0xac23, 0xac25, 
@@ -1544,8 +1545,9 @@ uint16_t table_fd[] = {
 	0x8a16, 0x6b20, 0x6b3d, 0x6b46, 0x5438, 0x6070, 0x6d3d, 0x7fd5, 0x8208, 0x50d6, 0x51de, 0x559c, 0x566b, 0x56cd, 0x59ec, 0x5b09, 
 	0x5e0c, 0x6199, 0x6198, 0x6231, 0x665e, 0x66e6, 0x7199, 0x71b9, 0x71ba, 0x72a7, 0x79a7, 0x7a00, 0x7fb2, 0x8a70, 0xffff
 };
+}
 
-uint32_t cp949_to_unicode(const char*& ptr, const char* end) {
+inline uint32_t cp949_to_unicode(const char*& ptr, const char* end) {
 	if (ptr == end) return 0xffff;
 	switch((unsigned char)*ptr++) {
 	case 0: return 0;
@@ -1809,14 +1811,14 @@ uint32_t cp949_to_unicode(const char*& ptr, const char* end) {
 }
 
 
-bool korean_locale_to_utf8(const a_string& src, a_string& dst) {
+inline bool korean_locale_to_utf8(const a_string& src, a_string& dst) {
 	const char* c = src.data();
 	const char* e = src.data() + src.size();
 	dst.clear();
 	size_t est_size = 0;
 	const char* ct = c;
 	for (; ct != e; ++ct) {
-		if (*ct <= 0x7f) ++est_size;
+		if ((unsigned char)*ct <= 0x7f) ++est_size;
 		else {
 			est_size += 2;
 			++ct;
