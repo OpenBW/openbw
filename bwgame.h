@@ -3387,7 +3387,11 @@ struct state_functions {
 			if (unit_is_researching(u)) cancel_research(u);
 			if (unit_is_upgrading(u)) cancel_upgrade(u);
 		}
-		if (unit_is_reaver(u) || unit_is_carrier(u)) cancel_build_queue(u);
+		if (unit_is_reaver(u) || unit_is_carrier(u)) {
+			cancel_build_queue(u);
+			u->current_build_unit = nullptr;
+			u->secondary_order_state = 0;
+		}
 		set_unit_owner(u, new_owner, true);
 		if (new_owner < 8) set_sprite_owner(u, new_owner);
 		if (any_upgrades_granted) apply_upgrades_to_player_units(new_owner);
@@ -9219,6 +9223,7 @@ struct state_functions {
 
 			all_nodes.clear();
 			open.clear();
+			goal_node = nullptr;
 
 			all_nodes.emplace_back();
 			node_t* start_node = &all_nodes.back();
@@ -9754,6 +9759,7 @@ struct state_functions {
 		};
 
 		auto pf_add_neighbor = [&](xy pos, int flags) {
+			if (!is_in_map_bounds(pos)) return;
 			if (pos == w.cur_pos) return;
 			bool is_goal = false;
 			if (w.target_unit) {
@@ -15485,13 +15491,13 @@ struct state_functions {
 	}
 
 	void unit_finder_reinsert(unit_t* u) {
-		if (u->unit_finder_bounding_box.from.x == -1) return;
+		if (u->unit_finder_bounding_box.to.x == -1) return;
 		rect bb = unit_sprite_inner_bounding_box(u);
 		unit_finder_reinsert(u, bb);
 	}
 
 	void unit_finder_remove(unit_t* u) {
-		if (u->unit_finder_bounding_box.from.x == -1) return;
+		if (u->unit_finder_bounding_box.to.x == -1) return;
 		if (unit_finder_search_index) error("attempt to modify unit finder while search is active");
 		auto remove = [&](auto& vec, int value) {
 			auto cmp_l = [&](auto& a, int b) {
