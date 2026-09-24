@@ -21252,6 +21252,14 @@ struct game_load_functions : state_functions {
 			for (auto& v : tags) {
 				tag_t tag = std::get<0>(v);
 				auto i = chunks.find(tag);
+				if (i == chunks.end() && tag == tag_t("STR ")) {
+					// SC:R (1.21+) editors write extended strings as "STRx" (32-bit count/offsets)
+					auto x = chunks.find(tag_t("STRx"));
+					if (x != chunks.end()) {
+						for (auto& c : x->second) tag_funcs[tag_t("STRx")](c);
+						continue;
+					}
+				}
 				if (i == chunks.end()) {
 					if (std::get<1>(v)) error("map is missing required chunk '%s'", tagstr(tag));
 				} else {
@@ -21302,6 +21310,28 @@ struct game_load_functions : state_functions {
 					char* b = (char*)t.ptr;
 					while (t.get<char>());
 					game_st.map_strings[i] = a_string(b, (char*)t.ptr - b - 1);
+				} else {
+					game_st.map_strings[i] = "<invalid string offset>";
+				}
+			}
+		};
+		tag_funcs["STRx"] = [&](data_reader_le r) {
+			if (r.left() < 4) return;
+			auto start = r;
+			size_t num = r.get<uint32_t>();
+			// the count is 32-bit; don't trust it beyond what the chunk can hold
+			num = std::min(num, r.left() / 4);
+			game_st.map_strings.clear();
+			game_st.map_strings.resize(num);
+			for (size_t i = 0; i != num; ++i) {
+				size_t offset = r.get<uint32_t>();
+				auto t = start;
+				if (offset < t.left()) {
+					t.skip(offset);
+					char* b = (char*)t.ptr;
+					bool terminated = false;
+					while (t.left() && !terminated) terminated = t.get<char>() == 0;
+					game_st.map_strings[i] = a_string(b, (char*)t.ptr - b - (terminated ? 1 : 0));
 				} else {
 					game_st.map_strings[i] = "<invalid string offset>";
 				}
@@ -21805,7 +21835,7 @@ struct game_load_functions : state_functions {
 
 		use_map_settings = setup_info.victory_condition == 0 && setup_info.tournament_mode == 0 && setup_info.starting_units == 0;
 
-		if (version == 59 || version == 63) {
+		if (version == 59 || version == 63 || version == 64) { // 64 = SC:R vanilla map format
 			if (use_map_settings) {
 				read_chunks({
 					{"STR ", true},
@@ -21836,7 +21866,8 @@ struct game_load_functions : state_functions {
 					{"UNIT", true}
 				});
 			}
-		} else if (version == 205) {
+		} else if (version == 205 || version == 206) {
+			// 206 = SC:R map format: same chunks as 205, colors may be in CRGB instead of COLR
 			if (use_map_settings) {
 				read_chunks({
 					{"STR ", true},
@@ -21853,7 +21884,7 @@ struct game_load_functions : state_functions {
 					{"UPRP", true},
 					{"MRGN", true},
 					{"TRIG", true},
-					{"COLR", true},
+					{"COLR", version == 205},
 				});
 			} else {
 				read_chunks({
@@ -21861,7 +21892,7 @@ struct game_load_functions : state_functions {
 					{"MTXM", true},
 					{"THG2", true},
 					{"UNIT", true},
-					{"COLR", true}
+					{"COLR", version == 205}
 				});
 			}
 		} else error("unsupported map version %d", version);
