@@ -19559,11 +19559,11 @@ struct state_copier {
 	state_functions funcs;
 	state_copier(const state&st, state& r) : st(st), r(r), funcs(r) {}
 
-	std::array<bool, 1700> unit_copied{};
-	std::array<bool, 100> bullet_copied{};
-	std::array<bool, 2500> sprite_copied{};
-	std::array<bool, 5000> image_copied{};
-	std::array<bool, 2000> order_copied{};
+	std::array<bool, decltype(state::units_container)::capacity> unit_copied{};
+	std::array<bool, decltype(state::bullets_container)::capacity> bullet_copied{};
+	std::array<bool, decltype(state::sprites_container)::capacity> sprite_copied{};
+	std::array<bool, decltype(state::images_container)::capacity> image_copied{};
+	std::array<bool, decltype(state::orders_container)::capacity> order_copied{};
 	unit_t* unit(const unit_t* v) {
 		size_t index = v->index;
 		auto* u = r.units_container.get(index, false);
