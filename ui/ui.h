@@ -14,7 +14,7 @@ struct vr4_entry {
 	std::array<bitmap_t, 64 / sizeof(bitmap_t)> inverted_bitmap;
 };
 struct vx4_entry {
-	std::array<uint16_t, 16> images;
+	std::array<uint32_t, 16> images;
 };
 
 struct pcx_image {
@@ -182,6 +182,19 @@ void load_image_data(image_data& img, load_data_file_F&& load_data_file) {
 }
 
 template<typename load_data_file_F>
+auto data_file_exists(load_data_file_F& load_data_file, const a_string& filename, int) -> decltype(load_data_file.file_exists(filename)) {
+	return load_data_file.file_exists(filename);
+}
+template<typename load_data_file_F>
+bool data_file_exists(load_data_file_F& load_data_file, const a_string& filename, long) {
+	return false;
+}
+template<typename load_data_file_F>
+bool data_file_exists(load_data_file_F& load_data_file, const a_string& filename) {
+	return data_file_exists(load_data_file, filename, 0);
+}
+
+template<typename load_data_file_F>
 void load_tileset_image_data(tileset_image_data& img, size_t tileset_index, load_data_file_F&& load_data_file) {
 	using namespace data_loading;
 
@@ -195,7 +208,9 @@ void load_tileset_image_data(tileset_image_data& img, size_t tileset_index, load
 	const char* tileset_name = tileset_names.at(tileset_index);
 
 	load_data_file(vr4_data, format("Tileset/%s.vr4", tileset_name));
-	load_data_file(vx4_data, format("Tileset/%s.vx4", tileset_name));
+	// Remastered SD tilesets have .vx4ex (32-bit image indices) instead of .vx4 (16-bit)
+	bool vx4ex = data_file_exists(load_data_file, format("Tileset/%s.vx4ex", tileset_name));
+	load_data_file(vx4_data, format(vx4ex ? "Tileset/%s.vx4ex" : "Tileset/%s.vx4", tileset_name));
 	load_data_file(img.wpe, format("Tileset/%s.wpe", tileset_name));
 
 	a_vector<uint8_t> grp_data;
@@ -219,10 +234,10 @@ void load_tileset_image_data(tileset_image_data& img, size_t tileset_index, load
 		}
 	}
 	data_reader<true, false> vx4_r(vx4_data.data(), vx4_data.data() + vx4_data.size());
-	img.vx4.resize(vx4_data.size() / 32);
+	img.vx4.resize(vx4_data.size() / (vx4ex ? 64 : 32));
 	for (size_t i = 0; i != img.vx4.size(); ++i) {
 		for (size_t i2 = 0; i2 != 16; ++i2) {
-			img.vx4[i].images[i2] = vx4_r.get<uint16_t>();
+			img.vx4[i].images[i2] = vx4ex ? vx4_r.get<uint32_t>() : vx4_r.get<uint16_t>();
 		}
 	}
 
