@@ -49,6 +49,7 @@ struct object_container {
 	a_deque<std::array<T, allocation_granularity>> list;
 	intrusive_list<T, default_link_f> free_list;
 	size_t size = 0;
+	static constexpr size_t capacity = max_size;
 	
 	T* get(size_t index, bool add_new_to_free = true) {
 		if (index) index = max_size - index;
