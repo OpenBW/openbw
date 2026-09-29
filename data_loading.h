@@ -1304,6 +1304,13 @@ struct data_files_loader {
 		mpqs.emplace_back(std::move(filename));
 	}
 
+	bool file_exists(const a_string& filename) {
+		for (auto& v : mpqs) {
+			if (v.mpq.file_exists(filename)) return true;
+		}
+		return false;
+	}
+
 	void operator()(a_vector<uint8_t>& dst, a_string filename) {
 		for (auto& v : mpqs) {
 			if (v.mpq.file_exists(filename)) {
