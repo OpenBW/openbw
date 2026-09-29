@@ -218,6 +218,18 @@ struct replay_functions: action_functions {
 					else game_load_funcs.setup_info.create_melee_units_for_player[i] = create_melee_units_for_player[i] != 0;
 				}
 			}
+			if (game_type == 15) {
+				// Top vs Bottom: each team starts allied with shared vision. This is not recorded in the replay.
+				for (size_t i = 0; i != 8; ++i) {
+					if (st.players[i].controller != player_t::controller_occupied) continue;
+					for (size_t i2 = 0; i2 != 8; ++i2) {
+						if (i2 == i || st.players[i2].controller != player_t::controller_occupied) continue;
+						if (st.players[i2].force != st.players[i].force) continue;
+						st.alliances[i][i2] = 1;
+						st.shared_vision[i] |= 1 << i2;
+					}
+				}
+			}
 			st.lcg_rand_state = random_seed;
 		}, initial_processing);
 		
